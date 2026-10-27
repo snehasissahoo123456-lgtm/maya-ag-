@@ -1,0 +1,11 @@
+{
+  "name": "Action Engine",
+  "description": "Maya — Autonomous Founder-Grade Coding Agent and Engineering Cockpit for Founder Snehasis Sahoo (SYB)",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
