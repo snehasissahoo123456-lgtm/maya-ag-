@@ -8,10 +8,13 @@
  */
 
 import * as aiae from 'aiae';
+import React from 'react';
+import { createRoot, Root } from 'react-dom/client';
 import { html, LitElement, PropertyValueMap } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
 import '@material/web/icon/icon.js';
 import '@material/web/iconbutton/icon-button.js';
+import { ReactLockScreen } from './ReactLockScreen.tsx';
 
 import {
   SYB_VENTURES,
@@ -57,6 +60,8 @@ export class ActionEngineApp extends LitElement {
 
   // Authentication & Security Lock Gate States
   @state() accessor isAuthenticated = false;
+  @state() accessor authUiMode: 'react' | 'lit' = (localStorage.getItem('cockpit_auth_ui_mode') as 'react' | 'lit') || 'react';
+  private reactAuthRoot: Root | null = null;
   @state() accessor currentUser: AuthenticatedUser | null = null;
   @state() accessor sessionToken: string | null = null;
   @state() accessor authTab: 'google' | 'phone' = 'google';
@@ -211,6 +216,47 @@ Batao Founder, aaj kya build karna hai? Chaaho toh pehle Discovery Protocol se 5
     this.setupSpeechRecognition();
   }
 
+  override updated(changedProps: PropertyValueMap<unknown> | Map<PropertyKey, unknown>) {
+    super.updated(changedProps);
+    if (!this.isAuthenticated && this.authUiMode === 'react') {
+      this.mountReactLockScreen();
+    } else {
+      this.unmountReactLockScreen();
+    }
+  }
+
+  private mountReactLockScreen() {
+    const container = this.querySelector('#react-auth-mount-container') || document.getElementById('react-auth-mount-container');
+    if (!container) return;
+    if (!this.reactAuthRoot) {
+      this.reactAuthRoot = createRoot(container);
+    }
+    this.reactAuthRoot.render(
+      React.createElement(ReactLockScreen, {
+        onAuthenticated: (user: AuthenticatedUser, token: string) => {
+          this.sessionToken = token;
+          this.currentUser = user;
+          this.isAuthenticated = true;
+          this.unmountReactLockScreen();
+          this.requestUpdate();
+        },
+        onSwitchToLit: () => {
+          this.authUiMode = 'lit';
+          localStorage.setItem('cockpit_auth_ui_mode', 'lit');
+          this.unmountReactLockScreen();
+          this.requestUpdate();
+        },
+      })
+    );
+  }
+
+  private unmountReactLockScreen() {
+    if (this.reactAuthRoot) {
+      this.reactAuthRoot.unmount();
+      this.reactAuthRoot = null;
+    }
+  }
+
   private async restoreSession() {
     try {
       const storedToken = localStorage.getItem('maya_session_token');
@@ -336,6 +382,8 @@ Batao Founder, aaj kya build karna hai? Chaaho toh pehle Discovery Protocol se 5
     this.otpInput = '';
     this.authSuccessNotice = null;
     this.authError = null;
+    this.unmountReactLockScreen();
+    this.requestUpdate();
   }
 
   private async fetchPlatformProbes() {
@@ -1283,6 +1331,9 @@ Status: Ready to build upon Founder "go ahead".`;
 
   protected override render() {
     if (!this.isAuthenticated) {
+      if (this.authUiMode === 'react') {
+        return html`<div id="react-auth-mount-container" class="w-full min-h-screen"></div>`;
+      }
       return (this as any).renderAuthLockScreen();
     }
 
@@ -3413,8 +3464,8 @@ Status: Ready to build upon Founder "go ahead".`;
         <div class="absolute top-1/2 -right-40 w-96 h-96 bg-purple-600/15 rounded-full blur-3xl pointer-events-none"></div>
         <div class="absolute -bottom-40 left-1/3 w-96 h-96 bg-cyan-600/10 rounded-full blur-3xl pointer-events-none"></div>
 
-        <!-- Top Header: Brand & Security Badge -->
-        <header class="flex items-center justify-between z-10 w-full max-w-5xl mx-auto">
+        <!-- Top Header: Brand, Security Badge & Dual-Mode Toggle -->
+        <header class="flex flex-wrap items-center justify-between gap-4 z-10 w-full max-w-5xl mx-auto">
           <div class="flex items-center gap-3">
             <div class="w-10 h-10 rounded-2xl bg-gradient-to-tr from-pink-500 via-indigo-600 to-cyan-400 flex items-center justify-center font-extrabold text-white text-lg shadow-lg shadow-indigo-500/30">
               M
@@ -3428,9 +3479,32 @@ Status: Ready to build upon Founder "go ahead".`;
             </div>
           </div>
 
-          <div class="flex items-center gap-2 px-3 py-1.5 rounded-full bg-slate-900/90 border border-slate-800 text-xs">
-            <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-            <span class="text-slate-300 font-medium">Local Bridge :3000 Active</span>
+          <div class="flex items-center gap-3">
+            <!-- Dual Mode Selector -->
+            <div class="flex items-center p-1 bg-slate-900/90 border border-slate-700/60 rounded-2xl backdrop-blur-xl shadow-lg">
+              <button
+                class="px-3 py-1.5 rounded-xl text-xs font-medium text-slate-400 hover:text-white hover:bg-slate-800/60 transition-all flex items-center gap-1.5"
+                @click="${() => {
+                  this.authUiMode = 'react';
+                  localStorage.setItem('cockpit_auth_ui_mode', 'react');
+                  this.requestUpdate();
+                }}"
+                title="Switch to React Lock Screen"
+              >
+                <span>⚛️ React View</span>
+              </button>
+              <button
+                class="px-3 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 bg-gradient-to-r from-amber-600 to-amber-700 text-white shadow-md shadow-amber-600/30 transition-all cursor-default"
+                title="Currently in Lit View"
+              >
+                <span>⚡ Lit View</span>
+              </button>
+            </div>
+
+            <div class="flex items-center gap-2 px-3 py-1.5 rounded-full bg-slate-900/90 border border-slate-800 text-xs">
+              <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+              <span class="text-slate-300 font-medium">Local Bridge :3000 Active</span>
+            </div>
           </div>
         </header>
 
