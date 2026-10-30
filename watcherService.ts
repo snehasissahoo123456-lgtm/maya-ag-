@@ -16,7 +16,9 @@ import {
   BuildLogEntry,
   BuildEventMessage,
   WatcherStatus,
+  AutoFixRecord,
 } from './actionEngineCore.ts';
+import { TypeScriptFixer } from './typeScriptFixer.ts';
 
 export class WatcherService {
   private watcherActive = true;
@@ -34,6 +36,7 @@ export class WatcherService {
       timestamp: new Date().toISOString(),
     },
   ];
+  private recentAutoFixes: AutoFixRecord[] = [];
   private pendingRebuild = false;
   private pendingFile: string | null = null;
   private connectedWsClients: Set<WebSocket> = new Set();
@@ -41,8 +44,10 @@ export class WatcherService {
   private onTestSuitesUpdated?: (suites: TestSuite[]) => void;
   private onAuditLog?: (record: any) => void;
   private fsWatcher: fs.FSWatcher | null = null;
+  private isAutoHealing = false;
 
   constructor(options: {
+
     getTestSuites: () => TestSuite[];
     onTestSuitesUpdated?: (suites: TestSuite[]) => void;
     onAuditLog?: (record: any) => void;
@@ -94,8 +99,10 @@ export class WatcherService {
       totalTriggers: this.totalTriggers,
       lastStatus: this.lastBuildStatus,
       buildLogs: this.recentBuildLogs.slice(-100),
+      recentAutoFixes: this.recentAutoFixes.slice(-20),
     };
   }
+
 
   public toggleWatcher(active?: boolean): boolean {
     if (typeof active === 'boolean') {
@@ -297,6 +304,53 @@ export class WatcherService {
           });
         }
 
+        // Proactive Autonomous TypeScript Auto-Fix Engine
+        if (!success && !this.isAutoHealing) {
+          try {
+            const diags = TypeScriptFixer.parseOutput(fullOutput);
+            if (diags.length > 0) {
+              const appliedFixes = TypeScriptFixer.autoFixDiagnostics(diags);
+              if (appliedFixes.length > 0) {
+                this.isAutoHealing = true;
+                for (const f of appliedFixes) {
+                  const record: AutoFixRecord = {
+                    id: 'fix-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 6),
+                    file: f.file,
+                    line: f.line,
+                    code: f.code,
+                    actionTaken: f.actionTaken,
+                    originalSnippet: f.originalSnippet,
+                    fixedSnippet: f.fixedSnippet,
+                    timestamp: new Date().toISOString(),
+                  };
+                  this.recentAutoFixes.unshift(record);
+                }
+                const healLog: BuildLogEntry = {
+                  id: 'heal-' + Date.now().toString(36),
+                  text: `⚡ [Auto-Fix Engine] Proactively self-healed ${appliedFixes.length} TypeScript issue(s) without manual confirmation: ${appliedFixes.map((a) => a.code).join(', ')}. Triggering verification...`,
+                  stream: 'system',
+                  timestamp: new Date().toISOString(),
+                };
+                this.recentBuildLogs.push(healLog);
+                this.broadcast({
+                  type: 'auto_fix_applied',
+                  file: appliedFixes[0].file,
+                  autoFixes: this.recentAutoFixes.slice(0, 10),
+                  timestamp: new Date().toISOString(),
+                });
+
+                setTimeout(() => {
+                  this.isAutoHealing = false;
+                  this.runDiagnostics('auto-healed-' + appliedFixes[0].file);
+                }, 200);
+              }
+            }
+          } catch (healErr) {
+            console.warn('[Auto-Fix Engine] Error running proactive fixes:', healErr);
+            this.isAutoHealing = false;
+          }
+        }
+
         resolve({
           success,
           durationMs,
@@ -311,6 +365,7 @@ export class WatcherService {
           this.pendingFile = null;
           setTimeout(() => this.runDiagnostics(nextFile || 'coalesced-change'), 50);
         }
+
       });
     });
   }

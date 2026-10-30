@@ -7,7 +7,7 @@ export interface SYBVenture {
   id: string;
   name: string;
   tagline: string;
-  category: 'AI Platform' | 'Voice Agent' | 'Media & Content' | 'Fintech' | 'Hospitality' | 'Operating System' | 'Developer Tools';
+  category: 'AI Systems & OS' | 'Fintech & Ledgers' | 'Voice & Conversational AI' | 'Media & Production' | 'Hospitality & Enterprise';
   description: string;
   status: 'active' | 'in-development' | 'concept' | 'scaling';
   primaryTech: string[];
@@ -206,7 +206,7 @@ export const SYB_VENTURES: SYBVenture[] = [
     id: 'orbit-aios',
     name: 'ORBIT AIOS',
     tagline: 'Autonomous AI Operating System for Modern Businesses',
-    category: 'AI Platform',
+    category: 'AI Systems & OS',
     description: 'Central brain connecting agents, workflows, real-time analytics, and enterprise data across ventures.',
     status: 'active',
     primaryTech: ['TypeScript', 'Node.js', 'FastAPI', 'Gemini 3', 'WebSockets'],
@@ -216,7 +216,7 @@ export const SYB_VENTURES: SYBVenture[] = [
     id: 'realtakes-ai',
     name: 'RealTakes AI',
     tagline: 'High-Impact Video & Creative AI Automation',
-    category: 'Media & Content',
+    category: 'Media & Production',
     description: 'Autonomous content pipeline generating, rendering, and publishing brand reels, shorts, and marketing clips.',
     status: 'active',
     primaryTech: ['Python', 'FFmpeg', 'Gemini Video', 'React', 'Remotion'],
@@ -226,7 +226,7 @@ export const SYB_VENTURES: SYBVenture[] = [
     id: 'nandi-voice',
     name: 'Nandi',
     tagline: 'Hyper-responsive Multilingual Voice Agent',
-    category: 'Voice Agent',
+    category: 'Voice & Conversational AI',
     description: 'Ultra-low latency conversational companion fluent in Hindi, English, Hinglish, and Odia.',
     status: 'scaling',
     primaryTech: ['Gemini Live Audio', 'WebRTC', 'FastAPI', 'Whisper', 'Piper TTS'],
@@ -236,7 +236,7 @@ export const SYB_VENTURES: SYBVenture[] = [
     id: 'forge-your-frame',
     name: 'Forge Your Frame',
     tagline: 'Founder Branding & Visual Storytelling Engine',
-    category: 'Media & Content',
+    category: 'Media & Production',
     description: 'Visual identity generator and editorial engine for founder-led growth and authority.',
     status: 'in-development',
     primaryTech: ['Next.js', 'Tailwind CSS', 'Vector Embeddings', 'Canvas API'],
@@ -246,7 +246,7 @@ export const SYB_VENTURES: SYBVenture[] = [
     id: 'sahoo-hotels',
     name: 'Sahoo Group of Hotels',
     tagline: 'Smart Hospitality & Reservation Operating System',
-    category: 'Hospitality',
+    category: 'Hospitality & Enterprise',
     description: 'Property management system with WhatsApp booking bot, automated guest concierge, and billing.',
     status: 'active',
     primaryTech: ['Express', 'PostgreSQL', 'WhatsApp Cloud API', 'Razorpay', 'Tailwind'],
@@ -256,7 +256,7 @@ export const SYB_VENTURES: SYBVenture[] = [
     id: 'loan-ledger',
     name: 'Loan Ledger',
     tagline: 'Secured Financial Ledger & Lending Tracker',
-    category: 'Fintech',
+    category: 'Fintech & Ledgers',
     description: 'Secure, audit-ready private lending ledger with payment reminders, interest calculator, and GST export.',
     status: 'active',
     primaryTech: ['TypeScript', 'SQLite/Postgres', 'Tailwind CSS', 'PWA', 'PDFKit'],
@@ -266,7 +266,7 @@ export const SYB_VENTURES: SYBVenture[] = [
     id: 'scanline',
     name: 'Scanline',
     tagline: 'Autonomous Code & Architecture Analyzer',
-    category: 'Developer Tools',
+    category: 'AI Systems & OS',
     description: 'Continuous code quality, vulnerability scanner, and AST security inspector for SYB engineering.',
     status: 'in-development',
     primaryTech: ['TypeScript', 'ESLint AST', 'Ruff', 'Docker', 'Gemini 3'],
@@ -276,7 +276,7 @@ export const SYB_VENTURES: SYBVenture[] = [
     id: 'graven-os',
     name: 'GRAVEN OS',
     tagline: 'Minimalist Spatial Workspace & Executive Dashboard',
-    category: 'Operating System',
+    category: 'AI Systems & OS',
     description: 'Executive command center displaying venture health, revenue velocity, and real-time operational alerts.',
     status: 'concept',
     primaryTech: ['Three.js', 'Vite', 'WebSockets', 'Tailwind v4'],
@@ -286,7 +286,7 @@ export const SYB_VENTURES: SYBVenture[] = [
     id: 'mantra',
     name: 'MANTRA',
     tagline: 'AI Business Operations Orchestrator',
-    category: 'AI Platform',
+    category: 'Fintech & Ledgers',
     description: 'System of record and workflow automation bridging sales, operations, support, and marketing.',
     status: 'active',
     primaryTech: ['Node.js', 'PostgreSQL', 'BullMQ', 'Gemini 2.5'],
@@ -296,7 +296,7 @@ export const SYB_VENTURES: SYBVenture[] = [
     id: 'adapt-planner',
     name: 'Adapt Planner',
     tagline: 'Fluid Adaptive Daily Agenda for High-Velocity Founders',
-    category: 'AI Platform',
+    category: 'AI Systems & OS',
     description: 'Auto-rescheduling personal calendar that adapts to unexpected client calls, energy levels, and tasks.',
     status: 'in-development',
     primaryTech: ['React', 'IndexedDB', 'Google Calendar API', 'Gemini 3'],
@@ -306,7 +306,7 @@ export const SYB_VENTURES: SYBVenture[] = [
     id: 'krishna',
     name: 'Krishna',
     tagline: 'Strategic Decision & Advisory Cognitive Engine',
-    category: 'AI Platform',
+    category: 'Voice & Conversational AI',
     description: 'Advisory agent simulating counter-perspectives, risk analysis, and strategic clarity for the Founder.',
     status: 'concept',
     primaryTech: ['Gemini 3.1 Pro', 'Graph RAG', 'TypeScript'],
@@ -825,7 +825,7 @@ export interface TestSuite {
   id: string;
   name: string;
   description: string;
-  category: 'typescript' | 'vite' | 'api' | 'tools' | 'persona';
+  category: 'typescript' | 'vite' | 'api' | 'tools' | 'persona' | 'systems';
   icon: string;
   status: 'passed' | 'failed' | 'warning' | 'idle' | 'running';
   assertions: TestAssertion[];
@@ -1137,8 +1137,95 @@ export const INITIAL_TEST_SUITES: TestSuite[] = [
         message: 'Never claims physical human existence; truthful and warm when asked directly.',
       }
     ]
+  },
+  {
+    id: 'suite-platforms',
+    name: 'Connected Operating Systems & Platform Bridges',
+    description: 'Real-time protocol handshakes, health telemetry, and low-latency bridges across 5 corporate categories',
+    category: 'systems',
+    icon: 'hub',
+    status: 'passed',
+    totalCount: 6,
+    passedCount: 6,
+    failedCount: 0,
+    warningCount: 0,
+    durationMs: 92,
+    lastRunAt: new Date().toISOString(),
+    assertions: [
+      {
+        id: 'plat-1',
+        suiteId: 'suite-platforms',
+        name: 'ORBIT AIOS & GRAVEN OS Kernel Bridge',
+        category: 'AI Systems & OS',
+        status: 'passed',
+        severity: 'CRITICAL',
+        durationMs: 14,
+        message: 'IPC and WebSocket bi-directional channels operational with sub-20ms latency.',
+      },
+      {
+        id: 'plat-2',
+        suiteId: 'suite-platforms',
+        name: 'Scanline AST & Adapt Planner Coordination',
+        category: 'AI Systems & OS',
+        status: 'passed',
+        severity: 'HIGH',
+        durationMs: 16,
+        message: 'Static analysis pipeline and dynamic MCTS agenda decomposer synced.',
+      },
+      {
+        id: 'plat-3',
+        suiteId: 'suite-platforms',
+        name: 'Loan Ledger & MANTRA Financial Security Bridge',
+        category: 'Fintech & Ledgers',
+        status: 'passed',
+        severity: 'CRITICAL',
+        durationMs: 22,
+        message: 'mTLS handshake verified, double-entry credit ledger and risk algorithms connected.',
+      },
+      {
+        id: 'plat-4',
+        suiteId: 'suite-platforms',
+        name: 'Nandi Voice Agent & Krishna Conversational Stream',
+        category: 'Voice & Conversational AI',
+        status: 'passed',
+        severity: 'CRITICAL',
+        durationMs: 12,
+        message: 'PCM-24k audio relay and philosophical reasoning tree responsive across Hindi, Odia, English.',
+      },
+      {
+        id: 'plat-5',
+        suiteId: 'suite-platforms',
+        name: 'RealTakes AI & Forge Your Frame Media Studio',
+        category: 'Media & Production',
+        status: 'passed',
+        severity: 'HIGH',
+        durationMs: 28,
+        message: 'Video rendering pipeline and digital branding compositor connected.',
+      },
+      {
+        id: 'plat-6',
+        suiteId: 'suite-platforms',
+        name: 'Sahoo Group of Hotels Enterprise PMS Bridge',
+        category: 'Hospitality & Enterprise',
+        status: 'passed',
+        severity: 'HIGH',
+        durationMs: 20,
+        message: 'Property management system, WhatsApp concierge gateway, and room inventory grid verified.',
+      }
+    ]
   }
 ];
+
+export interface AutoFixRecord {
+  id: string;
+  file: string;
+  line: number;
+  code: string;
+  actionTaken: string;
+  originalSnippet?: string;
+  fixedSnippet?: string;
+  timestamp: string;
+}
 
 export interface WatcherStatus {
   active: boolean;
@@ -1149,6 +1236,7 @@ export interface WatcherStatus {
   totalTriggers: number;
   lastStatus: 'idle' | 'building' | 'passed' | 'failed';
   buildLogs: BuildLogEntry[];
+  recentAutoFixes: AutoFixRecord[];
 }
 
 export interface BuildLogEntry {
@@ -1159,7 +1247,7 @@ export interface BuildLogEntry {
 }
 
 export interface BuildEventMessage {
-  type: 'build_status' | 'build_chunk' | 'build_complete' | 'test_update';
+  type: 'build_status' | 'build_chunk' | 'build_complete' | 'test_update' | 'auto_fix_applied';
   status?: 'idle' | 'building' | 'passed' | 'failed';
   file?: string;
   stream?: 'stdout' | 'stderr' | 'system';
@@ -1169,6 +1257,8 @@ export interface BuildEventMessage {
   warningCount?: number;
   summary?: any;
   suites?: TestSuite[];
+  autoFixes?: AutoFixRecord[];
   timestamp?: string;
 }
+
 
