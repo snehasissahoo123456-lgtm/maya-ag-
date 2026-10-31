@@ -364,6 +364,72 @@ Batao Founder, aaj kya build karna hai? Chaaho toh pehle Discovery Protocol se 5
     }
   }
 
+  private handleLitOtpDigitInput(index: number, e: any) {
+    const rawVal = (e.target.value || '').replace(/\D/g, '');
+    const currentChars = Array.from({ length: 6 }, (_, i) => this.otpInput[i] || ' ');
+    if (rawVal.length === 0) {
+      currentChars[index] = ' ';
+    } else {
+      currentChars[index] = rawVal[rawVal.length - 1];
+    }
+    this.otpInput = currentChars.join('').trimEnd();
+
+    // Auto-focus next box if digit entered
+    if (rawVal.length > 0 && index < 5) {
+      const nextInput = this.querySelector<HTMLInputElement>(`#lit-otp-box-${index + 1}`);
+      nextInput?.focus();
+    }
+
+    if (this.otpInput.length === 6 && !this.otpInput.includes(' ')) {
+      this.handleVerifyOtp();
+    }
+  }
+
+  private handleLitOtpKeyDown(index: number, e: KeyboardEvent) {
+    if (e.key === 'Backspace') {
+      const currentChars = Array.from({ length: 6 }, (_, i) => this.otpInput[i] || ' ');
+      if ((!currentChars[index] || currentChars[index] === ' ') && index > 0) {
+        currentChars[index - 1] = ' ';
+        this.otpInput = currentChars.join('').trimEnd();
+        const prevInput = this.querySelector<HTMLInputElement>(`#lit-otp-box-${index - 1}`);
+        prevInput?.focus();
+        e.preventDefault();
+      }
+    } else if (e.key === 'ArrowLeft' && index > 0) {
+      const prevInput = this.querySelector<HTMLInputElement>(`#lit-otp-box-${index - 1}`);
+      prevInput?.focus();
+    } else if (e.key === 'ArrowRight' && index < 5) {
+      const nextInput = this.querySelector<HTMLInputElement>(`#lit-otp-box-${index + 1}`);
+      nextInput?.focus();
+    } else if (e.key === 'Enter' && this.otpInput.length >= 6) {
+      this.handleVerifyOtp();
+    }
+  }
+
+  private async handleLitPasteFromClipboard() {
+    try {
+      let codeToPaste = this.demoOtpCode || '123456';
+      if (navigator.clipboard && navigator.clipboard.readText) {
+        const text = await navigator.clipboard.readText();
+        const clean = text.replace(/\D/g, '').slice(0, 6);
+        if (clean.length > 0) {
+          codeToPaste = clean;
+        }
+      }
+      this.otpInput = codeToPaste;
+      const lastInput = this.querySelector<HTMLInputElement>(`#lit-otp-box-${Math.min(codeToPaste.length - 1, 5)}`);
+      lastInput?.focus();
+      if (this.otpInput.length === 6) {
+        this.handleVerifyOtp();
+      }
+    } catch (_e) {
+      this.otpInput = this.demoOtpCode || '123456';
+      if (this.otpInput.length === 6) {
+        this.handleVerifyOtp();
+      }
+    }
+  }
+
   private async handleLogout() {
     try {
       if (this.sessionToken) {
@@ -3661,39 +3727,94 @@ Status: Ready to build upon Founder "go ahead".`;
 
                     ${this.otpSent
                       ? html`
-                          <div class="space-y-3 pt-2 animate-fadeIn">
-                            <!-- Demo OTP Code Helper Badge -->
-                            <div class="p-2.5 bg-amber-500/10 border border-amber-500/30 rounded-xl text-xs flex items-center justify-between text-amber-200">
-                              <span class="flex items-center gap-1.5 font-medium">
-                                <span class="material-symbols-outlined text-sm text-amber-400">key</span>
-                                Demo OTP Code:
-                              </span>
-                              <button
-                                class="font-mono font-bold bg-amber-500/20 px-2 py-0.5 rounded text-amber-300 hover:bg-amber-500/30 border border-amber-500/40"
-                                @click="${() => (this.otpInput = this.demoOtpCode || '123456')}"
-                                title="Click to auto-paste code"
+                          <div class="space-y-3.5 pt-2 animate-fadeIn">
+                            <!-- 6-Box Auto-Focus Input Grid -->
+                            <div class="space-y-2">
+                              <div class="flex items-center justify-between text-xs">
+                                <label class="text-slate-300 font-semibold uppercase tracking-wider text-[11px]">
+                                  Enter 6-Digit OTP
+                                </label>
+                                <span class="text-[11px] font-mono text-cyan-400">Auto-focus enabled</span>
+                              </div>
+
+                              <div
+                                class="flex items-center justify-center gap-2 sm:gap-3"
+                                @paste="${(e: ClipboardEvent) => {
+                                  e.preventDefault();
+                                  const pasted = e.clipboardData?.getData('text/plain').replace(/\D/g, '').slice(0, 6) || '';
+                                  if (pasted) {
+                                    this.otpInput = pasted;
+                                    if (pasted.length === 6) this.handleVerifyOtp();
+                                  }
+                                }}"
                               >
-                                ${this.demoOtpCode || '123456'} (Paste)
-                              </button>
+                                ${[0, 1, 2, 3, 4, 5].map((idx) => {
+                                  const char = this.otpInput[idx] && this.otpInput[idx] !== ' ' ? this.otpInput[idx] : '';
+                                  return html`
+                                    <input
+                                      id="lit-otp-box-${idx}"
+                                      type="text"
+                                      inputmode="numeric"
+                                      pattern="[0-9]*"
+                                      maxlength="1"
+                                      class="w-12 h-14 sm:w-14 sm:h-16 text-center text-xl sm:text-2xl font-mono font-bold rounded-2xl border transition-all outline-none ${
+                                        char
+                                          ? 'bg-indigo-950/50 border-indigo-500 text-white shadow-md shadow-indigo-500/30 scale-[1.03]'
+                                          : 'bg-slate-950/80 border-slate-800 text-slate-300 hover:border-slate-700 focus:border-cyan-400 focus:ring-2 focus:ring-cyan-500/30'
+                                      }"
+                                      .value="${char}"
+                                      @input="${(e: any) => this.handleLitOtpDigitInput(idx, e)}"
+                                      @keydown="${(e: KeyboardEvent) => this.handleLitOtpKeyDown(idx, e)}"
+                                    />
+                                  `;
+                                })}
+                              </div>
                             </div>
 
-                            <div class="space-y-1.5">
-                              <label class="block text-[11px] text-slate-400 font-medium">Enter 6-Digit OTP</label>
-                              <input
-                                type="text"
-                                maxlength="6"
-                                class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-3 text-center text-lg font-mono font-bold tracking-[0.4em] text-white focus:outline-none focus:border-indigo-500"
-                                placeholder="······"
-                                .value="${this.otpInput}"
-                                @input="${(e: any) => (this.otpInput = e.target.value)}"
-                                @keydown="${(e: KeyboardEvent) => {
-                                  if (e.key === 'Enter' && this.otpInput.length >= 6) this.handleVerifyOtp();
-                                }}"
-                              />
+                            <!-- 1-Click Clipboard Actions Bar -->
+                            <div class="flex items-center justify-between gap-2 text-xs pt-1">
+                              <div class="flex items-center gap-2">
+                                <button
+                                  type="button"
+                                  class="px-3 py-1.5 rounded-xl bg-slate-900/90 hover:bg-slate-800 text-cyan-300 border border-slate-700 font-medium transition-all shadow-sm flex items-center gap-1.5 cursor-pointer"
+                                  @click="${() => this.handleLitPasteFromClipboard()}"
+                                  title="1-Click Paste from clipboard"
+                                >
+                                  <span class="material-symbols-outlined text-sm text-cyan-400">content_paste</span>
+                                  <span>1-Click Paste</span>
+                                </button>
+
+                                <button
+                                  type="button"
+                                  class="px-2.5 py-1.5 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border border-amber-500/30 font-mono text-[11px] font-semibold flex items-center gap-1 cursor-pointer"
+                                  @click="${() => {
+                                    this.otpInput = this.demoOtpCode || '123456';
+                                    this.handleVerifyOtp();
+                                  }}"
+                                  title="Click to paste demo code"
+                                >
+                                  <span class="material-symbols-outlined text-xs text-amber-400">bolt</span>
+                                  <span>${this.demoOtpCode || '123456'}</span>
+                                </button>
+                              </div>
+
+                              ${this.otpInput.length > 0
+                                ? html`
+                                    <button
+                                      type="button"
+                                      class="text-slate-400 hover:text-rose-400 text-[11px] font-mono transition-colors cursor-pointer"
+                                      @click="${() => {
+                                        this.otpInput = '';
+                                      }}"
+                                    >
+                                      Clear
+                                    </button>
+                                  `
+                                : ''}
                             </div>
 
                             <button
-                              class="w-full py-3 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white rounded-2xl text-xs font-bold transition-all shadow-lg shadow-indigo-600/30 flex items-center justify-center gap-2 disabled:opacity-50"
+                              class="w-full py-3 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white rounded-2xl text-xs font-bold transition-all shadow-lg shadow-indigo-600/30 flex items-center justify-center gap-2 disabled:opacity-50 cursor-pointer"
                               ?disabled="${this.isAuthLoading || this.otpInput.length < 6}"
                               @click="${() => this.handleVerifyOtp()}"
                             >

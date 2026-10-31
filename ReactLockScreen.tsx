@@ -23,9 +23,10 @@ import {
   RefreshCw,
   Cpu,
   Layers,
-  Code2
+  Code2,
 } from 'lucide-react';
 import { AuthenticatedUser } from './authService.ts';
+import { OtpInput } from './OtpInput.tsx';
 
 interface ReactLockScreenProps {
   onAuthenticated: (user: AuthenticatedUser, token: string) => void;
@@ -41,14 +42,11 @@ export const ReactLockScreen: React.FC<ReactLockScreenProps> = ({
   const [phone, setPhone] = useState('+91 98765 43210');
   const [otpSent, setOtpSent] = useState(false);
   const [demoCode, setDemoCode] = useState<string | null>(null);
-  const [otpDigits, setOtpDigits] = useState<string[]>(['', '', '', '', '', '']);
+  const [otpCode, setOtpCode] = useState('');
   const [countdown, setCountdown] = useState(0);
   const [isLoading, setIsLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
-
-  // References for the 6 OTP input boxes
-  const otpInputRefs = useRef<(HTMLInputElement | null)[]>([]);
 
   // Timer countdown effect for OTP resend
   useEffect(() => {
@@ -60,9 +58,9 @@ export const ReactLockScreen: React.FC<ReactLockScreenProps> = ({
 
   // Google Sign-In Handler
   const handleGoogleLogin = async (emailToUse?: string) => {
-    setIsLoading(true);
-    setErrorMsg(null);
-    setSuccessMsg(null);
+    ((setIsLoading as any) as any)(true);
+    ((setErrorMsg as any) as any)(null);
+    ((setSuccessMsg as any) as any)(null);
     try {
       const targetEmail = emailToUse || googleEmail || 'snehasissahoo123456@gmail.com';
       const res = await fetch('/api/auth/google-login', {
@@ -78,22 +76,22 @@ export const ReactLockScreen: React.FC<ReactLockScreenProps> = ({
         throw new Error(data.error || 'Google login authorization failed');
       }
       localStorage.setItem('maya_session_token', data.session.token);
-      setSuccessMsg('Welcome back Founder Snehasis Sahoo! Access granted.');
+      ((setSuccessMsg as any) as any)('Welcome back Founder Snehasis Sahoo! Access granted.');
       setTimeout(() => {
         onAuthenticated(data.session.user, data.session.token);
       }, 500);
     } catch (err: any) {
-      setErrorMsg(err.message || 'Google authentication error');
+      ((setErrorMsg as any) as any)(err.message || 'Google authentication error');
     } finally {
-      setIsLoading(false);
+      ((setIsLoading as any) as any)(false);
     }
   };
 
   // Dispatch OTP SMS handler
   const handleSendOtp = async () => {
-    setIsLoading(true);
-    setErrorMsg(null);
-    setSuccessMsg(null);
+    ((setIsLoading as any) as any)(true);
+    ((setErrorMsg as any) as any)(null);
+    ((setSuccessMsg as any) as any)(null);
     try {
       const res = await fetch('/api/auth/send-otp', {
         method: 'POST',
@@ -106,100 +104,22 @@ export const ReactLockScreen: React.FC<ReactLockScreenProps> = ({
       }
       setOtpSent(true);
       setDemoCode(data.demoCode || '123456');
-      setSuccessMsg(data.message || 'OTP dispatched to ' + phone);
+      ((setSuccessMsg as any) as any)(data.message || 'OTP dispatched to ' + phone);
       setCountdown(60);
-      // Focus first box automatically
-      setTimeout(() => {
-        otpInputRefs.current[0]?.focus();
-      }, 150);
+      setOtpCode('');
     } catch (err: any) {
-      setErrorMsg(err.message || 'OTP dispatch failed');
+      ((setErrorMsg as any) as any)(err.message || 'OTP dispatch failed');
     } finally {
-      setIsLoading(false);
+      ((setIsLoading as any) as any)(false);
     }
   };
 
-  // 6-Box OTP Input Change Handler
-  const handleOtpDigitChange = (index: number, value: string) => {
-    // Only accept numeric digit
-    const cleaned = value.replace(/\D/g, '');
-    const newDigits = [...otpDigits];
 
-    if (cleaned.length === 0) {
-      newDigits[index] = '';
-      setOtpDigits(newDigits);
-      return;
-    }
-
-    // Single digit input
-    newDigits[index] = cleaned[cleaned.length - 1];
-    setOtpDigits(newDigits);
-
-    // Auto-focus next box if available
-    if (index < 5) {
-      otpInputRefs.current[index + 1]?.focus();
-    } else {
-      // All 6 digits filled, check if ready to submit
-      const fullCode = newDigits.join('');
-      if (fullCode.length === 6) {
-        handleVerifyOtpWithCode(fullCode);
-      }
-    }
-  };
-
-  // Handle keydown for backspace rewind and arrows
-  const handleKeyDown = (index: number, e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === 'Backspace') {
-      if (!otpDigits[index] && index > 0) {
-        otpInputRefs.current[index - 1]?.focus();
-      }
-    } else if (e.key === 'ArrowLeft' && index > 0) {
-      otpInputRefs.current[index - 1]?.focus();
-    } else if (e.key === 'ArrowRight' && index < 5) {
-      otpInputRefs.current[index + 1]?.focus();
-    } else if (e.key === 'Enter') {
-      const fullCode = otpDigits.join('');
-      if (fullCode.length === 6) {
-        handleVerifyOtpWithCode(fullCode);
-      }
-    }
-  };
-
-  // Handle paste across all 6 boxes
-  const handlePaste = (e: React.ClipboardEvent<HTMLInputElement>) => {
-    e.preventDefault();
-    const pastedData = e.clipboardData.getData('text/plain').replace(/\D/g, '').slice(0, 6);
-    if (!pastedData) return;
-
-    const newDigits = [...otpDigits];
-    for (let i = 0; i < 6; i++) {
-      newDigits[i] = pastedData[i] || '';
-    }
-    setOtpDigits(newDigits);
-
-    // Focus on the next empty box or the last box
-    const nextEmptyIndex = newDigits.findIndex((d) => !d);
-    if (nextEmptyIndex !== -1) {
-      otpInputRefs.current[nextEmptyIndex]?.focus();
-    } else {
-      otpInputRefs.current[5]?.focus();
-      handleVerifyOtpWithCode(pastedData);
-    }
-  };
-
-  // 1-Click Paste Test Code helper
-  const handlePasteTestCode = () => {
-    const code = demoCode || '123456';
-    const splitCode = code.split('').slice(0, 6);
-    setOtpDigits(splitCode);
-    otpInputRefs.current[5]?.focus();
-    handleVerifyOtpWithCode(code);
-  };
 
   // Verify OTP handler
   const handleVerifyOtpWithCode = async (codeToVerify: string) => {
-    setIsLoading(true);
-    setErrorMsg(null);
+    ((setIsLoading as any) as any)(true);
+    ((setErrorMsg as any) as any)(null);
     try {
       const res = await fetch('/api/auth/verify-otp', {
         method: 'POST',
@@ -215,14 +135,14 @@ export const ReactLockScreen: React.FC<ReactLockScreenProps> = ({
         throw new Error(data.error || 'Invalid or expired OTP code');
       }
       localStorage.setItem('maya_session_token', data.session.token);
-      setSuccessMsg('Mobile OTP verified successfully! Launching Action Engine Cockpit...');
+      ((setSuccessMsg as any) as any)('Mobile OTP verified successfully! Launching Action Engine Cockpit...');
       setTimeout(() => {
         onAuthenticated(data.session.user, data.session.token);
       }, 500);
     } catch (err: any) {
-      setErrorMsg(err.message || 'OTP verification error');
+      ((setErrorMsg as any) as any)(err.message || 'OTP verification error');
     } finally {
-      setIsLoading(false);
+      ((setIsLoading as any) as any)(false);
     }
   };
 
@@ -330,12 +250,12 @@ export const ReactLockScreen: React.FC<ReactLockScreenProps> = ({
             </div>
 
             {/* Error & Success Feedback Alerts */}
-            {errorMsg && (
+            {((errorMsg as any) as any) && (
               <div className="p-3.5 bg-rose-950/80 border border-rose-700/80 rounded-2xl text-xs text-rose-200 flex items-start gap-2.5 animate-fadeIn">
                 <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
-                <span className="flex-1 leading-relaxed">{errorMsg}</span>
+                <span className="flex-1 leading-relaxed">{((errorMsg as any) as any)}</span>
                 <button
-                  onClick={() => setErrorMsg(null)}
+                  onClick={() => ((setErrorMsg as any) as any)(null)}
                   className="text-rose-400 hover:text-white text-sm font-bold"
                 >
                   ✕
@@ -343,10 +263,10 @@ export const ReactLockScreen: React.FC<ReactLockScreenProps> = ({
               </div>
             )}
 
-            {successMsg && (
+            {((successMsg as any) as any) && (
               <div className="p-3.5 bg-emerald-950/80 border border-emerald-700/80 rounded-2xl text-xs text-emerald-200 flex items-center gap-2.5 animate-fadeIn">
                 <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-                <span className="flex-1 leading-relaxed">{successMsg}</span>
+                <span className="flex-1 leading-relaxed">{((successMsg as any) as any)}</span>
               </div>
             )}
 
@@ -356,7 +276,7 @@ export const ReactLockScreen: React.FC<ReactLockScreenProps> = ({
                 type="button"
                 onClick={() => {
                   setAuthTab('google');
-                  setErrorMsg(null);
+                  ((setErrorMsg as any) as any)(null);
                 }}
                 className={`py-2.5 rounded-xl transition-all flex items-center justify-center gap-2 ${
                   authTab === 'google'
@@ -372,7 +292,7 @@ export const ReactLockScreen: React.FC<ReactLockScreenProps> = ({
                 type="button"
                 onClick={() => {
                   setAuthTab('phone');
-                  setErrorMsg(null);
+                  ((setErrorMsg as any) as any)(null);
                 }}
                 className={`py-2.5 rounded-xl transition-all flex items-center justify-center gap-2 ${
                   authTab === 'phone'
@@ -421,11 +341,11 @@ export const ReactLockScreen: React.FC<ReactLockScreenProps> = ({
                 {/* 1-Click Fast Founder Sign-In Button */}
                 <button
                   type="button"
-                  disabled={isLoading}
+                  disabled={((isLoading as any) as any)}
                   onClick={() => handleGoogleLogin('snehasissahoo123456@gmail.com')}
                   className="w-full py-3.5 px-4 bg-white hover:bg-slate-100 text-slate-900 rounded-2xl text-xs font-bold flex items-center justify-center gap-3 transition-all shadow-xl hover:scale-[1.01] active:scale-[0.99] disabled:opacity-50 cursor-pointer"
                 >
-                  {isLoading ? (
+                  {((isLoading as any) as any) ? (
                     <RefreshCw className="w-4 h-4 text-slate-900 animate-spin" />
                   ) : (
                     <svg className="w-4 h-4 shrink-0" viewBox="0 0 24 24">
@@ -436,7 +356,7 @@ export const ReactLockScreen: React.FC<ReactLockScreenProps> = ({
                     </svg>
                   )}
                   <span>
-                    {isLoading
+                    {((isLoading as any) as any)
                       ? 'Authenticating Session...'
                       : 'Continue with Google (snehasissahoo123456@gmail.com)'}
                   </span>
@@ -462,7 +382,7 @@ export const ReactLockScreen: React.FC<ReactLockScreenProps> = ({
                     />
                     <button
                       type="button"
-                      disabled={isLoading}
+                      disabled={((isLoading as any) as any)}
                       onClick={() => handleGoogleLogin(googleEmail)}
                       className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-semibold whitespace-nowrap transition-all border border-slate-700 cursor-pointer disabled:opacity-50"
                     >
@@ -496,7 +416,7 @@ export const ReactLockScreen: React.FC<ReactLockScreenProps> = ({
                     </div>
                     <button
                       type="button"
-                      disabled={isLoading || countdown > 0}
+                      disabled={((isLoading as any) as any) || countdown > 0}
                       onClick={handleSendOtp}
                       className="px-4 py-2.5 bg-gradient-to-r from-indigo-600 to-indigo-700 hover:from-indigo-500 hover:to-indigo-600 text-white rounded-xl text-xs font-semibold whitespace-nowrap transition-all shadow-md shadow-indigo-600/20 disabled:opacity-50 cursor-pointer"
                     >
@@ -508,67 +428,42 @@ export const ReactLockScreen: React.FC<ReactLockScreenProps> = ({
                 {/* OTP Entry Grid (Triggered when OTP dispatched) */}
                 {otpSent && (
                   <div className="space-y-4 pt-2 animate-fadeIn">
-                    {/* Demo OTP Helper Badge with 1-Click Paste */}
-                    <div className="p-3 bg-gradient-to-r from-amber-500/10 via-amber-500/5 to-transparent border border-amber-500/30 rounded-2xl text-xs flex items-center justify-between text-amber-200">
-                      <div className="flex items-center gap-2">
-                        <KeyRound className="w-4 h-4 text-amber-400 shrink-0" />
-                        <div>
-                          <span className="font-semibold text-white">Live SMS Test Code: </span>
-                          <span className="font-mono text-amber-300 font-bold">{demoCode || '123456'}</span>
-                        </div>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={handlePasteTestCode}
-                        className="px-3 py-1 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 font-mono font-bold text-xs border border-amber-500/40 transition-all flex items-center gap-1 cursor-pointer"
-                        title="Click to automatically paste test code into the 6 boxes"
-                      >
-                        <Zap className="w-3 h-3" />
-                        <span>Paste 123456</span>
-                      </button>
-                    </div>
-
-                    {/* 6-Box Auto-Focus Input Grid */}
                     <div className="space-y-2">
-                      <label className="block text-xs text-slate-300 font-semibold text-center uppercase tracking-wider">
-                        Enter 6-Digit Verification Code
-                      </label>
-                      <div className="flex items-center justify-center gap-2 sm:gap-3" onPaste={handlePaste}>
-                        {otpDigits.map((digit, index) => (
-                          <input
-                            key={index}
-                            ref={(el) => { otpInputRefs.current[index] = el; }}
-                            type="text"
-                            inputMode="numeric"
-                            pattern="[0-9]*"
-                            maxLength={1}
-                            value={digit}
-                            onChange={(e) => handleOtpDigitChange(index, e.target.value)}
-                            onKeyDown={(e) => handleKeyDown(index, e)}
-                            className={`w-12 h-14 sm:w-14 sm:h-16 text-center text-xl sm:text-2xl font-mono font-bold text-white rounded-2xl border transition-all outline-none ${
-                              digit
-                                ? 'bg-indigo-950/40 border-indigo-500 shadow-md shadow-indigo-500/20 scale-[1.03]'
-                                : 'bg-slate-950 border-slate-800 hover:border-slate-700 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/30'
-                            }`}
-                          />
-                        ))}
+                      <div className="flex items-center justify-between text-xs">
+                        <label className="text-slate-300 font-semibold uppercase tracking-wider text-[11px]">
+                          Enter 6-Digit Verification Code
+                        </label>
+                        <span className="text-[11px] font-mono text-cyan-400">
+                          Auto-focus & 1-click paste
+                        </span>
                       </div>
+
+                      {/* Modular 6-Box Auto-Focus OTP Input Component */}
+                      <OtpInput
+                        length={6}
+                        value={otpCode}
+                        onChange={setOtpCode}
+                        onComplete={(code) => handleVerifyOtpWithCode(code)}
+                        disabled={((isLoading as any) as any)}
+                        demoCode={demoCode || '123456'}
+                        hasError={Boolean(((errorMsg as any) as any))}
+                      />
                     </div>
 
                     {/* Verify & Launch Button */}
                     <button
                       type="button"
-                      disabled={isLoading || otpDigits.join('').length < 6}
-                      onClick={() => handleVerifyOtpWithCode(otpDigits.join(''))}
+                      disabled={((isLoading as any) as any) || otpCode.length < 6}
+                      onClick={() => handleVerifyOtpWithCode(otpCode)}
                       className="w-full py-3.5 bg-gradient-to-r from-indigo-600 via-purple-600 to-cyan-600 hover:from-indigo-500 hover:via-purple-500 hover:to-cyan-500 text-white rounded-2xl text-xs font-bold transition-all shadow-xl shadow-indigo-600/30 flex items-center justify-center gap-2 disabled:opacity-50 cursor-pointer hover:scale-[1.01] active:scale-[0.99]"
                     >
-                      {isLoading ? (
+                      {((isLoading as any) as any) ? (
                         <RefreshCw className="w-4 h-4 animate-spin text-white" />
                       ) : (
                         <ShieldCheck className="w-4 h-4 text-emerald-300" />
                       )}
                       <span>
-                        {isLoading ? 'Verifying Credentials...' : 'Verify OTP & Launch Cockpit'}
+                        {((isLoading as any) as any) ? 'Verifying Credentials...' : 'Verify OTP & Launch Cockpit'}
                       </span>
                       <ArrowRight className="w-4 h-4" />
                     </button>
