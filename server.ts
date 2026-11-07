@@ -547,7 +547,7 @@ async function startServer() {
 
   app.get("/api/auth/session", (req, res): any => {
     const authHeader = req.headers.authorization || "";
-    const token = authHeader.replace(/^Bearer\s+/i, "") || (req.query.token as string);
+    const token = authHeader.replace(/^Bearer\s+/i, "");
     if (!token) return res.status(401).json({ success: false, error: "No token provided" });
     const session = authService.validateSession(token);
     if (!session) return res.status(401).json({ success: false, error: "Session expired or invalid" });
