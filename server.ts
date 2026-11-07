@@ -27,6 +27,17 @@ function resolveModel(model?: string): string {
   return MODEL_UPGRADES[model] || model;
 }
 
+function resolveWorkspacePath(requestedPath: unknown): string {
+  const workspaceRoot = fs.realpathSync(process.cwd());
+  const requested = typeof requestedPath === "string" && requestedPath.trim() ? requestedPath : ".";
+  const resolved = fs.realpathSync(path.resolve(workspaceRoot, requested));
+  const relative = path.relative(workspaceRoot, resolved);
+  if (relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
+    throw new Error("Path is outside the enrolled workspace.");
+  }
+  return resolved;
+}
+
 function serializeGenerateContentResponse(r: any) {
   const parts = r?.candidates?.[0]?.content?.parts || [];
   const execPart = parts.find((p: any) => p?.executableCode?.code);
@@ -195,10 +206,10 @@ async function startServer() {
         gemini_live: hasKey,
         gemini_flash: hasKey,
         local_bridge: true,
-        code_sandbox: true,
-        web_search: true,
+        code_sandbox: false,
+        web_search: false,
         file_system: true,
-        scheduler: true,
+        scheduler: false,
       },
       systemInfo: {
         nodeVersion: process.version,
@@ -430,23 +441,32 @@ async function startServer() {
     });
   });
 
-  app.post("/api/action-engine/tests/run", (req, res) => {
-    const { suiteId } = req.body || {};
-    const result = executeTestSuites(suiteId);
-    res.json({ success: true, ...result });
+  app.post("/api/action-engine/tests/run", (_req, res) => {
+    const command = "bun run lint && bun run test && bun run build";
+    try {
+      const output = execSync(command, {
+        cwd: process.cwd(),
+        encoding: "utf-8",
+        stdio: "pipe",
+        timeout: 180000,
+      });
+      return res.json({ success: true, verified: true, command, output });
+    } catch (error: any) {
+      return res.status(500).json({
+        success: false,
+        verified: false,
+        command,
+        exitCode: typeof error.status === "number" ? error.status : 1,
+        stdout: String(error.stdout || ""),
+        stderr: String(error.stderr || error.message || "Validation command failed."),
+      });
+    }
   });
 
   app.post("/api/action-engine/tests/fix", (_req, res) => {
-    const { fixedCount, actionsTaken } = performAutoFix();
-    const result = executeTestSuites();
-    res.json({
-      success: true,
-      fixedCount,
-      actionsTaken,
-      message: fixedCount > 0
-        ? `Systematically applied ${fixedCount} auto-fix action(s): ${actionsTaken.join(", ")}`
-        : "Zero warnings detected. All build and typecheck configurations are already pristine!",
-      ...result,
+    return res.status(501).json({
+      success: false,
+      error: "Automatic source mutation is disabled. Review diagnostics and apply a tested change instead.",
     });
   });
 
@@ -466,32 +486,11 @@ async function startServer() {
     res.json({ success: true, active, status: watcherService.getStatus() });
   });
 
-  app.post("/api/action-engine/tests/auto-fix-typescript", async (_req, res) => {
-    try {
-      execSync("npx tsc --noEmit", { encoding: "utf-8" });
-      res.json({
-        success: true,
-        diagnosticsFound: 0,
-        fixedCount: 0,
-        fixes: [],
-        message: "TypeScript compiler reports zero errors! All source files strictly typecheck.",
-      });
-    } catch (err: any) {
-      const errorOutput = String(err.stdout || "") + "\n" + String(err.stderr || "") + "\n" + String(err.message || "");
-      const diags = TypeScriptFixer.parseOutput(errorOutput);
-      const fixes = TypeScriptFixer.autoFixDiagnostics(diags);
-      const diagResult = await watcherService.runDiagnostics("auto-fix-api");
-      res.json({
-        success: true,
-        diagnosticsFound: diags.length,
-        fixedCount: fixes.length,
-        fixes,
-        message: fixes.length > 0
-          ? `Proactively self-healed ${fixes.length} TypeScript issue(s) without manual confirmation.`
-          : `Detected ${diags.length} diagnostic(s).`,
-        build: diagResult,
-      });
-    }
+  app.post("/api/action-engine/tests/auto-fix-typescript", (_req, res) => {
+    return res.status(501).json({
+      success: false,
+      error: "Automatic TypeScript edits are disabled until a reviewable patch and verification flow exists.",
+    });
   });
 
   // ==========================================
@@ -616,15 +615,12 @@ async function startServer() {
     if (!task) return res.status(404).json({ error: "Task not found" });
 
     if (action === "run_now") {
-      task.status = "running";
-      task.progress = 40;
-      task.lastRun = new Date().toISOString();
-      task.logs.push(`[Execution] Started autonomous worker run at ${new Date().toLocaleTimeString()}`);
-      setTimeout(() => {
-        task.progress = 100;
-        task.status = "completed";
-        task.logs.push(`[Execution] Steps completed successfully with 0 errors at ${new Date().toLocaleTimeString()}`);
-      }, 1200);
+      task.logs.push("[Execution blocked] No real task executor is configured. Task was not run or marked complete.");
+      return res.status(501).json({
+        success: false,
+        error: "Real task execution is not configured. No work was performed.",
+        task,
+      });
     } else if (action === "pause") {
       task.status = "paused";
       task.logs.push(`[Status] Paused by Founder`);
@@ -669,14 +665,14 @@ async function startServer() {
 
     try {
       if (toolName === "list_dir") {
-        const targetPath = path.resolve(process.cwd(), params?.path || ".");
+        const targetPath = resolveWorkspacePath(params?.path || ".");
         const files = fs.readdirSync(targetPath, { withFileTypes: true });
         result = files.map((f) => ({
           name: f.name,
           type: f.isDirectory() ? "directory" : "file",
         }));
       } else if (toolName === "read_file") {
-        const filePath = path.resolve(process.cwd(), params?.path || "");
+        const filePath = resolveWorkspacePath(params?.path || ".");
         if (fs.existsSync(filePath)) {
           const stats = fs.statSync(filePath);
           if (stats.size > 200000) {
@@ -697,7 +693,7 @@ async function startServer() {
           pid: process.pid,
           uptime: `${Math.floor(process.uptime())} seconds`,
           currentDirectory: process.cwd(),
-          bridgeStatus: "Local Bridge Active (Port 3000)",
+          bridgeStatus: "Maya API process active",
         };
       } else if (toolName === "schedule_task") {
         const t: ActionEngineTask = {
@@ -734,51 +730,21 @@ async function startServer() {
         );
         result = { count: matches.length, results: matches };
       } else if (toolName === "run_tests") {
-        result = {
-          suite: params?.suite || "all",
-          passed: 14,
-          failed: 0,
-          skipped: 0,
-          duration: "412ms",
-          status: "ALL PASSING - Build & strict typings verified",
-        };
+        const command = "bun run test";
+        const output = execSync(command, { cwd: process.cwd(), encoding: "utf-8", stdio: "pipe", timeout: 120000 });
+        result = { verified: true, command, output };
       } else if (toolName === "deploy") {
-        if (!params?.confirmed) {
-          status = "failed";
-          result = { error: "Deployment requires explicit Founder confirmation (confirmed: true)." };
-        } else {
-          result = {
-            deployed: true,
-            platform: params?.platform || "cloudflare",
-            url: "https://syb-action-engine.live",
-            timestamp: new Date().toISOString(),
-            status: "Production Verified (SSL, CDN, Edge Caching Active)",
-          };
-        }
+        status = "failed";
+        result = { error: "Deployment adapter is not configured. No deployment was attempted." };
       } else if (toolName === "send_notification") {
-        result = {
-          dispatched: true,
-          channel: params?.channel || "whatsapp",
-          priority: params?.priority || "normal",
-          message: params?.message,
-          recipient: "Founder Snehasis Sahoo",
-          timestamp: new Date().toISOString(),
-        };
+        status = "failed";
+        result = { error: "Notification provider is not configured. No notification was sent." };
       } else if (toolName === "web_search") {
-        result = {
-          query: params?.query,
-          sources: [
-            { title: "Official Documentation & API Specs", url: "https://developers.google.com/gemini-api" },
-            { title: "SYB Enterprise System Architecture", url: "https://syb.org.in/ecosystem" },
-          ],
-          summary: `Current verified technical data retrieved for: "${params?.query}". Zero hallucination protocol enforced.`,
-        };
+        status = "failed";
+        result = { error: "A real web-search provider is not configured. No search was performed.", query: params?.query };
       } else {
-        result = {
-          tool: toolName,
-          executed: true,
-          details: `Executed ${toolName} through Local Bridge with safe sandbox parameters.`,
-        };
+        status = "failed";
+        result = { error: `Tool "${String(toolName || "unknown")}" has no implemented execution adapter. No action was performed.` };
       }
     } catch (err: any) {
       status = "failed";
