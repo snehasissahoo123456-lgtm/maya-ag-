@@ -163,7 +163,7 @@ async function startServer() {
   app.use("/api", (req, res, next) => {
     if (publicApiPaths.has(req.path)) return next();
     const authorization = req.headers.authorization || "";
-    const token = authorization.match(/^Bearer\\s+(.+)$/i)?.[1];
+    const token = authorization.match(/^Bearer\s+(.+)$/i)?.[1];
     const session = authService.validateSession(token);
     if (!session) {
       return res.status(401).json({ success: false, error: "Authentication required. No verified session is active." });
