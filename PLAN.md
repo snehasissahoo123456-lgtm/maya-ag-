@@ -3,7 +3,7 @@
 ## Current verified repository state
 The original repository is a web-based Action Engine cockpit built with TypeScript, Node.js, Express, WebSockets, and a React/Lit frontend. It includes Gemini integration, task and memory UI, tool definitions, and platform/watcher services.
 
-The current implementation is a prototype, not a production autonomous operator. Some execution and platform-health paths are simulated; authentication contains demo behavior; task and memory state is held in process memory; and route authorization and filesystem containment require a complete review.
+The current implementation is a prototype, not a production autonomous operator. Demo authentication and fabricated success responses have been removed; REST routes now default-deny without a verified session; WebSocket access requires a session cookie; and workspace file reads/listings are path-contained. Sign-in remains unavailable until real OAuth/SMS identity providers and cookie issuance are integrated. Task/memory state remains in process memory, the task executor and several external adapters are not implemented, and the server-side approval ledger is still missing.
 
 ## Current development branch
 \`maya/foundation-architecture\`
@@ -12,8 +12,11 @@ The current implementation is a prototype, not a production autonomous operator.
 - Target cloud + local architecture.
 - Security baseline and threat model.
 - Phased implementation roadmap.
-- Shared TypeScript task lifecycle with explicit approval and verification evidence gates.
-- Unit tests for the task lifecycle.
+- Shared TypeScript task lifecycle with high-risk approval enforcement and verification evidence gates.
+- Authentication and task lifecycle regression tests.
+- GitHub Actions CI; latest validated commit passed locked install, typecheck, tests, and production build.
+- Removed simulated task completion and fabricated tool/test/deployment/notification/search success; unsupported actions now fail explicitly.
+- Workspace file read/list operations are contained to the server workspace.
 - Android runtime plan distinguishing everyday personal use from a separate dedicated kiosk device.
 - Project README, test command, and local secret/build-artifact ignore rules.
 
