@@ -9,9 +9,9 @@ Maya is being evolved from the existing web-based Action Engine cockpit into a c
 - Existing action engine, platform registry, watcher, and task UI are retained as the starting point.
 
 ## Current development status
-The \`maya/foundation-architecture\` branch adds the target architecture, security baseline, implementation roadmap, Android runtime plan, and shared task lifecycle primitives with tests.
+The \`maya/foundation-architecture\` branch adds architecture and task lifecycle foundations, fail-closed authentication, default-deny REST authorization, a session-cookie gate for WebSockets, workspace path containment, honest unsupported-capability responses, and GitHub Actions CI.
 
-This is a foundation milestone, not a finished autonomous agent. The Android directory is currently documentation only; no APK is present. Existing task execution and platform health code still require implementation and security remediation before real device or account access.
+The latest CI run verifies dependency installation, typechecking, unit tests, and the production build. This remains a prototype, not an operational autonomous agent. Google OAuth and SMS verification are not configured, so authenticated access is intentionally disabled. The Android directory is documentation only; no APK exists. Real task execution, durable storage, approval-ledger validation, search/notification/deployment adapters, and the PC/VS Code connector remain unimplemented.
 
 ## Run locally
 Requirements: a supported Node.js runtime and dependencies installed from the repository lockfile.
