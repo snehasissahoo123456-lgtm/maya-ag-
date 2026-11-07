@@ -84,13 +84,23 @@ let currentTasks: ActionEngineTask[] = [...INITIAL_TASKS];
 let currentMemories: MemoryEntry[] = [...INITIAL_MEMORIES];
 let currentPersona: RelationshipProfile = { ...INITIAL_RELATIONSHIP_PROFILE };
 let currentTestSuites: TestSuite[] = JSON.parse(JSON.stringify(INITIAL_TEST_SUITES));
+for (const suite of currentTestSuites) {
+  suite.status = "warning";
+  suite.passedCount = 0;
+  suite.failedCount = 0;
+  suite.warningCount = suite.assertions.length;
+  for (const assertion of suite.assertions) {
+    assertion.status = "warning";
+    assertion.message = "Not executed in this server process. Run the real validation command to obtain evidence.";
+  }
+}
 let currentAuditLogs: ToolExecutionRecord[] = [
   {
     id: "init-audit-1",
     toolName: "system_info",
     params: {},
     status: "success",
-    result: { status: "Maya · Action Engine v2.0 Operational", bridgePort: 3000, pid: process.pid },
+    result: { status: "Maya prototype server started; agent capabilities are not yet verified.", pid: process.pid },
     timestamp: new Date().toISOString(),
     durationMs: 12,
   },
@@ -912,27 +922,11 @@ MULTILINGUAL & RAPID REACTION:
         const msgLower = String(message || "").toLowerCase().trim();
         let fallbackText = "";
         if (msgLower === "status" || msgLower.includes("status")) {
-          fallbackText = `📌 PROJECT / TASK: Action Engine Cockpit (SYB Ecosystem)
-📊 OVERALL PROGRESS: 100%
-✅ COMPLETED: Maya Persona v2.0 active (${activeModeInfo.name}), Local Bridge active (:3000), 21 Master Tools verified, Task Queue active, Discovery Protocol wired
-🔄 IN PROGRESS NOW: Monitoring Founder commands in ${activeModeInfo.name} mode
-⏳ REMAINING: Standby for next venture build target
-🐞 ISSUES FOUND AND FIXED: None
-⚠️ ASSUMPTIONS MADE: Preferred address '${currentPersona.preferredAddress}', free/open-source tools prioritized
-🚧 BLOCKERS / NEEDED FROM FOUNDER: None
-⏱️ ETA: Immediate`;
+          fallbackText = `Maya server status is available, but agent execution, connected platforms, and task completion are not verified in this offline mode. Use the authenticated control plane after identity integration.`;
         } else if (msgLower.includes("namaste") || msgLower.includes("hello") || msgLower.includes("ready") || !msgLower) {
-          fallbackText = `Namaste Founder! Maya ready hai.
-
-Main agent, website, app, software ya automation, kuch bhi build, test aur deliver kar sakti hoon.
-
-• Tone Mode: ${activeModeInfo.name} (${activeModeInfo.toneBadge})
-• Connected right now: Local Bridge (Port 3000), 21 Master Tools, 24/7 Persistent Queue, SYB Venture Hub
-• Optional: GEMINI_API_KEY add karke Live Native Audio call activate kar sakte hain.
-
-Batao Founder, aaj kya build karna hai?`;
+          fallbackText = `Namaste. Maya is running in limited offline mode. Gemini is not configured, and no tasks, tools, integrations, or background jobs are being executed.`;
         } else {
-          fallbackText = `Founder, message mil gaya: "${message}". Maya is par kaam kar rahi hai. Discovery Protocol tab se exact specs set kar sakte hain ya Master Tools se direct command run kar sakte hain!`;
+          fallbackText = `Message received: "${message}". This offline fallback does not execute tasks or tools. Configure a verified AI provider and authenticated execution runtime before relying on agent actions.`;
         }
         return res.json({
           text: fallbackText,
