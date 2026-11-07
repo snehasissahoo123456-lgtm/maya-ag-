@@ -54,7 +54,7 @@ Treat model output, repository content, web pages, files, plugin responses, and 
 - Provide device revocation, emergency stop, backups, and documented kiosk recovery.
 
 ## Initial release blockers from the repository review
-The current code contains a seeded Founder session, client-supplied identity login paths, a demo OTP returned to callers, an always-accepted test OTP, in-memory task/memory arrays, and simulated tool outcomes. The server needs a route-by-route authorization review and filesystem path-containment review. These are not production-safe and must be addressed before connecting personal accounts or enabling remote execution.
+The seeded session, browser-asserted Google login, demo OTP disclosure, and universal test OTP have been removed. REST routes now default-deny without a verified session; the WebSocket relay requires a session cookie. No OAuth verifier, SMS provider, or cookie-issuing session flow exists yet, so sign-in and protected APIs remain deliberately unavailable. File reads/listings are contained to the realpath-resolved server workspace. Simulated task completion and fabricated test/deploy/notification/search success responses have been removed or replaced with explicit unsupported errors. Durable storage, a server-side approval ledger, a complete route/tool policy review, and real adapters remain release blockers.
 
 ## Security acceptance tests
 1. Unauthenticated requests cannot read or mutate Founder data.
