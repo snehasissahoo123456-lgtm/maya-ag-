@@ -16,7 +16,7 @@ test("high-risk tasks require approval before execution", () => {
   const planning = transitionTask(task, "planning", { now: time });
   const approval = transitionTask(planning, "awaiting_approval", { now: time });
   assert.throws(() => transitionTask(approval, "running", { now: time }), TaskTransitionError);
-  const running = transitionTask(approval, "running", { approvalGranted: true, now: time });
+  const running = transitionTask(approval, "running", { approval: { approvalId: "approval-2", taskId: "task-2", founderId: "founder-1", approvedAt: time }, now: time });
   assert.equal(running.status, "running");
   assert.equal(running.approvalGrantedAt, time);
 });
@@ -50,4 +50,25 @@ test("failed tasks retain a failure reason and can be re-queued", () => {
   const failed = transitionTask(planning, "failed", { error: "Missing build dependency", now: time });
   assert.equal(failed.lastError, "Missing build dependency");
   assert.equal(transitionTask(failed, "queued", { now: time }).status, "queued");
+});
+
+
+test("high and critical risk cannot opt out of approval", () => {
+  const task = createTask({ id: "task-6", founderId: "founder-1", instruction: "Delete production data", riskLevel: "critical", requiresApproval: false }, time);
+  assert.equal(task.requiresApproval, true);
+  const planning = transitionTask(task, "planning", { now: time });
+  assert.throws(() => transitionTask(planning, "running", { now: time }), TaskTransitionError);
+});
+
+test("approval grants must match the exact task and Founder", () => {
+  const task = createTask({ id: "task-7", founderId: "founder-1", instruction: "Publish release", riskLevel: "high" }, time);
+  const planning = transitionTask(task, "planning", { now: time });
+  assert.throws(() => transitionTask(planning, "running", {
+    approval: { approvalId: "approval-7", taskId: "another-task", founderId: "founder-1", approvedAt: time },
+    now: time,
+  }), TaskTransitionError);
+  assert.throws(() => transitionTask(planning, "running", {
+    approval: { approvalId: "approval-7", taskId: "task-7", founderId: "another-founder", approvedAt: time },
+    now: time,
+  }), TaskTransitionError);
 });
