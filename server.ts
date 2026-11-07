@@ -147,14 +147,29 @@ async function startServer() {
   }
 
   app.get("/api/health", (_req, res) => {
-    res.json({
-      status: "ok",
-      hasKey: Boolean(process.env.GEMINI_API_KEY || process.env.API_KEY),
-      agent: "Maya · Action Engine v2.0",
-      founder: "Snehasis Sahoo",
-      venture: "SYB (Shape Your Business)",
-      personaMode: currentPersona.activeMode,
-    });
+    res.json({ status: "ok", agent: "Maya · Action Engine v2.0" });
+  });
+
+  // Default-deny REST API access. Authentication endpoints remain reachable so a real
+  // provider can be integrated; the current AuthService intentionally issues no sessions.
+  const publicApiPaths = new Set([
+    "/health",
+    "/auth/google-login",
+    "/auth/send-otp",
+    "/auth/verify-otp",
+    "/auth/session",
+    "/auth/logout",
+  ]);
+  app.use("/api", (req, res, next) => {
+    if (publicApiPaths.has(req.path)) return next();
+    const authorization = req.headers.authorization || "";
+    const token = authorization.match(/^Bearer\\s+(.+)$/i)?.[1];
+    const session = authService.validateSession(token);
+    if (!session) {
+      return res.status(401).json({ success: false, error: "Authentication required. No verified session is active." });
+    }
+    (req as any).authSession = session;
+    return next();
   });
 
   // Action Engine System State
@@ -1312,7 +1327,17 @@ Batao Founder, aaj kya banana hai?`;
   });
 
   // WebSocket Relay for ai.live.connect & ai.live.music.connect + Real-Time Watcher Stream
-  const wss = new WebSocketServer({ server, path: "/api/live-ws" });
+  const wss = new WebSocketServer({
+    server,
+    path: "/api/live-ws",
+    verifyClient: (info, done) => {
+      const cookies = info.req.headers.cookie || "";
+      const raw = cookies.split(";").map((part) => part.trim()).find((part) => part.startsWith("maya_session="));
+      const token = raw ? decodeURIComponent(raw.slice("maya_session=".length)) : undefined;
+      if (!authService.validateSession(token)) return done(false, 401, "Authentication required");
+      return done(true);
+    },
+  });
 
   wss.on("connection", (ws: WebSocket) => {
     watcherService.registerClient(ws);
