@@ -1,22 +1,22 @@
 # Maya Implementation Roadmap
 
 Branch: maya/foundation-architecture
-Status: Phase 0 foundation is being established. No Android APK or production deployment is claimed.
+Status: Foundation and first security-hardening pass are implemented. Latest CI validates install, typecheck, tests, and production build. No Android APK or production deployment is claimed.
 
 ## Phase 0 — Baseline and contracts
 - [x] Capture target cloud + local architecture.
 - [x] Define task states and verification gate in shared TypeScript primitives.
-- [ ] Run repository build and lifecycle tests in a real checkout.
-- [ ] Map every existing route and tool to authentication/policy requirements.
-- [ ] Add repository CI and branch protection after baseline is known.
+- [x] Run repository typecheck, unit tests, and production build in GitHub Actions.
+- [ ] Complete route and tool policy mapping, including WebSocket upgrade and every tool adapter.
+- [x] Add repository CI. Branch protection remains unconfigured.
 
 ## Phase 1 — Make the existing server safe
-- Replace demo authentication with verified OAuth and secure sessions.
-- Add default-deny authorization to HTTP and WebSocket endpoints.
+- Integrate verified Google OAuth/SMS identity providers, secure session issuance, HttpOnly cookie lifecycle, CSRF/origin controls, and revocation.
+- Complete route/tool authorization mapping and add security acceptance tests.
 - Replace in-memory task/memory state with durable storage and migrations.
-- Add validated task transitions, approvals, idempotency, checkpoints, and audit events.
-- Remove or quarantine simulated tools; expose unsupported capability states honestly.
-- Fix filesystem root containment and safe command execution.
+- Add a persisted, server-validated approval ledger bound to exact action arguments and targets.
+- Implement real, sandboxed execution adapters; unsupported actions currently fail closed.
+- Extend workspace containment to every future file and command adapter; unrestricted shell execution remains disabled.
 Exit gate: security tests pass; no route exposes Founder state unauthenticated; tasks survive restart; fake success paths cannot mark tasks complete.
 
 ## Phase 2 — Cloud control plane
