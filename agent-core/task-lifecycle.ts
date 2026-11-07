@@ -35,8 +35,16 @@ export interface CreateTaskInput {
   assignedDeviceId?: string;
   requiresApproval?: boolean;
 }
+export interface FounderApprovalGrant {
+  approvalId: string;
+  taskId: string;
+  founderId: string;
+  approvedAt: string;
+}
+
 export interface TransitionOptions {
-  approvalGranted?: boolean;
+  /** Must be created only after server-side Founder approval verification. */
+  approval?: FounderApprovalGrant;
   evidence?: VerificationEvidence;
   error?: string;
   now?: string;
@@ -70,7 +78,7 @@ export function createTask(input: CreateTaskInput, now = new Date().toISOString(
   if (!instruction) throw new Error("Task instruction cannot be empty.");
 
   const riskLevel = input.riskLevel ?? "low";
-  const requiresApproval = input.requiresApproval ?? (riskLevel === "high" || riskLevel === "critical");
+  const requiresApproval = riskLevel === "high" || riskLevel === "critical" || input.requiresApproval === true;
   return {
     id: input.id,
     founderId: input.founderId,
@@ -97,11 +105,17 @@ export function transitionTask(
   if (!ALLOWED_TRANSITIONS[task.status].includes(nextStatus)) {
     throw new TaskTransitionError("Invalid task transition: " + task.status + " -> " + nextStatus + ".");
   }
-  if (task.status === "awaiting_approval" && nextStatus === "running" && !options.approvalGranted) {
-    throw new TaskTransitionError("Founder approval is required before execution.");
-  }
-  if (task.requiresApproval && nextStatus === "running" && !task.approvalGrantedAt && !options.approvalGranted) {
-    throw new TaskTransitionError("This task requires an approval record before execution.");
+  if (nextStatus === "running" && (task.requiresApproval || task.status === "awaiting_approval")) {
+    const approval = options.approval;
+    if (
+      !approval ||
+      !approval.approvalId.trim() ||
+      approval.taskId !== task.id ||
+      approval.founderId !== task.founderId ||
+      !Number.isFinite(Date.parse(approval.approvedAt))
+    ) {
+      throw new TaskTransitionError("A valid Founder approval grant for this exact task is required before execution.");
+    }
   }
   if (nextStatus === "completed" && task.status !== "verifying") {
     throw new TaskTransitionError("A task can only complete from the verifying state.");
@@ -125,7 +139,7 @@ export function transitionTask(
     ...task,
     status: nextStatus,
     progress,
-    approvalGrantedAt: options.approvalGranted ? now : task.approvalGrantedAt,
+    approvalGrantedAt: options.approval ? options.approval.approvedAt : (nextStatus === "queued" ? undefined : task.approvalGrantedAt),
     verificationEvidence: evidence,
     lastError: nextStatus === "failed" ? (options.error ?? "Task failed without a recorded reason.") : undefined,
     updatedAt: now,
