@@ -298,7 +298,7 @@ const ceoOrchestrator = new CEOOrchestrator({
       JSON.stringify(availableSpecialists),
       "FOUNDER OBJECTIVE:",
       objective,
-    ].join("\\n\\n");
+    ].join("\n\n");
     const response = await ai.models.generateContent({
       model: resolveModel("gemini-3-flash-preview"),
       contents: [{ role: "user", parts: [{ text: prompt }] }],
@@ -322,7 +322,7 @@ const ceoOrchestrator = new CEOOrchestrator({
         objective,
         "SPECIALIST FINDINGS:",
         JSON.stringify(findings.map(({ agentId, role, output }) => ({ agentId, role, output }))),
-      ].join("\\n\\n") }] }],
+      ].join("\n\n") }] }],
       config: { maxOutputTokens: 2200 },
     });
     return String(response.text || "");
