@@ -93,7 +93,7 @@ This module is intentionally described as file-backed persistence, not a product
 - [x] Bind approval to a SHA-256 digest of exact tool arguments
 - [x] Record result digests, resume completed steps, and fail closed without automatic retries
 - [ ] Add transactional database persistence and cross-process execution locks
-- [ ] Add a dedicated plan review/approval/execution UI
+- [x] Add a dedicated plan review/approval/execution UI
 - [ ] Add capability-level verification contracts and recovery workflows for failed steps
 
 
