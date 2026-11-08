@@ -124,7 +124,7 @@ import { ApprovalLedger } from "./agent-core/approval-ledger.ts";
 import { TaskOrchestrator } from "./agent-core/task-orchestrator.ts";
 import { FileTaskRepository } from "./agent-core/file-task-repository.ts";
 import { TaskWorker } from "./agent-core/task-worker.ts";
-import { ConversationStore } from "./agent-core/conversation-store.ts";
+import { createConversationRepository } from "./agent-core/create-conversation-repository.ts";
 import { validateGoalPlan, type PlannerToolContract } from "./agent-core/goal-planner.ts";
 import { GoalPlanStore } from "./agent-core/goal-plan-store.ts";
 import { GoalPlanExecutor } from "./agent-core/goal-plan-executor.ts";
@@ -133,7 +133,7 @@ import { createChatToolExecutor } from "./agent-core/chat-tool-policy.ts";
 import { SpecialistRuntime, listRunnableSpecialists } from "./agent-core/specialist-runtime.ts";
 import { CEOOrchestrator } from "./agent-core/ceo-orchestrator.ts";
 
-const conversationStore = new ConversationStore();
+const conversationStore = createConversationRepository();
 const taskRepository = new FileTaskRepository();
 const taskCapabilityRegistry = new CapabilityRegistry();
 taskCapabilityRegistry.register({
@@ -573,42 +573,43 @@ async function startServer() {
 
   // Founder-scoped persistent conversation history. Every route is protected by the
   // authenticated API middleware above; conversation IDs are not authorization tokens.
-  app.get("/api/conversations", (req, res) => {
+  app.get("/api/conversations", async (req, res) => {
     const founderId = (req as any).authSession?.user?.id;
     if (!founderId) return res.status(401).json({ success: false, error: "Verified Founder session required." });
-    return res.json({ success: true, conversations: conversationStore.list(founderId).map(({ id, title, createdAt, updatedAt, messages }) => ({ id, title, createdAt, updatedAt, messageCount: messages.length })) });
+    const conversations = await conversationStore.list(founderId);
+    return res.json({ success: true, conversations: conversations.map(({ id, title, createdAt, updatedAt, messages, messageCount }) => ({ id, title, createdAt, updatedAt, messageCount: messageCount ?? messages.length })) });
   });
 
-  app.get("/api/conversations/:id", (req, res) => {
+  app.get("/api/conversations/:id", async (req, res) => {
     const founderId = (req as any).authSession?.user?.id;
     if (!founderId) return res.status(401).json({ success: false, error: "Verified Founder session required." });
-    const conversation = conversationStore.get(founderId, req.params.id);
+    const conversation = await conversationStore.get(founderId, req.params.id);
     if (!conversation) return res.status(404).json({ success: false, error: "Conversation not found." });
     return res.json({ success: true, conversation });
   });
 
-  app.delete("/api/conversations/:id", (req, res) => {
+  app.delete("/api/conversations/:id", async (req, res) => {
     const founderId = (req as any).authSession?.user?.id;
     if (!founderId) return res.status(401).json({ success: false, error: "Verified Founder session required." });
-    const deleted = conversationStore.delete(founderId, req.params.id);
+    const deleted = await conversationStore.delete(founderId, req.params.id);
     return deleted ? res.json({ success: true, deleted: req.params.id }) : res.status(404).json({ success: false, error: "Conversation not found." });
   });
 
-  function prepareConversation(req: express.Request): { founderId: string; conversationId: string; message: string; history: Array<{ role: "user" | "model"; parts: Array<{ text: string }> }> } {
+  async function prepareConversation(req: express.Request): Promise<{ founderId: string; conversationId: string; message: string; history: Array<{ role: "user" | "model"; parts: Array<{ text: string }> }> }> {
     const founderId = (req as any).authSession?.user?.id;
     const conversationId = typeof req.body?.conversationId === "string" ? req.body.conversationId.trim() : "";
     const message = typeof req.body?.message === "string" ? req.body.message : "";
     if (!founderId) throw new Error("Verified Founder session required.");
     if (!conversationId || conversationId.length > 128) throw new Error("A valid conversationId is required.");
     if (!message.trim() || message.length > 20000) throw new Error("Message must contain 1–20,000 characters.");
-    const conversation = conversationStore.getOrCreate(founderId, conversationId, message);
+    const conversation = await conversationStore.getOrCreate(founderId, conversationId, message);
     const history = conversation.messages.map((item) => ({ role: item.role, parts: [{ text: item.text }] }));
-    conversationStore.append(founderId, conversationId, "user", message);
+    await conversationStore.append(founderId, conversationId, "user", message);
     return { founderId, conversationId, message, history };
   }
 
-  function persistConversationReply(founderId: string, conversationId: string, reply: string): void {
-    if (reply.trim()) conversationStore.append(founderId, conversationId, "model", reply.slice(0, 20000));
+  async function persistConversationReply(founderId: string, conversationId: string, reply: string): Promise<void> {
+    if (reply.trim()) await conversationStore.append(founderId, conversationId, "model", reply.slice(0, 20000));
   }
 
   // Action Engine System State
@@ -1166,12 +1167,12 @@ You act as an autonomous founder-grade CTO, lead engineer, and QA engineer.
   app.post("/api/chat-message", async (req, res): Promise<any> => {
     try {
       const { model, config: incomingConfig, message, msgConfig } = req.body || {};
-      const conversationContext = prepareConversation(req);
+      const conversationContext = await prepareConversation(req);
 
       // Check if this message is a persona control command
       const cmdResponse = handlePersonaCommands(String(message || ""));
       if (cmdResponse) {
-        persistConversationReply(conversationContext.founderId, conversationContext.conversationId, cmdResponse);
+        await persistConversationReply(conversationContext.founderId, conversationContext.conversationId, cmdResponse);
         return res.json({
           text: cmdResponse,
           candidates: [{ content: { parts: [{ text: cmdResponse }] } }],
@@ -1217,7 +1218,7 @@ MULTILINGUAL & RAPID REACTION:
         } else {
           fallbackText = `Message received: "${message}". This offline fallback does not execute tasks or tools. Configure a verified AI provider and authenticated execution runtime before relying on agent actions.`;
         }
-        persistConversationReply(conversationContext.founderId, conversationContext.conversationId, fallbackText);
+        await persistConversationReply(conversationContext.founderId, conversationContext.conversationId, fallbackText);
         return res.json({
           text: fallbackText,
           candidates: [{ content: { parts: [{ text: fallbackText }] } }],
@@ -1228,7 +1229,7 @@ MULTILINGUAL & RAPID REACTION:
       const chat = ai.chats.create({ model: resolveModel(model), config, history: conversationContext.history });
       const response = await runFunctionCallingTurn(chat, message, executeChatTool);
       const serialized = serializeGenerateContentResponse(response);
-      persistConversationReply(conversationContext.founderId, conversationContext.conversationId, String(serialized.text || ""));
+      await persistConversationReply(conversationContext.founderId, conversationContext.conversationId, String(serialized.text || ""));
       return res.json(serialized);
     } catch (error: any) {
       console.error("[Backend] /api/chat-message error:", error);
@@ -1239,12 +1240,12 @@ MULTILINGUAL & RAPID REACTION:
   app.post("/api/chat-stream", async (req, res): Promise<any> => {
     try {
       const { model, config: incomingConfig, message, msgConfig } = req.body || {};
-      const conversationContext = prepareConversation(req);
+      const conversationContext = await prepareConversation(req);
 
       // Check if this message is a persona control command
       const cmdResponse = handlePersonaCommands(String(message || ""));
       if (cmdResponse) {
-        persistConversationReply(conversationContext.founderId, conversationContext.conversationId, cmdResponse);
+        await persistConversationReply(conversationContext.founderId, conversationContext.conversationId, cmdResponse);
         res.setHeader("Content-Type", "application/x-ndjson");
         res.setHeader("Cache-Control", "no-cache");
         res.setHeader("Connection", "keep-alive");
@@ -1293,7 +1294,7 @@ MULTILINGUAL & RAPID REACTION:
           res.write(JSON.stringify({ text: chunk, candidates: [{ content: { parts: [{ text: chunk }] } }] }) + "\n");
           await new Promise((r) => setTimeout(r, 30));
         }
-        persistConversationReply(conversationContext.founderId, conversationContext.conversationId, fallbackText);
+        await persistConversationReply(conversationContext.founderId, conversationContext.conversationId, fallbackText);
         res.end();
         return;
       }
@@ -1302,7 +1303,7 @@ MULTILINGUAL & RAPID REACTION:
       const chat = ai.chats.create({ model: resolveModel(model), config, history: conversationContext.history });
       const response = await runFunctionCallingTurn(chat, message, executeChatTool);
       const serialized = serializeGenerateContentResponse(response);
-      persistConversationReply(conversationContext.founderId, conversationContext.conversationId, String(serialized.text || ""));
+      await persistConversationReply(conversationContext.founderId, conversationContext.conversationId, String(serialized.text || ""));
       res.setHeader("Content-Type", "application/x-ndjson");
       res.setHeader("Cache-Control", "no-cache");
       res.setHeader("Connection", "keep-alive");
