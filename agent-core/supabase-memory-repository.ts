@@ -5,7 +5,7 @@ type FetchLike = (input: string | URL, init?: RequestInit) => Promise<Response>;
 export type MemoryEmbeddingProvider = (text: string, purpose: "document" | "query") => Promise<number[] | undefined>;
 interface MemoryRow {
   id: string; founder_id: string; category: MemoryEntry["category"]; title: string; content: string;
-  created_at: string; updated_at: string; embedding?: number[] | null;
+  created_at: string; updated_at: string; embedding?: number[] | null; feedback_score?: number; feedback_count?: number;
 }
 const CATEGORIES = new Set(["founder_profile", "project", "design", "technical", "process", "lesson", "assumption"]);
 
@@ -20,7 +20,7 @@ export class SupabaseMemoryRepository implements MemoryRepository {
   }
   async list(founderId: string): Promise<MemoryEntry[]> {
     await this.ensureLegacyImport(founderId);
-    const query = new URLSearchParams({ select: "id,founder_id,category,title,content,created_at,updated_at", founder_id: `eq.${founderId}`, order: "updated_at.desc", limit: "500" });
+    const query = new URLSearchParams({ select: "id,founder_id,category,title,content,created_at,updated_at,feedback_score,feedback_count", founder_id: `eq.${founderId}`, order: "updated_at.desc", limit: "500" });
     const rows = await this.request<MemoryRow[]>(`maya_memories?${query}`);
     return rows.map(row => this.fromRow(row));
   }
@@ -44,6 +44,18 @@ export class SupabaseMemoryRepository implements MemoryRepository {
     const query = new URLSearchParams({ id: `eq.${id}`, founder_id: `eq.${founderId}`, select: "id" });
     const rows = await this.request<Array<{ id: string }>>(`maya_memories?${query}`, { method: "DELETE", headers: { Prefer: "return=representation" } });
     return Array.isArray(rows) && rows.length > 0;
+  }
+  async recordFeedback(founderId: string, memoryId: string, rating: "helpful" | "not_helpful"): Promise<MemoryEntry> {
+    await this.ensureLegacyImport(founderId);
+    if (rating !== "helpful" && rating !== "not_helpful") throw new Error("Memory feedback rating is invalid.");
+    const rows = await this.request<MemoryRow[]>("rpc/maya_record_memory_feedback", {
+      method: "POST",
+      body: JSON.stringify({ p_founder_id: founderId, p_memory_id: memoryId, p_rating: rating === "helpful" ? 1 : -1 }),
+    });
+    if (!Array.isArray(rows) || rows.length !== 1 || rows[0].founder_id !== founderId || rows[0].id !== memoryId) {
+      throw new Error("Memory feedback was not recorded for this Founder-owned note.");
+    }
+    return this.fromRow(rows[0]);
   }
   async search(founderId: string, query: string, limit = 20): Promise<MemoryEntry[]> {
     const needle = query.trim().toLocaleLowerCase();
@@ -74,7 +86,8 @@ export class SupabaseMemoryRepository implements MemoryRepository {
   private async keywordSearch(founderId: string, needle: string, limit: number): Promise<MemoryEntry[]> {
     const memories = await this.list(founderId);
     return memories.filter(item => item.title.toLocaleLowerCase().includes(needle) ||
-      item.content.toLocaleLowerCase().includes(needle) || item.category.includes(needle)).slice(0, limit);
+      item.content.toLocaleLowerCase().includes(needle) || item.category.includes(needle))
+      .sort((a, b) => (b.feedbackScore || 0) - (a.feedbackScore || 0)).slice(0, limit);
   }
   private async ensureLegacyImport(founderId: string): Promise<void> {
     if (this.initializedFounders.has(founderId)) return;
@@ -88,7 +101,7 @@ export class SupabaseMemoryRepository implements MemoryRepository {
     this.initializedFounders.add(founderId);
   }
   private fromRow(row: MemoryRow): MemoryEntry {
-    return { id: row.id, category: row.category, title: row.title, content: row.content, createdAt: row.created_at, updatedAt: row.updated_at };
+    return { id: row.id, category: row.category, title: row.title, content: row.content, createdAt: row.created_at, updatedAt: row.updated_at, feedbackScore: Number(row.feedback_score) || 0, feedbackCount: Number(row.feedback_count) || 0 };
   }
   private validate(memory: MemoryEntry): void {
     if (!memory.id || memory.id.length > 128 || !CATEGORIES.has(memory.category)) throw new Error("Memory identity or category is invalid.");
