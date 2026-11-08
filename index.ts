@@ -259,23 +259,17 @@ Batao Founder, aaj kya build karna hai? Chaaho toh pehle Discovery Protocol se 5
 
   private async restoreSession() {
     try {
-      const storedToken = localStorage.getItem('maya_session_token');
-      if (storedToken) {
-        const res = await fetch('/api/auth/session', {
-          headers: { Authorization: `Bearer ${storedToken}` },
-        });
-        if (res.ok) {
-          const data = await res.json();
-          if (data.success && data.session) {
-            this.sessionToken = data.session.token;
-            this.currentUser = data.session.user;
-            this.isAuthenticated = true;
-            return;
-          }
+      const res = await fetch('/api/auth/session', { credentials: 'same-origin' });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success && data.session) {
+          this.sessionToken = null;
+          this.currentUser = data.session.user;
+          this.isAuthenticated = true;
+          return;
         }
       }
     } catch (_e) {}
-    // If no valid stored session, show lock screen
     this.isAuthenticated = false;
   }
 
@@ -297,7 +291,7 @@ Batao Founder, aaj kya build karna hai? Chaaho toh pehle Discovery Protocol se 5
       }
       this.sessionToken = data.session.token;
       this.currentUser = data.session.user;
-      localStorage.setItem('maya_session_token', data.session.token);
+
       this.isAuthenticated = true;
       this.authSuccessNotice = 'Welcome back Founder Snehasis Sahoo! Authenticated via Google Account.';
     } catch (err: any) {
@@ -355,7 +349,7 @@ Batao Founder, aaj kya build karna hai? Chaaho toh pehle Discovery Protocol se 5
       }
       this.sessionToken = data.session.token;
       this.currentUser = data.session.user;
-      localStorage.setItem('maya_session_token', data.session.token);
+
       this.isAuthenticated = true;
     } catch (err: any) {
       this.authError = err.message || 'Verification error';
@@ -432,15 +426,8 @@ Batao Founder, aaj kya build karna hai? Chaaho toh pehle Discovery Protocol se 5
 
   private async handleLogout() {
     try {
-      if (this.sessionToken) {
-        await fetch('/api/auth/logout', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ token: this.sessionToken }),
-        });
-      }
+      await fetch('/api/auth/logout', { method: 'POST', credentials: 'same-origin' });
     } catch (_e) {}
-    localStorage.removeItem('maya_session_token');
     this.sessionToken = null;
     this.currentUser = null;
     this.isAuthenticated = false;
