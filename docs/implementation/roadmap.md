@@ -161,3 +161,14 @@ This module is intentionally described as file-backed persistence, not a product
 - [ ] Add optimistic concurrency/version checks and cross-process plan execution locks
 - [ ] Migrate task queue, memory notes, approval ledger and audit logs to database storage
 
+
+
+## Supabase task queue persistence — development branch
+
+- [x] Founder-scoped task repository interface and Supabase PostgREST adapter
+- [x] Server-side service-role authentication; no database key is exposed to the browser
+- [x] Atomic owner-bound task save RPC and immutable task-owner checks
+- [x] Founder-filtered task reads/lists and adapter tests
+- [ ] Durable approvals and audit event storage
+- [ ] Distributed task leases, worker heartbeats and multi-instance idempotency
+- [ ] Live Supabase migration/application and end-to-end verification in the user's project
