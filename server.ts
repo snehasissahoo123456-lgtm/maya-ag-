@@ -152,6 +152,7 @@ import { createConversationRepository } from "./agent-core/create-conversation-r
 import { validateGoalPlan, type PlannerToolContract } from "./agent-core/goal-planner.ts";
 import { createGoalPlanRepository } from "./agent-core/create-goal-plan-repository.ts";
 import { GoalPlanExecutor } from "./agent-core/goal-plan-executor.ts";
+import { GoalPlanWorker } from "./agent-core/goal-plan-worker.ts";
 import { retrieveRelevantMemories, formatMemoryContext } from "./agent-core/memory-retrieval.ts";
 import { createChatToolExecutor } from "./agent-core/chat-tool-policy.ts";
 import { SpecialistRuntime, listRunnableSpecialists } from "./agent-core/specialist-runtime.ts";
@@ -297,6 +298,15 @@ async function executeAgentTool(name: string, args: Record<string, unknown>, fou
 
 const goalPlanStore = createGoalPlanRepository();
 const goalPlanExecutor = new GoalPlanExecutor(goalPlanStore, executeAgentTool);
+const goalPlanWorkerEnabled = process.env.MAYA_PLAN_WORKER_ENABLED === "true";
+if (goalPlanWorkerEnabled && (process.env.MAYA_STORAGE_DRIVER || "file").toLowerCase() !== "file") {
+  throw new Error("MAYA_PLAN_WORKER_ENABLED requires single-instance file storage until distributed goal-plan leases are implemented.");
+}
+const goalPlanWorker = new GoalPlanWorker(
+  goalPlanStore, goalPlanExecutor, "founder-primary",
+  Number(process.env.MAYA_PLAN_WORKER_POLL_MS) || 3000,
+  Number(process.env.MAYA_PLAN_WORKER_MAX_PLANS_PER_CYCLE) || 10,
+);
 function createFounderChatToolExecutor(founderId: string) {
   return createChatToolExecutor((name, args) => executeAgentTool(name, args, founderId));
 }
@@ -430,7 +440,7 @@ async function startServer() {
   }
 
   app.get("/api/health", (_req, res) => {
-    res.json({ status: "ok", agent: "Maya · Action Engine v2.0", taskWorker: taskWorker.getStatus() });
+    res.json({ status: "ok", agent: "Maya · Action Engine v2.0", taskWorker: taskWorker.getStatus(), goalPlanWorker: goalPlanWorker.getStatus() });
   });
 
   // Default-deny REST API access. Only Founder password sign-in, session validation,
@@ -580,6 +590,18 @@ async function startServer() {
       return res.json({ success: true, plan });
     } catch (error) {
       return res.status(400).json({ success: false, error: error instanceof Error ? error.message : String(error) });
+    }
+  });
+
+  app.post("/api/agent/plans/:id/start", async (req, res): Promise<any> => {
+    const founderId = (req as any).authSession?.user?.id;
+    if (!founderId) return res.status(401).json({ success: false, error: "Verified Founder session required." });
+    if (!goalPlanWorkerEnabled) return res.status(503).json({ success: false, error: "Background goal-plan worker is disabled. Set MAYA_PLAN_WORKER_ENABLED=true on a single-instance file-storage server." });
+    try {
+      const plan = await goalPlanExecutor.start(founderId, req.params.id);
+      return res.status(202).json({ success: true, plan, worker: goalPlanWorker.getStatus() });
+    } catch (error) {
+      return res.status(400).json({ success: false, error: error instanceof Error ? error.message : "Unable to start plan." });
     }
   });
 
@@ -1907,12 +1929,14 @@ MULTILINGUAL & RAPID REACTION:
     });
   }
 
-  server.on("close", () => { void taskWorker.stop(); });
+  server.on("close", () => { void taskWorker.stop(); void goalPlanWorker.stop(); });
   server.on("close", () => { deviceWss.close(); wss.close(); });
   server.listen(PORT, "0.0.0.0", () => {
     if (taskWorkerEnabled) taskWorker.start();
+    if (goalPlanWorkerEnabled) goalPlanWorker.start();
     console.log(`[Backend] Server running on http://localhost:${PORT}`);
     console.log(`[Task Worker] ${taskWorkerEnabled ? "enabled (read-only allowlist)" : "disabled; set MAYA_TASK_WORKER_ENABLED=true to opt in"}`);
+    console.log(`[Goal Plan Worker] ${goalPlanWorkerEnabled ? "enabled (single-instance; Founder-approved plans only)" : "disabled; set MAYA_PLAN_WORKER_ENABLED=true to opt in"}`);
   });
 }
 
