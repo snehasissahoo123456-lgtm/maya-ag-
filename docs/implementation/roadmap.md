@@ -96,3 +96,15 @@ This module is intentionally described as file-backed persistence, not a product
 - [ ] Add a dedicated plan review/approval/execution UI
 - [ ] Add capability-level verification contracts and recovery workflows for failed steps
 
+
+
+## Memory retrieval and chat mutation policy — development branch
+
+- [x] Retrieve relevant saved Founder notes for each chat turn with bounded keyword ranking
+- [x] Delimit retrieved memory as untrusted reference data in the model context
+- [x] Block memory writes, task queue writes, and test commands from direct chat tool calls
+- [x] Route state-changing operations through persisted plans and exact-action Founder approval
+- [ ] Add embeddings/vector search and memory retrieval evaluation
+- [ ] Add explicit memory review, correction, expiry and deletion UI
+- [ ] Add transactional database storage and encryption/key management
+
