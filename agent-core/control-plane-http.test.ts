@@ -74,9 +74,20 @@ test("real HTTP control-plane routes enforce Founder auth and execute only the r
 
     const planBeforeAuth = await fetch(baseUrl + "/api/agent/plan", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ objective: "Inspect the repository" }) });
     assert.equal(planBeforeAuth.status, 401, "Goal planning must require Founder authentication");
+    const specialistsBeforeAuth = await fetch(baseUrl + "/api/agent/specialists");
+    assert.equal(specialistsBeforeAuth.status, 401, "Specialist registry must require Founder authentication");
+    const specialistRunBeforeAuth = await fetch(baseUrl + "/api/agent/specialists/run", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ agentId: "research", task: "Review this project" }) });
+    assert.equal(specialistRunBeforeAuth.status, 401, "Specialist execution must require Founder authentication");
 
     const unavailablePlan = await fetch(baseUrl + "/api/agent/plan", { method: "POST", headers: { "content-type": "application/json", cookie }, body: JSON.stringify({ objective: "Inspect the repository" }) });
     assert.equal(unavailablePlan.status, 503, "Planner must report missing Gemini configuration instead of fabricating a plan");
+
+    const specialists = await fetch(baseUrl + "/api/agent/specialists", { headers: { cookie } });
+    assert.equal(specialists.status, 200);
+    const specialistsBody = await specialists.json() as any;
+    assert.ok(specialistsBody.specialists.some((agent: any) => agent.id === "research"));
+    const unavailableSpecialist = await fetch(baseUrl + "/api/agent/specialists/run", { method: "POST", headers: { "content-type": "application/json", cookie }, body: JSON.stringify({ agentId: "research", task: "Review this project" }) });
+    assert.equal(unavailableSpecialist.status, 503, "Specialist execution must report missing Gemini configuration");
 
     const emptyPlans = await fetch(baseUrl + "/api/agent/plans", { headers: { cookie } });
     assert.equal(emptyPlans.status, 200);
