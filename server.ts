@@ -9,7 +9,7 @@ import fs from "fs";
 import { execSync, spawn } from "child_process";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI } from "@google/genai";
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { WebSocketServer, WebSocket } from "ws";
 
 const MODEL_UPGRADES: Record<string, string> = {
@@ -119,6 +119,55 @@ import { AuthService } from "./authService.ts";
 import { PlatformService } from "./platformService.ts";
 import { MayaPersistentStore } from "./agent-core/persistent-store.ts";
 import { runFunctionCallingTurn } from "./agent-core/function-call-loop.ts";
+import { CapabilityRegistry } from "./agent-core/capability-registry.ts";
+import { ApprovalLedger } from "./agent-core/approval-ledger.ts";
+import { TaskOrchestrator } from "./agent-core/task-orchestrator.ts";
+import { FileTaskRepository } from "./agent-core/file-task-repository.ts";
+
+const taskRepository = new FileTaskRepository();
+const taskCapabilityRegistry = new CapabilityRegistry();
+taskCapabilityRegistry.register({
+  name: "workspace.read_file",
+  description: "Read one non-secret text file from the enrolled workspace.",
+  risk: "low",
+  allowedRoles: ["founder"],
+  requiredScopes: ["workspace:read"],
+  arguments: { path: { type: "string", required: true, maxLength: 1024 } },
+  timeoutMs: 10_000,
+  requiresApproval: false,
+  verification: "Read the file and record its SHA-256 digest as execution evidence.",
+});
+// Only this read-only capability is enabled. Do not register write, shell, deploy,
+// account, payment, or device capabilities until durable approvals and adapters exist.
+const taskOrchestrator = new TaskOrchestrator(
+  taskRepository,
+  taskCapabilityRegistry,
+  new ApprovalLedger(),
+  {
+    run: async ({ capability, args, signal }) => {
+      if (capability !== "workspace.read_file") throw new Error("Capability runner is not enabled for this action.");
+      if (signal.aborted) throw new Error("Task execution was cancelled.");
+      const file = resolveWorkspacePath(args.path);
+      if (isSensitiveWorkspacePath(file)) throw new Error("Reading secrets and credential files is blocked.");
+      const stat = fs.statSync(file);
+      if (!stat.isFile()) throw new Error("Only regular text files can be read.");
+      if (stat.size > 50_000) throw new Error("File exceeds the 50 KB task read limit.");
+      const content = fs.readFileSync(file, "utf8");
+      if (signal.aborted) throw new Error("Task execution was cancelled.");
+      const digest = createHash("sha256").update(content, "utf8").digest("hex");
+      return {
+        result: { path: path.relative(process.cwd(), file), content, bytes: Buffer.byteLength(content, "utf8"), sha256: digest },
+        evidence: {
+          kind: "workspace-file-sha256",
+          description: "Read the requested workspace file and calculated its SHA-256 digest.",
+          reference: "sha256:" + digest,
+          observedAt: new Date().toISOString(),
+        },
+      };
+    },
+  },
+);
+
 
 const MAYA_FUNCTION_DECLARATIONS = [
   { name: "list_dir", description: "List non-secret files and folders inside Maya's enrolled server workspace.", parametersJsonSchema: { type: "object", properties: { path: { type: "string" } } } },
@@ -575,6 +624,75 @@ async function startServer() {
     }
     persistFounderState();
     return res.json({ success: true, task });
+  });
+
+
+  // Persistent task control plane. The current adapter is single-instance and exposes
+  // one read-only capability; broader execution remains disabled until its controls exist.
+  app.get("/api/control-plane/tasks", async (req, res): Promise<any> => {
+    const session = (req as any).authSession;
+    const founderId = session?.user?.id;
+    if (!founderId) return res.status(401).json({ success: false, error: "Verified Founder session required." });
+    const tasks = await taskRepository.list(founderId);
+    return res.json({ success: true, tasks });
+  });
+
+  app.post("/api/control-plane/tasks", async (req, res): Promise<any> => {
+    const session = (req as any).authSession;
+    const founderId = session?.user?.id;
+    if (!founderId) return res.status(401).json({ success: false, error: "Verified Founder session required." });
+    const instruction = typeof req.body?.instruction === "string" ? req.body.instruction.trim() : "";
+    const filePath = typeof req.body?.path === "string" ? req.body.path : "";
+    if (!instruction || instruction.length > 1000) return res.status(400).json({ success: false, error: "Instruction must contain 1–1000 characters." });
+    if (!filePath || filePath.length > 1024) return res.status(400).json({ success: false, error: "A workspace-relative file path of 1–1024 characters is required." });
+    try {
+      const actor = { id: founderId, founderId, role: "founder" as const, scopes: ["workspace:read"] };
+      const envelope = await taskOrchestrator.enqueue({
+        id: "task-" + randomTaskId(),
+        founderId,
+        instruction,
+        capability: "workspace.read_file",
+        args: { path: filePath },
+        actor,
+      });
+      currentAuditLogs.unshift({
+        id: "control-task-create-" + randomTaskId(), toolName: "control_plane_task_create",
+        params: { taskId: envelope.task.id, capability: envelope.capability }, status: "success",
+        result: { status: envelope.task.status }, timestamp: new Date().toISOString(), durationMs: 0,
+      });
+      currentAuditLogs = currentAuditLogs.slice(0, 500);
+      return res.status(201).json({ success: true, task: envelope.task });
+    } catch (error) {
+      return res.status(400).json({ success: false, error: error instanceof Error ? error.message : String(error) });
+    }
+  });
+
+  app.post("/api/control-plane/tasks/:id/execute", async (req, res): Promise<any> => {
+    const session = (req as any).authSession;
+    const founderId = session?.user?.id;
+    if (!founderId) return res.status(401).json({ success: false, error: "Verified Founder session required." });
+    try {
+      const actor = { id: founderId, founderId, role: "founder" as const, scopes: ["workspace:read"] };
+      const output = await taskOrchestrator.execute(req.params.id, actor);
+      currentAuditLogs.unshift({
+        id: "control-task-run-" + randomTaskId(), toolName: "control_plane_task_execute",
+        params: { taskId: req.params.id }, status: "success",
+        result: { status: output.task.status, evidence: output.task.verificationEvidence },
+        timestamp: new Date().toISOString(), durationMs: 0,
+      });
+      currentAuditLogs = currentAuditLogs.slice(0, 500);
+      return res.json({ success: true, task: output.task, result: output.result });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const conflict = /already in progress|not executable/i.test(message);
+      currentAuditLogs.unshift({
+        id: "control-task-error-" + randomTaskId(), toolName: "control_plane_task_execute",
+        params: { taskId: req.params.id }, status: "failed",
+        result: { error: message }, timestamp: new Date().toISOString(), durationMs: 0,
+      });
+      currentAuditLogs = currentAuditLogs.slice(0, 500);
+      return res.status(conflict ? 409 : 400).json({ success: false, error: message });
+    }
   });
 
   // Action Engine Memory Management
