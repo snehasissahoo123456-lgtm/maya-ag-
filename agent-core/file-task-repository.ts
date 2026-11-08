@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { randomBytes } from "node:crypto";
 import { transitionTask, type MayaTask } from "./task-lifecycle.ts";
 import type { TaskEnvelope, TaskRepository } from "./task-orchestrator.ts";
 
@@ -47,8 +48,15 @@ export class FileTaskRepository implements TaskRepository {
       if (existing && existing.task.founderId !== envelope.task.founderId) {
         throw new Error("Task id is already owned by another Founder.");
       }
+      const previous = this.rows.get(envelope.task.id);
       this.rows.set(envelope.task.id, structuredClone(envelope));
-      this.persist();
+      try {
+        this.persist();
+      } catch (error) {
+        if (previous) this.rows.set(envelope.task.id, previous);
+        else this.rows.delete(envelope.task.id);
+        throw error;
+      }
     });
   }
 
@@ -99,7 +107,7 @@ export class FileTaskRepository implements TaskRepository {
       updatedAt: new Date().toISOString(),
       tasks: [...this.rows.values()],
     };
-    const tempPath = path.join(path.dirname(this.filePath), `.task-control-plane.${process.pid}.${Date.now()}.${Math.random().toString(16).slice(2)}.tmp`);
+    const tempPath = path.join(path.dirname(this.filePath), `.task-control-plane.${process.pid}.${randomBytes(8).toString("hex")}.tmp`);
     fs.writeFileSync(tempPath, JSON.stringify(state, null, 2), { encoding: "utf8", mode: 0o600, flag: "wx" });
     try {
       fs.renameSync(tempPath, this.filePath);
