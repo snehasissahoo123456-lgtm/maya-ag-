@@ -86,6 +86,13 @@ test("real HTTP control-plane routes enforce Founder auth and execute only the r
     assert.equal(stateResponse.status, 200);
     const stateBody = await stateResponse.json() as any;
     assert.ok(stateBody.memories.some((item: any) => item.id === savedMemoryBody.memory.id));
+    const memoryFeedback = await fetch(baseUrl + `/api/action-engine/memory/${savedMemoryBody.memory.id}/feedback`, {
+      method: "POST", headers: { "content-type": "application/json", cookie }, body: JSON.stringify({ rating: "helpful" }),
+    });
+    assert.equal(memoryFeedback.status, 200);
+    const memoryFeedbackBody = await memoryFeedback.json() as any;
+    assert.equal(memoryFeedbackBody.feedbackScore, 1);
+    assert.equal(memoryFeedbackBody.feedbackCount, 1);
     const deletedMemory = await fetch(baseUrl + `/api/action-engine/memory/${savedMemoryBody.memory.id}`, { method: "DELETE", headers: { cookie } });
     assert.equal(deletedMemory.status, 200);
 
