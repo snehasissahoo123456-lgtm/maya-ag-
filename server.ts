@@ -1304,7 +1304,8 @@ MULTILINGUAL & RAPID REACTION:
         return;
       }
 
-      const memoryContext = formatMemoryContext(retrieveRelevantMemories(String(message || ""), currentMemories, { limit: 5 }));
+      const memories = await getFounderMemories(conversationContext.founderId);
+      const memoryContext = formatMemoryContext(retrieveRelevantMemories(String(message || ""), memories, { limit: 5 }));
       const activeModeInfo = PERSONA_MODES.find((m) => m.id === currentPersona.activeMode) || PERSONA_MODES[0];
       const dynamicInstruction = `${ACTION_ENGINE_SYSTEM_PROMPT}
 
