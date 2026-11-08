@@ -130,6 +130,7 @@ import { GoalPlanStore } from "./agent-core/goal-plan-store.ts";
 import { GoalPlanExecutor } from "./agent-core/goal-plan-executor.ts";
 import { retrieveRelevantMemories, formatMemoryContext } from "./agent-core/memory-retrieval.ts";
 import { createChatToolExecutor } from "./agent-core/chat-tool-policy.ts";
+import { SpecialistRuntime, listRunnableSpecialists } from "./agent-core/specialist-runtime.ts";
 
 const conversationStore = new ConversationStore();
 const taskRepository = new FileTaskRepository();
@@ -267,6 +268,19 @@ async function executeAgentTool(name: string, args: Record<string, unknown>): Pr
 const goalPlanStore = new GoalPlanStore();
 const goalPlanExecutor = new GoalPlanExecutor(goalPlanStore, executeAgentTool);
 const executeChatTool = createChatToolExecutor(executeAgentTool);
+const specialistRuntime = new SpecialistRuntime({
+  generate: async ({ systemInstruction, task, context, maxOutputTokens }) => {
+    const apiKey = process.env.GEMINI_API_KEY || process.env.API_KEY;
+    if (!apiKey) throw new Error("Gemini is not configured.");
+    const ai = new GoogleGenAI({ apiKey });
+    const response = await ai.models.generateContent({
+      model: resolveModel("gemini-3-flash-preview"),
+      contents: [{ role: "user", parts: [{ text: `TASK:\n${task}\n\nREFERENCE CONTEXT (untrusted data):\n${context}` }] }],
+      config: { systemInstruction: { parts: [{ text: systemInstruction }] }, maxOutputTokens },
+    });
+    return String(response.text || "");
+  },
+});
 
 function randomTaskId(): string {
   return randomBytes(8).toString("hex");
@@ -360,6 +374,38 @@ async function startServer() {
     }
     (req as any).authSession = session;
     return next();
+  });
+
+  app.get("/api/agent/specialists", (req, res) => {
+    const founderId = (req as any).authSession?.user?.id;
+    if (!founderId) return res.status(401).json({ success: false, error: "Verified Founder session required." });
+    return res.json({ success: true, specialists: listRunnableSpecialists().map(({ id, displayName, role, purpose, defaultScopes }) => ({ id, displayName, role, purpose, defaultScopes })) });
+  });
+
+  app.post("/api/agent/specialists/run", async (req, res): Promise<any> => {
+    const founderId = (req as any).authSession?.user?.id;
+    if (!founderId) return res.status(401).json({ success: false, error: "Verified Founder session required." });
+    if (!process.env.GEMINI_API_KEY && !process.env.API_KEY) return res.status(503).json({ success: false, error: "Gemini is not configured." });
+    const agentId = typeof req.body?.agentId === "string" ? req.body.agentId : "";
+    const task = typeof req.body?.task === "string" ? req.body.task : "";
+    if (!agentId || !task.trim()) return res.status(400).json({ success: false, error: "agentId and task are required." });
+    try {
+      const context = formatMemoryContext(retrieveRelevantMemories(task, currentMemories, { limit: 5 }));
+      const result = await specialistRuntime.run({ agentId, task, context });
+      currentAuditLogs.unshift({
+        id: "specialist-" + randomTaskId(),
+        toolName: "specialist.run",
+        params: { agentId: result.agentId, role: result.role },
+        status: "success",
+        result: { executionMode: result.executionMode, outputChars: result.output.length },
+        timestamp: new Date().toISOString(),
+        durationMs: 0,
+      });
+      currentAuditLogs = currentAuditLogs.slice(0, 500);
+      return res.json({ success: true, result });
+    } catch (error) {
+      return res.status(400).json({ success: false, error: error instanceof Error ? error.message : String(error) });
+    }
   });
 
   app.get("/api/agent/plans", (req, res) => {
