@@ -1517,8 +1517,7 @@ Status: Ready to build upon Founder "go ahead".`;
                 @click="${() => (this.activeTab = 'tests')}"
               >
                 <span class="material-symbols-outlined text-base ${this.activeTab === 'tests' ? 'text-emerald-400' : 'text-slate-400'}">verified</span>
-                <span class="flex-1">Test Suite (28)</span>
-                <span class="text-[10px] font-mono px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 font-bold">100%</span>
+                <span class="flex-1">Diagnostics</span>
               </button>
 
               <button
@@ -1530,8 +1529,7 @@ Status: Ready to build upon Founder "go ahead".`;
                 @click="${() => (this.activeTab = 'platforms')}"
               >
                 <span class="material-symbols-outlined text-base ${this.activeTab === 'platforms' ? 'text-cyan-400' : 'text-slate-400'}">hub</span>
-                <span class="flex-1">Connected Platforms</span>
-                <span class="text-[10px] font-mono px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300">11</span>
+                <span class="flex-1">Platform Registry</span>
               </button>
 
               <button
@@ -1556,7 +1554,7 @@ Status: Ready to build upon Founder "go ahead".`;
                 @click="${() => (this.activeTab = 'tools')}"
               >
                 <span class="material-symbols-outlined text-base ${this.activeTab === 'tools' ? 'text-amber-400' : 'text-slate-400'}">construction</span>
-                <span class="flex-1">Master Tools (21)</span>
+                <span class="flex-1">Tool Catalog</span>
               </button>
 
               <button
@@ -1641,10 +1639,10 @@ Status: Ready to build upon Founder "go ahead".`;
             <!-- Port 3000 Local Bridge Status -->
             <div class="flex items-center justify-between text-[11px] text-slate-400 px-1 font-mono">
               <span class="flex items-center gap-1.5">
-                <span class="w-2 h-2 rounded-full bg-emerald-400"></span>
-                Bridge :3000
+                <span class="w-2 h-2 rounded-full ${this.dashboardApiStatus === "online" ? "bg-emerald-400" : this.dashboardApiStatus === "offline" ? "bg-rose-400" : "bg-amber-400"}"></span>
+                API ${this.dashboardApiStatus}
               </span>
-              <span class="text-slate-500">Autonomous</span>
+              <span class="text-slate-500">Prototype</span>
             </div>
           </div>
         </aside>
@@ -1670,7 +1668,7 @@ Status: Ready to build upon Founder "go ahead".`;
                 <div>
                   <h2 class="text-xs font-bold text-white flex items-center gap-2">
                     Maya
-                    <span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+                    <span class="w-1.5 h-1.5 rounded-full ${this.dashboardApiStatus === "online" ? "bg-emerald-400" : this.dashboardApiStatus === "offline" ? "bg-rose-400" : "bg-amber-400"}"></span>
                     <span class="text-[11px] text-slate-400 font-normal">
                       ${this.activeTab === 'dashboard' ? 'Founder overview · live server and task data' : this.activeTab === 'console' ? 'Text & voice workspace · Hindi · Odia · English' : `Workspace: ${this.activeTab.toUpperCase()}`}
                     </span>
@@ -2650,10 +2648,10 @@ Status: Ready to build upon Founder "go ahead".`;
           <div>
             <h2 class="text-xl font-bold text-white flex items-center gap-2">
               <span class="material-symbols-outlined text-purple-400">schedule</span>
-              24/7 Persistent Task Queue
+              Task Workspace
             </h2>
             <p class="text-xs text-slate-400 mt-1">
-              Automated triggers: Cron, System Startup, File Change, Network Return, On Demand.
+              Existing cockpit task records and manual actions. A background scheduler and worker are not enabled.
             </p>
           </div>
           <button
