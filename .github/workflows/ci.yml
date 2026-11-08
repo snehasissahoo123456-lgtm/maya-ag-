@@ -9,6 +9,7 @@ on:
       - maya/task-worker-foundation
       - maya/persistent-conversations
       - maya/goal-planner
+      - maya/memory-retrieval
   pull_request:
     branches:
       - main
