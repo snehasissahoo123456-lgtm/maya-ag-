@@ -9,6 +9,7 @@ import fs from "fs";
 import { execSync, spawn } from "child_process";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI } from "@google/genai";
+import { randomBytes } from "node:crypto";
 import { WebSocketServer, WebSocket } from "ws";
 
 const MODEL_UPGRADES: Record<string, string> = {
@@ -202,7 +203,7 @@ async function executeAgentTool(name: string, args: Record<string, unknown>): Pr
 }
 
 function randomTaskId(): string {
-  return require("node:crypto").randomBytes(8).toString("hex");
+  return randomBytes(8).toString("hex");
 }
 
 const authService = new AuthService();
@@ -609,13 +610,17 @@ async function startServer() {
     try {
       if (toolName === "list_dir") {
         const targetPath = resolveWorkspacePath(params?.path || ".");
-        const files = fs.readdirSync(targetPath, { withFileTypes: true });
+        if (isSensitiveWorkspacePath(targetPath)) throw new Error("Access to sensitive workspace paths is blocked.");
+        const files = fs.readdirSync(targetPath, { withFileTypes: true })
+          .filter((entry) => !isSensitiveWorkspacePath(path.join(targetPath, entry.name)))
+          .slice(0, 100);
         result = files.map((f) => ({
           name: f.name,
           type: f.isDirectory() ? "directory" : "file",
         }));
       } else if (toolName === "read_file") {
         const filePath = resolveWorkspacePath(params?.path || ".");
+        if (isSensitiveWorkspacePath(filePath)) throw new Error("Reading secrets and credential files is blocked.");
         if (fs.existsSync(filePath)) {
           const stats = fs.statSync(filePath);
           if (stats.size > 200000) {
@@ -850,7 +855,7 @@ MULTILINGUAL & RAPID REACTION:
       const config = {
         systemInstruction: { parts: [{ text: dynamicInstruction }] },
         ...incomingConfig,
-        tools: [{ functionDeclarations: MAYA_FUNCTION_DECLARATIONS }],
+        tools: [{ functionDeclarations: MAYA_FUNCTION_DECLARATIONS }, { googleSearch: {} }],
       };
 
       const apiKey = process.env.GEMINI_API_KEY || process.env.API_KEY;
