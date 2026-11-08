@@ -1,4 +1,4 @@
-import type { ConversationMessage, ConversationRecord, ConversationRole } from "./conversation-store.ts";
+import type { ConversationRecord, ConversationRole } from "./conversation-store.ts";
 
 export interface ConversationRepository {
   list(founderId: string): Promise<ConversationRecord[]>;
