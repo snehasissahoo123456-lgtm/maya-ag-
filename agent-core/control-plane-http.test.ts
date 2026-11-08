@@ -96,7 +96,7 @@ test("real HTTP control-plane routes enforce Founder auth and execute only the r
     const repeated = await fetch(baseUrl + `/api/control-plane/tasks/${encodeURIComponent(taskId)}/execute`, {
       method: "POST", headers: { cookie },
     });
-    assert.equal(repeated.status, 400, "Completed tasks must not execute a second time");
+    assert.equal(repeated.status, 409, "Completed tasks must not execute a second time");
   } catch (error) {
     throw new Error(`${error instanceof Error ? error.message : String(error)}\nServer output:\n${logs}`);
   } finally {
