@@ -72,3 +72,21 @@ $$;
 
 revoke all on function public.maya_append_conversation_message(text, text, text, text, uuid) from public, anon, authenticated;
 grant execute on function public.maya_append_conversation_message(text, text, text, text, uuid) to service_role;
+
+-- Persist validated goal plans and their sequential execution state.
+create table if not exists public.maya_goal_plans (
+  id text primary key,
+  founder_id text not null,
+  plan jsonb not null,
+  status text not null check (status in ('proposed', 'running', 'awaiting_approval', 'completed', 'failed')),
+  step_states jsonb not null default '{}'::jsonb,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create index if not exists maya_goal_plans_founder_updated_idx
+  on public.maya_goal_plans (founder_id, updated_at desc);
+
+alter table public.maya_goal_plans enable row level security;
+revoke all on public.maya_goal_plans from anon, authenticated;
+grant all on public.maya_goal_plans to service_role;
