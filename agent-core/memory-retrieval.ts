@@ -14,7 +14,7 @@ export interface RetrievedMemory {
 }
 const STOP_WORDS = new Set(["the","and","for","with","from","that","this","have","your","you","are","was","were","will","would","could","should","about","into","onto","then","than","what","when","where","which","who","how","why","does","did","can","may","might","not","but","all","any","our","their","them","they","its","it's","is","a","an","to","of","in","on","at","by","as","or","be","if","it","we","i","me","my"]);
 function terms(value: string): string[] {
-  return [...new Set(value.toLowerCase().match(/[a-z0-9]{2,}/g) || [])].filter(term => !STOP_WORDS.has(term));
+  return [...new Set(value.toLowerCase().match(/[\p{L}\p{N}]{2,}/gu) || [])].filter(term => !STOP_WORDS.has(term));
 }
 
 /** Keyword retrieval for explicitly saved Founder notes; it does not learn or write memories. */
