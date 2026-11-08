@@ -148,3 +148,16 @@ This module is intentionally described as file-backed persistence, not a product
 - [ ] Add database backup/restore, retention and encryption verification
 - [ ] Apply the migration to the user's Supabase project and run live integration tests after credentials are configured
 
+
+
+## Supabase goal plan persistence — development branch
+
+- [x] Define async goal plan repository contract
+- [x] Keep local file-backed plan store as default
+- [x] Add Supabase PostgREST plan store for plans, approvals and step states
+- [x] Add RLS-enabled `maya_goal_plans` table and service-role-only access
+- [x] Refactor executor and plan APIs to await repository operations
+- [x] Add adapter tests for Founder scoping and updates
+- [ ] Add optimistic concurrency/version checks and cross-process plan execution locks
+- [ ] Migrate task queue, memory notes, approval ledger and audit logs to database storage
+
