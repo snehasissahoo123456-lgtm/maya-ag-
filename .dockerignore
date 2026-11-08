@@ -1,0 +1,12 @@
+.git
+.gitignore
+node_modules
+dist
+.env
+.env.*
+!.env.example
+maya-data
+data
+coverage
+*.log
+.DS_Store
