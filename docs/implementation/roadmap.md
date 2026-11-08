@@ -4,6 +4,7 @@ Branch: maya/foundation-architecture
 Status: Foundation and first security-hardening pass are implemented. Latest CI validates install, typecheck, tests, and production build. No Android APK or production deployment is claimed.
 
 ## Phase 0 — Baseline and contracts
+- [x] Add a Founder dashboard as the default authenticated landing page; derive backend reachability and task counts from live API responses and remove unsupported integration/automation badges.
 - [x] Replace the legacy sign-in mockup with a focused Founder password screen backed by the server-issued HttpOnly session cookie; hide unconfigured Google/SMS paths and remove misleading security claims.
 - [x] Capture target cloud + local architecture.
 - [x] Define task states and verification gate in shared TypeScript primitives.
@@ -13,6 +14,7 @@ Status: Foundation and first security-hardening pass are implemented. Latest CI 
 - [x] Add repository CI. Branch protection remains unconfigured.
 
 ## Phase 1 — Make the existing server safe
+- [x] Dashboard only reports backend health and Founder-scoped task records returned by the server; no simulated integration or 24/7 worker status is shown.
 - Integrate verified Google OAuth/SMS identity providers, secure session issuance, HttpOnly cookie lifecycle, CSRF/origin controls, and revocation.
 - Complete route/tool authorization mapping and add security acceptance tests.
 - [x] Add a single-instance file-backed task repository for the new control plane, with serialized writes, corrupt-store fail-closed behavior, interrupted-task recovery, and rollback when durable writes fail. This is not a multi-instance database.
