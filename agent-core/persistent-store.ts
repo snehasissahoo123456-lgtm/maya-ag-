@@ -1,3 +1,4 @@
+import type { FounderStateRepository } from "./founder-state-repository.ts";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -11,7 +12,7 @@ export interface MayaPersistentState<TTask = unknown, TMemory = unknown, TPerson
  * Small atomic JSON store for single-instance deployments.
  * Place data outside the source tree by default. Use a managed database before horizontal scaling.
  */
-export class MayaPersistentStore<TTask = unknown, TMemory = unknown, TPersona = unknown> {
+export class MayaPersistentStore<TTask = unknown, TMemory = unknown, TPersona = unknown> implements FounderStateRepository {
   private readonly directory: string;
   private readonly filePath: string;
 
@@ -20,7 +21,7 @@ export class MayaPersistentStore<TTask = unknown, TMemory = unknown, TPersona = 
     this.filePath = path.join(this.directory, "state.json");
   }
 
-  load(defaults: MayaPersistentState<TTask, TMemory, TPersona>): MayaPersistentState<TTask, TMemory, TPersona> {
+  async load(_founderId: string, defaults: MayaPersistentState<TTask, TMemory, TPersona>): Promise<MayaPersistentState<TTask, TMemory, TPersona>> {
     try {
       const parsed = JSON.parse(fs.readFileSync(this.filePath, "utf8"));
       return {
@@ -33,7 +34,7 @@ export class MayaPersistentStore<TTask = unknown, TMemory = unknown, TPersona = 
     }
   }
 
-  save(state: MayaPersistentState<TTask, TMemory, TPersona>): void {
+  async save(_founderId: string, state: MayaPersistentState<TTask, TMemory, TPersona>): Promise<void> {
     fs.mkdirSync(this.directory, { recursive: true, mode: 0o700 });
     try { fs.chmodSync(this.directory, 0o700); } catch {}
     const tempPath = path.join(this.directory, `.state.${process.pid}.${Date.now()}.tmp`);
