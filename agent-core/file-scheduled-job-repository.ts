@@ -16,7 +16,10 @@ export class FileScheduledJobRepository implements ScheduledJobRepository {
 
   async create(job: ScheduledReadJob): Promise<void> {
     await this.mutate(state => {
-      if (!job.id || !job.founderId || !job.title.trim() || !job.path.trim()) throw new Error("Schedule identity, title and workspace path are required.");
+      if (!job.id || !job.founderId || !job.title.trim() || job.title.length > 160 || !job.path.trim() || job.path.length > 1024) throw new Error("Schedule identity, title and workspace path are invalid.");
+      if (!Number.isFinite(Date.parse(job.nextRunAt))) throw new Error("Scheduled run time must be a valid ISO timestamp.");
+      if (job.intervalMs !== null && (!Number.isInteger(job.intervalMs) || job.intervalMs < 60_000 || job.intervalMs > 30 * 24 * 60 * 60_000)) throw new Error("Recurring interval must be between one minute and 30 days.");
+      if (job.status !== "active" || job.runCount !== 0 || job.failureCount !== 0) throw new Error("New scheduled jobs must start active with zero counters.");
       if (state.jobs.some(item => item.id === job.id)) throw new Error("Scheduled job ID already exists.");
       if (state.jobs.length >= 2000) throw new Error("Scheduled job capacity reached.");
       state.jobs.unshift(structuredClone(job));
@@ -44,7 +47,7 @@ export class FileScheduledJobRepository implements ScheduledJobRepository {
   async markEnqueued(founderId: string, id: string, scheduledAt: string, nextRunAt: string | null): Promise<void> {
     await this.mutate(state => {
       const job = state.jobs.find(item => item.id === id && item.founderId === founderId);
-      if (!job) throw new Error("Scheduled job not found for this Founder.");
+      if (!job || job.status !== "active" || job.nextRunAt !== scheduledAt) throw new Error("Scheduled job is no longer active at this run time.");
       job.lastRunAt = scheduledAt;
       job.runCount++;
       job.lastError = undefined;
