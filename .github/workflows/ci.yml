@@ -20,6 +20,7 @@ on:
   pull_request:
     branches:
       - main
+      - maya/supabase-agent-state
       - maya/dashboard-foundation
       - maya/task-worker-foundation
       - maya/persistent-conversations
