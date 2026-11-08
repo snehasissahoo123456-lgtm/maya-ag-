@@ -7,7 +7,7 @@ export interface TaskRepository {
   put(envelope: TaskEnvelope): Promise<void>;
 }
 export interface CapabilityRunner {
-  run(input: { capability: string; args: Record<string, unknown>; timeoutMs: number; idempotencyKey: string }): Promise<{ result: unknown; evidence: VerificationEvidence }>;
+  run(input: { capability: string; args: Record<string, unknown>; timeoutMs: number; idempotencyKey: string; signal: AbortSignal }): Promise<{ result: unknown; evidence: VerificationEvidence }>;
 }
 export class TaskOrchestrator {
   constructor(private readonly repository: TaskRepository, private readonly capabilities: CapabilityRegistry, private readonly approvals: ApprovalLedger, private readonly runner: CapabilityRunner) {}
@@ -23,6 +23,7 @@ export class TaskOrchestrator {
     const envelope = await this.requireTask(taskId);
     if (actor.role !== "founder" || actor.founderId !== envelope.task.founderId) throw new Error("Only the owning Founder can request/approve this action.");
     if (!envelope.task.requiresApproval) throw new Error("This task does not require approval.");
+    if (envelope.task.status !== "queued") throw new Error("Only queued tasks can enter the approval queue.");
     const record = this.approvals.request({ taskId, founderId: actor.founderId, capability: envelope.capability, args: envelope.args });
     envelope.task = transitionTask(envelope.task, "planning");
     envelope.task = transitionTask(envelope.task, "awaiting_approval");
@@ -53,7 +54,13 @@ export class TaskOrchestrator {
     envelope.attempts += 1;
     await this.repository.put(envelope);
     try {
-      const output = await this.runner.run({ capability: definition.name, args: envelope.args, timeoutMs: definition.timeoutMs, idempotencyKey: envelope.idempotencyKey });
+      const controller = new AbortController();
+      let timeout: ReturnType<typeof setTimeout> | undefined;
+      const timeoutPromise = new Promise<never>((_resolve, reject) => {
+        timeout = setTimeout(() => { controller.abort(); reject(new Error("Capability execution timed out.")); }, definition.timeoutMs);
+      });
+      const output = await Promise.race([this.runner.run({ capability: definition.name, args: envelope.args, timeoutMs: definition.timeoutMs, idempotencyKey: envelope.idempotencyKey, signal: controller.signal }), timeoutPromise]);
+      if (timeout) clearTimeout(timeout);
       envelope.task = transitionTask(envelope.task, "verifying");
       envelope.task = transitionTask(envelope.task, "completed", { evidence: output.evidence });
       await this.repository.put(envelope);
@@ -62,6 +69,8 @@ export class TaskOrchestrator {
       envelope.task = transitionTask(envelope.task, "failed", { error: error instanceof Error ? error.message : String(error) });
       await this.repository.put(envelope);
       throw error;
+    } finally {
+      // The timeout promise is settled or cleared by the runner completion path.
     }
   }
   private async requireTask(id: string): Promise<TaskEnvelope> {
