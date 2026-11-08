@@ -230,3 +230,13 @@ This module is intentionally described as file-backed persistence, not a product
 - [ ] Live vector extension/migration verification in Supabase
 - [ ] Relevance benchmark set, precision/recall evaluation and memory feedback scoring
 - [ ] Explicit approval workflow for automatically extracted memory candidates
+
+
+## Memory feedback loop — development branch
+
+- [x] Founder-only helpful/not-helpful feedback endpoint
+- [x] File and Supabase feedback repository behavior
+- [x] Persist current feedback score/count and incorporate into keyword/vector ranking
+- [x] HTTP coverage for authenticated feedback
+- [ ] Evaluate ranking impact on a labelled retrieval benchmark
+- [ ] Add correction proposals and Founder approval before rewriting memory content
