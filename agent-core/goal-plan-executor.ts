@@ -57,11 +57,11 @@ export class GoalPlanExecutor {
           state.status = "awaiting_approval";
           plan.status = "awaiting_approval";
           await this.store.save(founderId, plan);
-          return this.requirePlan(founderId, planId);
+          return await this.requirePlan(founderId, planId);
         }
         state.status = "running";
         delete state.error;
-        this.store.save(founderId, plan);
+        await this.store.save(founderId, plan);
         try {
           const result = await this.executeTool(step.tool, step.args);
           const serialized = JSON.stringify(result) ?? "null";
@@ -74,7 +74,7 @@ export class GoalPlanExecutor {
           state.status = "failed";
           state.error = (error instanceof Error ? error.message : String(error)).slice(0, 1000);
           plan.status = "failed";
-          this.store.save(founderId, plan);
+          await this.store.save(founderId, plan);
           return this.requirePlan(founderId, planId);
         }
       }
