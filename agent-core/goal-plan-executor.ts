@@ -11,6 +11,10 @@ function digestResult(result: unknown): string {
   return createHash("sha256").update(serialized).digest("hex");
 }
 
+function requiresApproval(step: StoredGoalPlan["plan"]["steps"][number]): boolean {
+  return step.requiresFounderApproval || step.tool === "memory_save" || step.tool === "schedule_task" || step.tool === "run_tests";
+}
+
 /**
  * Sequential, resumable plan executor. State-mutating steps pause for a Founder
  * approval bound to the exact step arguments. Tool execution is injected and
@@ -24,7 +28,7 @@ export class GoalPlanExecutor {
     const plan = this.requirePlan(founderId, planId);
     const step = plan.plan.steps.find(item => item.id === stepId);
     if (!step) throw new Error("Plan step not found.");
-    if (!step.requiresFounderApproval) throw new Error("This step does not require Founder approval.");
+    if (!requiresApproval(step)) throw new Error("This step does not require Founder approval.");
     if (plan.stepStates[stepId].status === "completed") throw new Error("Completed steps cannot be re-approved.");
     plan.stepStates[stepId].approvedDigest = stepDigest(step);
     if (plan.status === "proposed" || plan.status === "awaiting_approval") plan.status = "proposed";
@@ -48,7 +52,7 @@ export class GoalPlanExecutor {
         if (state.status === "completed") continue;
         const dependenciesComplete = step.dependsOn.every(id => plan.stepStates[id]?.status === "completed");
         if (!dependenciesComplete) throw new Error("Plan dependency is not completed: " + step.id);
-        if (step.requiresFounderApproval && state.approvedDigest !== stepDigest(step)) {
+        if (requiresApproval(step) && state.approvedDigest !== stepDigest(step)) {
           state.status = "awaiting_approval";
           plan.status = "awaiting_approval";
           this.store.save(founderId, plan);
