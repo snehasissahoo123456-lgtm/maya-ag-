@@ -1,0 +1,41 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { ApprovalLedger } from "./approval-ledger.ts";
+import { CapabilityRegistry } from "./capability-registry.ts";
+import { TaskOrchestrator, type TaskEnvelope, type TaskRepository } from "./task-orchestrator.ts";
+class MemoryRepo implements TaskRepository {
+ private rows = new Map<string, TaskEnvelope>();
+ async get(id: string) { return this.rows.get(id); }
+ async put(value: TaskEnvelope) { this.rows.set(value.task.id, structuredClone(value)); }
+}
+const founder = { id: "founder-session", founderId: "f1", role: "founder" as const, scopes: ["*"] };
+const developer = { id: "developer-1", founderId: "f1", role: "developer" as const, scopes: ["workspace:write"] };
+function setup(risk: "low" | "high" = "low") {
+ const registry = new CapabilityRegistry();
+ registry.register({ name: "workspace.write", description: "Write a generated artifact", risk, allowedRoles: ["developer"], requiredScopes: ["workspace:write"], arguments: { file: { type: "string", required: true, maxLength: 100 } }, timeoutMs: 5000, requiresApproval: risk === "high", verification: "Read back artifact and compare checksum." });
+ const ledger = new ApprovalLedger();
+ let runs = 0;
+ const orchestrator = new TaskOrchestrator(new MemoryRepo(), registry, ledger, { run: async ({ capability, args }) => {
+  runs++;
+  return { result: { capability, args }, evidence: { kind: "checksum", description: "Artifact read back and checksum matched.", observedAt: new Date().toISOString() } };
+ } });
+ return { orchestrator, ledger, getRuns: () => runs };
+}
+test("low-risk task executes and only completes with verification evidence", async () => {
+ const { orchestrator, getRuns } = setup();
+ await orchestrator.enqueue({ id: "t-low", founderId: "f1", instruction: "Write a report", capability: "workspace.write", args: { file: "report.md" }, actor: developer });
+ const result = await orchestrator.execute("t-low", developer);
+ assert.equal(result.task.status, "completed");
+ assert.equal(result.task.verificationEvidence.length, 1);
+ assert.equal(getRuns(), 1);
+});
+test("high-risk task cannot execute until exact Founder approval is granted", async () => {
+ const { orchestrator, getRuns } = setup("high");
+ await orchestrator.enqueue({ id: "t-high", founderId: "f1", instruction: "Publish release", capability: "workspace.write", args: { file: "release.zip" }, actor: developer });
+ await assert.rejects(() => orchestrator.execute("t-high", developer), /approval/i);
+ const pending = await orchestrator.requestApproval("t-high", founder);
+ await orchestrator.decideApproval({ approvalId: pending.approvalId, approved: true, actor: founder });
+ const result = await orchestrator.execute("t-high", developer, pending.approvalId);
+ assert.equal(result.task.status, "completed");
+ assert.equal(getRuns(), 1);
+});
