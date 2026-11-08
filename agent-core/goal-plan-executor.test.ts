@@ -64,3 +64,16 @@ test("stops and records failure without automatically retrying", async () => {
     assert.equal(calls, 1);
   } finally { fs.rmSync(ctx.directory, { recursive: true, force: true }); }
 });
+
+test("enforces sensitive-tool approvals even if a model flag is false", async () => {
+  const altered: GoalPlan = { ...sample, steps: sample.steps.map(step => step.id === "save_note" ? { ...step, requiresFounderApproval: false } : step) };
+  const ctx = setup(altered, async () => ({ ok: true }));
+  try {
+    const paused = await ctx.executor.execute("founder-a", ctx.saved.id);
+    assert.equal(paused.status, "awaiting_approval");
+    assert.equal(paused.stepStates.save_note.status, "awaiting_approval");
+    ctx.executor.approveStep("founder-a", ctx.saved.id, "save_note");
+    const resumed = await ctx.executor.execute("founder-a", ctx.saved.id);
+    assert.equal(resumed.status, "completed");
+  } finally { fs.rmSync(ctx.directory, { recursive: true, force: true }); }
+});
