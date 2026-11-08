@@ -59,6 +59,8 @@ test("real HTTP control-plane routes enforce Founder auth and execute only the r
     await waitForServer(baseUrl, child);
     const unauthenticated = await fetch(baseUrl + "/api/control-plane/tasks");
     assert.equal(unauthenticated.status, 401);
+    const unauthenticatedAudit = await fetch(baseUrl + "/api/audit-events");
+    assert.equal(unauthenticatedAudit.status, 401, "Audit history must require Founder authentication");
 
     const login = await fetch(baseUrl + "/api/auth/founder-login", {
       method: "POST",
@@ -151,6 +153,14 @@ test("real HTTP control-plane routes enforce Founder auth and execute only the r
     assert.equal(executedBody.task.status, "completed");
     assert.match(executedBody.task.verificationEvidence[0].reference, /^sha256:[a-f0-9]{64}$/);
     assert.equal(executedBody.result.path, "README.md");
+
+    const auditHistory = await fetch(baseUrl + "/api/audit-events", { headers: { cookie } });
+    assert.equal(auditHistory.status, 200);
+    const auditBody = await auditHistory.json() as any;
+    const taskEvents = auditBody.events.filter((event: any) => event.taskId === taskId);
+    assert.deepEqual(taskEvents.map((event: any) => event.type).sort(), ["task.enqueued", "task.execution_started", "task.execution_verified"].sort());
+    assert.ok(taskEvents.every((event: any) => event.founderId === "founder-primary"));
+    assert.ok(taskEvents.every((event: any) => /^[a-f0-9]{64}$/.test(event.actionDigest)));
 
     const repeated = await fetch(baseUrl + `/api/control-plane/tasks/${encodeURIComponent(taskId)}/execute`, {
       method: "POST", headers: { cookie },
