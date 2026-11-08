@@ -8,6 +8,7 @@ on:
       - maya/dashboard-foundation
       - maya/task-worker-foundation
       - maya/persistent-conversations
+      - maya/goal-planner
   pull_request:
     branches:
       - main
