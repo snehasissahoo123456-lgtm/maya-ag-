@@ -10,6 +10,7 @@ export interface CapabilityRunner {
   run(input: { capability: string; args: Record<string, unknown>; timeoutMs: number; idempotencyKey: string; signal: AbortSignal }): Promise<{ result: unknown; evidence: VerificationEvidence }>;
 }
 export class TaskOrchestrator {
+  private readonly executing = new Set<string>();
   constructor(private readonly repository: TaskRepository, private readonly capabilities: CapabilityRegistry, private readonly approvals: ApprovalLedger, private readonly runner: CapabilityRunner) {}
   async enqueue(input: { id: string; founderId: string; instruction: string; capability: string; args: Record<string, unknown>; actor: AgentIdentity; riskLevel?: RiskLevel }): Promise<TaskEnvelope> {
     if (input.actor.founderId !== input.founderId) throw new Error("Task Founder does not match authenticated actor.");
