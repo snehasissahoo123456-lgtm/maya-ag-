@@ -183,3 +183,14 @@ This module is intentionally described as file-backed persistence, not a product
 - [x] Authenticated Founder-only audit history endpoint
 - [ ] Move approval grants themselves to a transactional database repository
 - [ ] Add immutable audit-chain verification / external backup and retention policy
+
+
+## Transactional approval persistence — development branch
+
+- [x] Async approval repository contract and local file adapter
+- [x] Supabase approval table with Founder-scoped listing
+- [x] Atomic decision RPC with expiry enforcement
+- [x] Atomic exact-action digest verification and single-use consume RPC
+- [x] Server uses configured approval repository and audit logs approval lifecycle
+- [ ] Verify SQL migration and concurrency behavior against a live Supabase project
+- [ ] Add multi-instance task claim/lease and recovery semantics before expanding worker execution
