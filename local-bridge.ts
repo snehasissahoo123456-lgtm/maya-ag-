@@ -1,0 +1,176 @@
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import WebSocket from "ws";
+
+interface BridgeCredentials { serverUrl: string; deviceId: string; founderId: string; token: string; }
+interface BridgeCommand { type: "command"; requestId: string; command: string; args?: Record<string, unknown>; }
+
+function isWithinRoot(root: string, target: string): boolean {
+  const relative = path.relative(root, target);
+  return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
+}
+function isSensitive(target: string): boolean {
+  const parts = target.split(path.sep).map(part => part.toLowerCase());
+  const base = path.basename(target).toLowerCase();
+  return parts.some(part => [".git", "node_modules", "secrets", "credentials", ".maya"].includes(part)) ||
+    base === ".env" || base.startsWith(".env.") || base === ".npmrc" || base === ".netrc" ||
+    base === "id_rsa" || base.endsWith(".pem") || base.endsWith(".key") || base.endsWith(".p12") || base.endsWith(".pfx");
+}
+function resolveAllowedPath(root: string, relativePath: unknown): string {
+  if (typeof relativePath !== "string" || relativePath.length > 1024) throw new Error("A valid relative path is required.");
+  const lexicalTarget = path.resolve(root, relativePath || ".");
+  if (!isWithinRoot(root, lexicalTarget)) throw new Error("Path escapes the configured workspace root.");
+  let realRoot: string;
+  let realTarget: string;
+  try { realRoot = fs.realpathSync(root); realTarget = fs.realpathSync(lexicalTarget); }
+  catch { throw new Error("Workspace path does not exist or cannot be resolved."); }
+  if (!isWithinRoot(realRoot, realTarget)) throw new Error("Resolved workspace path escapes the configured workspace root.");
+  if (isSensitive(realTarget)) throw new Error("Access to sensitive workspace paths is blocked.");
+  return realTarget;
+}
+
+export async function executeLocalBridgeCommand(rootInput: string, command: string, args: Record<string, unknown> = {}): Promise<unknown> {
+  const root = path.resolve(rootInput);
+  if (command === "system.info") {
+    return { node: process.version, platform: process.platform, architecture: process.arch, hostname: os.hostname(), uptimeSeconds: Math.floor(os.uptime()), memory: os.totalmem() };
+  }
+  if (command === "workspace.list") {
+    const directory = resolveAllowedPath(root, args.path || ".");
+    const stat = fs.lstatSync(directory);
+    if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error("Only workspace directories can be listed.");
+    return fs.readdirSync(directory, { withFileTypes: true })
+      .filter(entry => !entry.isSymbolicLink() && !isSensitive(path.join(directory, entry.name)))
+      .slice(0, 100)
+      .map(entry => ({ name: entry.name, type: entry.isDirectory() ? "directory" : "file" }));
+  }
+  if (command === "workspace.read_file") {
+    const file = resolveAllowedPath(root, args.path);
+    const stat = fs.lstatSync(file);
+    if (!stat.isFile() || stat.isSymbolicLink()) throw new Error("Only regular non-symlink files can be read.");
+    if (stat.size > 50_000) throw new Error("File exceeds the 50 KB read limit.");
+    return { path: path.relative(root, file), content: fs.readFileSync(file, "utf8") };
+  }
+  throw new Error("Local bridge command is not in the read-only allowlist.");
+}
+
+function readCredentials(file: string): BridgeCredentials | undefined {
+  try {
+    const value = JSON.parse(fs.readFileSync(file, "utf8"));
+    if (typeof value?.serverUrl !== "string" || typeof value?.deviceId !== "string" ||
+        typeof value?.founderId !== "string" || typeof value?.token !== "string") return undefined;
+    return value as BridgeCredentials;
+  } catch { return undefined; }
+}
+function saveCredentials(file: string, credentials: BridgeCredentials): void {
+  const directory = path.dirname(file);
+  fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
+  const temp = path.join(directory, `.device-bridge.${process.pid}.${Date.now()}.tmp`);
+  fs.writeFileSync(temp, JSON.stringify(credentials, null, 2), { encoding: "utf8", mode: 0o600, flag: "wx" });
+  fs.renameSync(temp, file);
+  try { fs.chmodSync(file, 0o600); } catch {}
+}
+
+export function startLocalDeviceBridge(): void {
+  const serverUrl = process.env.MAYA_SERVER_URL || "";
+  if (!serverUrl) throw new Error("Set MAYA_SERVER_URL to your Maya server URL.");
+  const parsed = new URL(serverUrl);
+  if (parsed.protocol !== "https:" && !(parsed.protocol === "http:" && ["localhost", "127.0.0.1"].includes(parsed.hostname))) {
+    throw new Error("Remote device bridge connections require HTTPS/WSS. HTTP is allowed only for localhost.");
+  }
+  const root = path.resolve(process.env.MAYA_WORKSPACE_ROOT || process.cwd());
+  if (!fs.existsSync(root) || !fs.statSync(root).isDirectory()) throw new Error("MAYA_WORKSPACE_ROOT must be an existing directory.");
+  const credentialsFile = process.env.MAYA_DEVICE_CREDENTIAL_FILE || path.join(os.homedir(), ".maya", "device-bridge.json");
+  let credentials = readCredentials(credentialsFile);
+  const pairingCode = process.env.MAYA_PAIRING_CODE || "";
+  if (!credentials && !pairingCode) throw new Error("Create a pairing code in Maya, then set MAYA_PAIRING_CODE for the first connection.");
+
+  let stopped = false;
+  let retryTimer: ReturnType<typeof setTimeout> | undefined;
+  let heartbeatTimer: ReturnType<typeof setInterval> | undefined;
+  let socket: WebSocket | undefined;
+  let retryMs = 1000;
+  const url = new URL("/api/device-bridge", parsed);
+  url.protocol = parsed.protocol === "https:" ? "wss:" : "ws:";
+
+  const connect = () => {
+    if (stopped) return;
+    socket = new WebSocket(url);
+    socket.on("open", () => {
+      retryMs = 1000;
+      if (credentials) {
+        socket?.send(JSON.stringify({ type: "authenticate", deviceId: credentials.deviceId, founderId: credentials.founderId, token: credentials.token }));
+      } else {
+        socket?.send(JSON.stringify({
+          type: "pair", code: pairingCode,
+          device: { name: os.hostname().slice(0, 100), platform: os.platform(), architecture: os.arch(), runtimeVersion: process.version },
+        }));
+      }
+    });
+    socket.on("message", async raw => {
+      let message: any;
+      try { message = JSON.parse(raw.toString()); } catch { return; }
+      if (message.type === "paired" && message.device?.id && message.token) {
+        credentials = { serverUrl, deviceId: message.device.id, founderId: message.device.founderId, token: message.token };
+        saveCredentials(credentialsFile, credentials);
+        console.info(`Maya device paired: ${credentials.deviceId}. Token stored in the local user profile.`);
+        return;
+      }
+      if (message.type === "authenticated") {
+        console.info(`Maya device bridge connected: ${message.device?.name || credentials?.deviceId}`);
+        if (heartbeatTimer) clearInterval(heartbeatTimer);
+        heartbeatTimer = setInterval(() => {
+          if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ type: "heartbeat" }));
+        }, 20_000);
+        heartbeatTimer.unref?.();
+        return;
+      }
+      if (message.type === "command" && typeof message.requestId === "string") {
+        try {
+          const result = await executeLocalBridgeCommand(root, String(message.command || ""), message.args || {});
+          const payload = JSON.stringify({ type: "command_result", requestId: message.requestId, success: true, result });
+          if (payload.length > 250_000) throw new Error("Local result exceeds the 250 KB bridge limit.");
+          if (socket?.readyState === WebSocket.OPEN) socket.send(payload);
+        } catch (error) {
+          if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify({
+            type: "command_result", requestId: message.requestId, success: false,
+            error: (error instanceof Error ? error.message : String(error)).slice(0, 500),
+          }));
+        }
+      }
+    });
+    socket.on("close", () => scheduleReconnect());
+    socket.on("error", () => { try { socket?.close(); } catch {} });
+  };
+
+  const scheduleReconnect = () => {
+    if (heartbeatTimer) clearInterval(heartbeatTimer);
+    heartbeatTimer = undefined;
+    if (stopped || retryTimer) return;
+    retryTimer = setTimeout(() => {
+      retryTimer = undefined;
+      connect();
+    }, retryMs);
+    retryTimer.unref?.();
+    retryMs = Math.min(30_000, retryMs * 2);
+  };
+
+  const shutdown = () => {
+    stopped = true;
+    if (retryTimer) clearTimeout(retryTimer);
+    if (heartbeatTimer) clearInterval(heartbeatTimer);
+    socket?.close(1000, "Local bridge stopped");
+  };
+  process.once("SIGINT", shutdown);
+  process.once("SIGTERM", shutdown);
+  connect();
+}
+
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  try { startLocalDeviceBridge(); }
+  catch (error) {
+    console.error(error instanceof Error ? error.message : String(error));
+    process.exitCode = 1;
+  }
+}
