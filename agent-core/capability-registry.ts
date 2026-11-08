@@ -32,6 +32,7 @@ export class CapabilityRegistry {
     if (!/^[a-z][a-z0-9_.-]{1,63}$/.test(definition.name)) throw new Error("Invalid capability name.");
     if (this.definitions.has(definition.name)) throw new Error("Capability already registered: " + definition.name);
     if (definition.timeoutMs < 100 || definition.timeoutMs > 120_000) throw new Error("Capability timeout must be between 100 and 120000 ms.");
+    if ((definition.risk === "high" || definition.risk === "critical") && !definition.requiresApproval) throw new Error("High- and critical-risk capabilities must require Founder approval.");
     if (!definition.verification.trim()) throw new Error("Every capability requires a verification method.");
     this.definitions.set(definition.name, Object.freeze({ ...definition, arguments: Object.freeze({ ...definition.arguments }) }));
   }
