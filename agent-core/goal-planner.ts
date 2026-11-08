@@ -88,7 +88,7 @@ export function validateGoalPlan(
     steps.push({
       id, title, tool: toolName, args: { ...args }, dependsOn: [...new Set(dependsOn as string[])],
       expectedResult,
-      requiresFounderApproval: toolName === "memory_save" || toolName === "schedule_task",
+      requiresFounderApproval: toolName === "memory_save" || toolName === "schedule_task" || toolName === "run_tests",
     });
   }
   return { objective: objective.trim(), summary: draft.summary.trim(), executionMode: "plan_only", steps };
