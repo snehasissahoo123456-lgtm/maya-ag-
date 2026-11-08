@@ -196,10 +196,10 @@ export const ReactLockScreen: React.FC<ReactLockScreenProps> = ({
 
           </div>
 
-          {/* Local Bridge Active Badge */}
+          {/* Authentication state badge */}
           <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-full bg-slate-900/80 border border-slate-800 text-xs text-slate-300 backdrop-blur-md">
             <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-            <span className="font-mono text-[11px]">Bridge :3000 Active</span>
+            <span className="font-mono text-[11px]">Founder Login Required</span>
           </div>
         </div>
       </header>
@@ -266,7 +266,7 @@ export const ReactLockScreen: React.FC<ReactLockScreenProps> = ({
                       Primary Founder Profile
                     </span>
                     <span className="text-[10px] font-mono text-emerald-400 bg-emerald-500/10 border border-emerald-500/30 px-2 py-0.5 rounded-full font-bold">
-                      VERIFIED
+                      NOT VERIFIED
                     </span>
                   </div>
 
