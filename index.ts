@@ -85,6 +85,7 @@ export class ActionEngineApp extends LitElement {
   // Active navigation tab
   @state() accessor activeTab: 'dashboard' | 'console' | 'discovery' | 'tasks' | 'ecosystem' | 'tools' | 'memory' | 'artifacts' | 'tests' | 'platforms' = 'dashboard';
   @state() accessor dashboardApiStatus: 'checking' | 'online' | 'offline' = 'checking';
+  @state() accessor dashboardWorkerStatus: 'checking' | 'enabled' | 'disabled' | 'unknown' = 'checking';
   @state() accessor dashboardTasksStatus: 'checking' | 'available' | 'unauthenticated' | 'unavailable' = 'checking';
   @state() accessor controlPlaneTasks: Array<{ task: { id: string; instruction: string; status: string; createdAt?: string; updatedAt?: string; verificationEvidence?: unknown[] }; capability: string; args: Record<string, unknown> }> = [];
 
@@ -665,8 +666,17 @@ You can use this cockpit to inspect the current development status and configure
     try {
       const healthResponse = await fetch('/api/health', { credentials: 'same-origin' });
       this.dashboardApiStatus = healthResponse.ok ? 'online' : 'offline';
+      if (healthResponse.ok) {
+        const healthData = await healthResponse.json();
+        this.dashboardWorkerStatus = healthData.taskWorker?.enabled === true
+          ? 'enabled'
+          : healthData.taskWorker?.enabled === false ? 'disabled' : 'unknown';
+      } else {
+        this.dashboardWorkerStatus = 'unknown';
+      }
     } catch {
       this.dashboardApiStatus = 'offline';
+      this.dashboardWorkerStatus = 'unknown';
     }
 
     try {
@@ -1784,6 +1794,7 @@ Status: Ready to build upon Founder "go ahead".`;
       return counts;
     }, {});
     const serverLabel = this.dashboardApiStatus === 'online' ? 'Reachable' : this.dashboardApiStatus === 'offline' ? 'Unavailable' : 'Checking';
+    const workerLabel = this.dashboardWorkerStatus === 'enabled' ? 'Enabled · read-only' : this.dashboardWorkerStatus === 'disabled' ? 'Disabled' : 'Unknown';
     const taskLabel = this.dashboardTasksStatus === 'available'
       ? 'Founder task data loaded'
       : this.dashboardTasksStatus === 'unauthenticated'
@@ -1826,6 +1837,11 @@ Status: Ready to build upon Founder "go ahead".`;
             <div class="flex items-center justify-between text-xs text-slate-400"><span>Tracked tasks</span><span class="material-symbols-outlined text-amber-300">assignment</span></div>
             <div class="mt-3 text-2xl font-semibold tabular-nums text-white">${this.dashboardTasksStatus === 'available' ? this.controlPlaneTasks.length : '—'}</div>
             <p class="mt-1 text-[11px] text-slate-500">Count from the persistent control-plane API</p>
+          </article>
+          <article class="rounded-2xl border border-slate-800 bg-slate-900/80 p-4">
+            <div class="flex items-center justify-between text-xs text-slate-400"><span>Background worker</span><span class="material-symbols-outlined text-amber-300">precision_manufacturing</span></div>
+            <div class="mt-3 text-sm font-semibold text-white">${workerLabel}</div>
+            <p class="mt-1 text-[11px] text-slate-500">Server-reported state; when enabled it can run only the read-only workspace file capability.</p>
           </article>
           <article class="rounded-2xl border border-slate-800 bg-slate-900/80 p-4">
             <div class="flex items-center justify-between text-xs text-slate-400"><span>Voice availability</span><span class="material-symbols-outlined text-emerald-300">graphic_eq</span></div>
