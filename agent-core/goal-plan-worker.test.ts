@@ -83,3 +83,15 @@ test("worker processes only its configured Founder's running plans", async () =>
     assert.equal((await store.get("founder-b", other.id))?.status, "running");
   } finally { fs.rmSync(directory, { recursive: true, force: true }); }
 });
+
+
+test("running plans cannot pre-approve a future step while another step is executing", async () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "maya-plan-approval-race-"));
+  try {
+    const store = new GoalPlanStore(directory);
+    const executor = new GoalPlanExecutor(store, async () => ({ ok: true }));
+    const created = await store.create("founder-a", plan([readStep, saveStep]));
+    await executor.start("founder-a", created.id);
+    await assert.rejects(() => executor.approveStep("founder-a", created.id, "save_step"), /only approve the exact step currently awaiting approval/i);
+  } finally { fs.rmSync(directory, { recursive: true, force: true }); }
+});
