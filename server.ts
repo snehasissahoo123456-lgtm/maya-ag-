@@ -508,6 +508,10 @@ async function startServer() {
     if (!Number.isFinite(runAt) || runAt < Date.now() - 30_000 || runAt > Date.now() + 365 * 24 * 60 * 60_000) return res.status(400).json({ success: false, error: "Run time must be between now and one year from now." });
     if (intervalMs !== null && (!Number.isInteger(intervalMs) || intervalMs < 60_000 || intervalMs > 30 * 24 * 60 * 60_000)) return res.status(400).json({ success: false, error: "Repeat interval must be between one minute and 30 days." });
     try {
+      const resolved = resolveWorkspacePath(workspacePath);
+      if (isSensitiveWorkspacePath(resolved)) throw new Error("Sensitive workspace paths cannot be scheduled.");
+      const fileStat = fs.statSync(resolved);
+      if (!fileStat.isFile() || fileStat.size > 50_000) throw new Error("Scheduled target must be a regular file no larger than 50 KB.");
       const now = new Date().toISOString();
       const schedule = {
         id: "schedule-" + randomTaskId(), founderId, title, path: workspacePath, status: "active" as const,
