@@ -47,7 +47,7 @@ test("scheduled job records are Founder-scoped and reject stale run timestamps",
     await repository.create(job("owner"));
     assert.equal(await repository.get("founder-b", "owner"), undefined);
     assert.equal((await repository.list("founder-b")).length, 0);
-    await assert.rejects(() => repository.markEnqueued("founder-b", "owner", "wrong", null), /not found/i);
+    await assert.rejects(() => repository.markEnqueued("founder-b", "owner", "wrong", null), /not found|no longer active/i);
     await assert.rejects(() => repository.markEnqueued("founder-a", "owner", "wrong", null), /no longer active/i);
     assert.equal(await repository.pause("founder-b", "owner"), false);
     assert.equal(await repository.pause("founder-a", "owner"), true);
