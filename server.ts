@@ -176,8 +176,22 @@ taskCapabilityRegistry.register({
   requiresApproval: false,
   verification: "Read the file and record its SHA-256 digest as execution evidence.",
 });
-// Only this read-only capability is enabled. Do not register write, shell, deploy,
-// account, payment, or device capabilities until durable approvals and adapters exist.
+taskCapabilityRegistry.register({
+  name: "workspace.write_file",
+  description: "Atomically replace the contents of an existing non-sensitive workspace file.",
+  risk: "high",
+  allowedRoles: ["founder", "worker"],
+  requiredScopes: ["workspace:write"],
+  arguments: {
+    path: { type: "string", required: true, maxLength: 1024 },
+    content: { type: "string", required: true, maxLength: 100_000 },
+  },
+  timeoutMs: 15_000,
+  requiresApproval: true,
+  verification: "Atomically replace an existing file only after exact Founder approval and verify the resulting SHA-256 digest.",
+});
+// Only read_file and exact-Founder-approved write_file are enabled. Shell, deploy,
+// account, payment and arbitrary device capabilities remain blocked.
 const approvalRepository = createApprovalRepository();
 const taskOrchestrator = new TaskOrchestrator(
   taskRepository,
@@ -185,25 +199,57 @@ const taskOrchestrator = new TaskOrchestrator(
   approvalRepository,
   {
     run: async ({ capability, args, signal }) => {
-      if (capability !== "workspace.read_file") throw new Error("Capability runner is not enabled for this action.");
       if (signal.aborted) throw new Error("Task execution was cancelled.");
-      const file = resolveWorkspacePath(args.path);
-      if (isSensitiveWorkspacePath(file)) throw new Error("Reading secrets and credential files is blocked.");
-      const stat = fs.statSync(file);
-      if (!stat.isFile()) throw new Error("Only regular text files can be read.");
-      if (stat.size > 50_000) throw new Error("File exceeds the 50 KB task read limit.");
-      const content = fs.readFileSync(file, "utf8");
-      if (signal.aborted) throw new Error("Task execution was cancelled.");
-      const digest = createHash("sha256").update(content, "utf8").digest("hex");
-      return {
-        result: { path: path.relative(process.cwd(), file), content, bytes: Buffer.byteLength(content, "utf8"), sha256: digest },
-        evidence: {
-          kind: "workspace-file-sha256",
-          description: "Read the requested workspace file and calculated its SHA-256 digest.",
-          reference: "sha256:" + digest,
-          observedAt: new Date().toISOString(),
-        },
-      };
+      if (capability === "workspace.read_file") {
+        const file = resolveWorkspacePath(args.path);
+        if (isSensitiveWorkspacePath(file)) throw new Error("Reading secrets and credential files is blocked.");
+        const stat = fs.statSync(file);
+        if (!stat.isFile()) throw new Error("Only regular text files can be read.");
+        if (stat.size > 50_000) throw new Error("File exceeds the 50 KB task read limit.");
+        const content = fs.readFileSync(file, "utf8");
+        if (signal.aborted) throw new Error("Task execution was cancelled.");
+        const digest = createHash("sha256").update(content, "utf8").digest("hex");
+        return {
+          result: { path: path.relative(process.cwd(), file), content, bytes: Buffer.byteLength(content, "utf8"), sha256: digest },
+          evidence: {
+            kind: "workspace-file-sha256",
+            description: "Read the requested workspace file and calculated its SHA-256 digest.",
+            reference: "sha256:" + digest,
+            observedAt: new Date().toISOString(),
+          },
+        };
+      }
+      if (capability === "workspace.write_file") {
+        const file = resolveWritableWorkspacePath(args.path);
+        if (isSensitiveWorkspacePath(file)) throw new Error("Writing secrets and credential files is blocked.");
+        const content = args.content;
+        if (typeof content !== "string" || content.length > 100_000) throw new Error("File content must be text no larger than 100 KB.");
+        const stat = fs.lstatSync(file);
+        if (!stat.isFile() || stat.isSymbolicLink()) throw new Error("Only existing regular files can be replaced; symlinks and new files are blocked.");
+        if (stat.size > 100_000) throw new Error("Existing file exceeds the 100 KB write limit.");
+        const temp = path.join(path.dirname(file), `.maya-write.${process.pid}.${randomUUID()}.tmp`);
+        fs.writeFileSync(temp, content, { encoding: "utf8", mode: stat.mode & 0o777, flag: "wx" });
+        try {
+          if (signal.aborted) throw new Error("Task execution was cancelled before commit.");
+          fs.renameSync(temp, file);
+        } catch (error) {
+          try { fs.rmSync(temp, { force: true }); } catch {}
+          throw error;
+        }
+        const verified = fs.readFileSync(file, "utf8");
+        if (verified !== content) throw new Error("Write verification failed; file content differs from the approved payload.");
+        const digest = createHash("sha256").update(verified, "utf8").digest("hex");
+        return {
+          result: { path: path.relative(process.cwd(), file), bytes: Buffer.byteLength(verified, "utf8"), sha256: digest, verified: true },
+          evidence: {
+            kind: "workspace-file-write-sha256",
+            description: "Atomically replaced an existing workspace file after Founder approval and verified the written bytes.",
+            reference: "sha256:" + digest,
+            observedAt: new Date().toISOString(),
+          },
+        };
+      }
+      throw new Error("Capability runner is not enabled for this action.");
     },
   },
   auditRepository,
@@ -238,6 +284,24 @@ const MAYA_FUNCTION_DECLARATIONS = [
   { name: "run_tests", description: "Run the repository lint, test, and production build commands and return their real output.", parametersJsonSchema: { type: "object", properties: {} } },
 ];
 const IMPLEMENTED_TOOL_NAMES = new Set(MAYA_FUNCTION_DECLARATIONS.map((tool) => tool.name));
+
+function resolveWritableWorkspacePath(requestedPath: unknown): string {
+  if (typeof requestedPath !== "string" || !requestedPath.trim() || requestedPath.length > 1024) throw new Error("A valid workspace-relative path is required.");
+  const root = fs.realpathSync(process.cwd());
+  const lexical = path.resolve(root, requestedPath);
+  const relative = path.relative(root, lexical);
+  if (relative.startsWith("..") || path.isAbsolute(relative)) throw new Error("Path escapes the enrolled workspace.");
+  let cursor = root;
+  for (const segment of relative.split(path.sep).filter(Boolean)) {
+    cursor = path.join(cursor, segment);
+    const stat = fs.lstatSync(cursor);
+    if (stat.isSymbolicLink()) throw new Error("Workspace writes through symbolic links are blocked.");
+  }
+  const real = fs.realpathSync(lexical);
+  const realRelative = path.relative(root, real);
+  if (realRelative.startsWith("..") || path.isAbsolute(realRelative)) throw new Error("Resolved path escapes the enrolled workspace.");
+  return real;
+}
 
 function isSensitiveWorkspacePath(filePath: string): boolean {
   const relative = path.relative(fs.realpathSync(process.cwd()), filePath);
