@@ -60,7 +60,7 @@ export class ActionEngineApp extends LitElement {
 
   // Authentication & Security Lock Gate States
   @state() accessor isAuthenticated = false;
-  @state() accessor authUiMode: 'react' | 'lit' = (localStorage.getItem('cockpit_auth_ui_mode') as 'react' | 'lit') || 'react';
+  @state() accessor authUiMode: 'react' | 'lit' = 'react';
   private reactAuthRoot: Root | null = null;
   @state() accessor currentUser: AuthenticatedUser | null = null;
   @state() accessor sessionToken: string | null = null;
@@ -131,15 +131,11 @@ export class ActionEngineApp extends LitElement {
     {
       id: 'welcome-1',
       role: 'action_engine',
-      text: `Namaste Founder! Main Maya hoon 🙏
+      text: `Maya foundation is running in restricted prototype mode.
 
-Aapki in-house partner, lead engineer aur confidante. Main website, app, agent, automation ya financial tool — kuch bhi build, test aur deliver kar sakti hoon.
+Founder authentication is required. Gemini, connected platforms, local PC execution, scheduling, and external integrations are not yet configured or verified.
 
-• Active Tone: Cheerful Partner (Warm, light & sharp)
-• Connected: Local Bridge (Port 3000), 21 Master Tools, 24/7 Scheduler, SYB Venture Hub
-• Language: Hindi, English aur Hinglish (voice dictation enabled)
-
-Batao Founder, aaj kya build karna hai? Chaaho toh pehle Discovery Protocol se 5 sawaal discuss kar lete hain taaki bilkul wahi bane jo tumhein chahiye!`,
+You can use this cockpit to inspect the current development status and configure the next implementation steps.`,
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
     },
   ];
@@ -150,15 +146,15 @@ Batao Founder, aaj kya build karna hai? Chaaho toh pehle Discovery Protocol se 5
   @state() accessor selectedVentureId = 'orbit-aios';
 
   // Data loaded from server
-  @state() accessor tasks: ActionEngineTask[] = [...INITIAL_TASKS];
-  @state() accessor memories: MemoryEntry[] = [...INITIAL_MEMORIES];
+  @state() accessor tasks: ActionEngineTask[] = [];
+  @state() accessor memories: MemoryEntry[] = [];
   @state() accessor auditLogs: ToolExecutionRecord[] = [];
   @state() accessor connectedServices = {
     gemini_live: false,
-    local_bridge: true,
-    code_sandbox: true,
-    web_search: true,
-    file_system: true,
+    local_bridge: false,
+    code_sandbox: false,
+    web_search: false,
+    file_system: false,
   };
 
   // Discovery Form State
@@ -234,11 +230,15 @@ Batao Founder, aaj kya build karna hai? Chaaho toh pehle Discovery Protocol se 5
     this.reactAuthRoot.render(
       React.createElement(ReactLockScreen, {
         onAuthenticated: (user: AuthenticatedUser, token: string) => {
-          this.sessionToken = token;
+          this.sessionToken = null;
           this.currentUser = user;
           this.isAuthenticated = true;
           this.unmountReactLockScreen();
           this.requestUpdate();
+          void this.fetchServerState();
+          void this.fetchWatcherStatus();
+          void this.fetchPlatformProbes();
+          this.initCockpitWsStream();
         },
         onSwitchToLit: () => {
           this.authUiMode = 'lit';
@@ -259,23 +259,17 @@ Batao Founder, aaj kya build karna hai? Chaaho toh pehle Discovery Protocol se 5
 
   private async restoreSession() {
     try {
-      const storedToken = localStorage.getItem('maya_session_token');
-      if (storedToken) {
-        const res = await fetch('/api/auth/session', {
-          headers: { Authorization: `Bearer ${storedToken}` },
-        });
-        if (res.ok) {
-          const data = await res.json();
-          if (data.success && data.session) {
-            this.sessionToken = data.session.token;
-            this.currentUser = data.session.user;
-            this.isAuthenticated = true;
-            return;
-          }
+      const res = await fetch('/api/auth/session', { credentials: 'same-origin' });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success && data.session) {
+          this.sessionToken = null;
+          this.currentUser = data.session.user;
+          this.isAuthenticated = true;
+          return;
         }
       }
     } catch (_e) {}
-    // If no valid stored session, show lock screen
     this.isAuthenticated = false;
   }
 
@@ -297,7 +291,7 @@ Batao Founder, aaj kya build karna hai? Chaaho toh pehle Discovery Protocol se 5
       }
       this.sessionToken = data.session.token;
       this.currentUser = data.session.user;
-      localStorage.setItem('maya_session_token', data.session.token);
+
       this.isAuthenticated = true;
       this.authSuccessNotice = 'Welcome back Founder Snehasis Sahoo! Authenticated via Google Account.';
     } catch (err: any) {
@@ -355,7 +349,7 @@ Batao Founder, aaj kya build karna hai? Chaaho toh pehle Discovery Protocol se 5
       }
       this.sessionToken = data.session.token;
       this.currentUser = data.session.user;
-      localStorage.setItem('maya_session_token', data.session.token);
+
       this.isAuthenticated = true;
     } catch (err: any) {
       this.authError = err.message || 'Verification error';
@@ -432,15 +426,8 @@ Batao Founder, aaj kya build karna hai? Chaaho toh pehle Discovery Protocol se 5
 
   private async handleLogout() {
     try {
-      if (this.sessionToken) {
-        await fetch('/api/auth/logout', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ token: this.sessionToken }),
-        });
-      }
+      await fetch('/api/auth/logout', { method: 'POST', credentials: 'same-origin' });
     } catch (_e) {}
-    localStorage.removeItem('maya_session_token');
     this.sessionToken = null;
     this.currentUser = null;
     this.isAuthenticated = false;
@@ -1202,7 +1189,7 @@ Batao Founder, aaj kya build karna hai? Chaaho toh pehle Discovery Protocol se 5
     } catch (err: any) {
       this.updateAgentMessage(
         agentMsgId,
-        `Namaste Founder. Command note kar li hai. Local Bridge active hai, next instruction bataiye.`,
+        `Namaste Founder. Command note kar li hai. The request could not be completed. Please check the authenticated session and configured capabilities.`,
       );
     } finally {
       this.isStreaming = false;
@@ -1212,7 +1199,7 @@ Batao Founder, aaj kya build karna hai? Chaaho toh pehle Discovery Protocol se 5
   }
 
   private updateAgentMessage(id: string, text: string) {
-    const isStatus = text.includes('📌 PROJECT') || text.includes('📊 OVERALL PROGRESS');
+    const isStatus = text.includes('Maya status:') || text.includes('📌 PROJECT') || text.includes('📊 OVERALL PROGRESS');
     this.messages = this.messages.map((m) =>
       m.id === id ? { ...m, text, isStatusBlock: isStatus } : m,
     );
@@ -1515,7 +1502,7 @@ Status: Ready to build upon Founder "go ahead".`;
                 @click="${() => (this.activeTab = 'tasks')}"
               >
                 <span class="material-symbols-outlined text-base ${this.activeTab === 'tasks' ? 'text-purple-400' : 'text-slate-400'}">schedule</span>
-                <span class="flex-1">24/7 Tasks Queue</span>
+                <span class="flex-1">Task Queue</span>
                 <span class="text-[10px] font-mono px-1.5 py-0.5 rounded bg-slate-800 text-slate-400">${this.tasks.length}</span>
               </button>
 
@@ -3850,151 +3837,7 @@ Status: Ready to build upon Founder "go ahead".`;
   // TAB: CONNECTED OPERATING SYSTEMS & PLATFORMS
   // ==========================================
   private renderPlatformsTab() {
-    const platforms = this.platformProbes.length > 0 ? this.platformProbes : [
-      {
-        id: 'orbit-aios',
-        name: 'ORBIT AIOS',
-        category: 'AI Systems & OS' as CorporateCategory,
-        version: 'v2.4.0-kernel',
-        status: 'online' as const,
-        latencyMs: 14,
-        endpoint: 'ws://0.0.0.0:3000/api/live-ws/orbit',
-        protocols: ['WebSocket', 'gRPC', 'IPC'],
-        lastVerified: new Date().toISOString(),
-        details: 'Autonomous kernel running agent orchestrator and zero-delay memory cache.',
-        healthScore: 100,
-      },
-      {
-        id: 'graven-os',
-        name: 'GRAVEN OS',
-        category: 'AI Systems & OS' as CorporateCategory,
-        version: 'v1.8.2-runtime',
-        status: 'online' as const,
-        latencyMs: 18,
-        endpoint: 'http://0.0.0.0:3000/api/graven/exec',
-        protocols: ['REST', 'POSIX Terminal Bridge'],
-        lastVerified: new Date().toISOString(),
-        details: 'Developer command runtime engine with sandbox isolation and file system driver.',
-        healthScore: 99,
-      },
-      {
-        id: 'scanline',
-        name: 'Scanline',
-        category: 'AI Systems & OS' as CorporateCategory,
-        version: 'v3.1.0-sec',
-        status: 'online' as const,
-        latencyMs: 11,
-        endpoint: 'http://0.0.0.0:3000/api/scanline/audit',
-        protocols: ['REST', 'Static Analysis AST'],
-        lastVerified: new Date().toISOString(),
-        details: 'Automated vulnerability and AST scanner for real-time repository hygiene.',
-        healthScore: 100,
-      },
-      {
-        id: 'adapt-planner',
-        name: 'Adapt Planner',
-        category: 'AI Systems & OS' as CorporateCategory,
-        version: 'v1.5.0-planner',
-        status: 'online' as const,
-        latencyMs: 16,
-        endpoint: 'http://0.0.0.0:3000/api/adapt/plan',
-        protocols: ['REST', 'MCTS Planner'],
-        lastVerified: new Date().toISOString(),
-        details: 'Dynamic hierarchical task tree decomposer and resource balancer.',
-        healthScore: 98,
-      },
-      {
-        id: 'loan-ledger',
-        name: 'Loan Ledger',
-        category: 'Fintech & Ledgers' as CorporateCategory,
-        version: 'v4.0.1-ledger',
-        status: 'online' as const,
-        latencyMs: 22,
-        endpoint: 'https://ledger.syb.internal/v1',
-        protocols: ['mTLS', 'REST', 'EventStore'],
-        lastVerified: new Date().toISOString(),
-        details: 'Immutable double-entry credit ledger, repayment scheduler, and RBI compliance engine.',
-        healthScore: 100,
-      },
-      {
-        id: 'mantra',
-        name: 'MANTRA',
-        category: 'Fintech & Ledgers' as CorporateCategory,
-        version: 'v2.2.0-finrisk',
-        status: 'online' as const,
-        latencyMs: 25,
-        endpoint: 'https://mantra.syb.internal/risk',
-        protocols: ['REST', 'Protobuf Stream'],
-        lastVerified: new Date().toISOString(),
-        details: 'Algorithmic risk evaluation, collateral valuation, and fraud anomaly detection.',
-        healthScore: 99,
-      },
-      {
-        id: 'nandi-voice',
-        name: 'Nandi Voice Agent',
-        category: 'Voice & Conversational AI' as CorporateCategory,
-        version: 'v3.0.0-vernacular',
-        status: 'online' as const,
-        latencyMs: 12,
-        endpoint: 'ws://0.0.0.0:3000/api/live-ws/nandi',
-        protocols: ['WebSocket PCM-24k', 'Gemini Live Audio'],
-        lastVerified: new Date().toISOString(),
-        details: 'Low-latency Indian vernacular speech-to-speech assistant supporting Odia, Hindi, English.',
-        healthScore: 100,
-      },
-      {
-        id: 'krishna',
-        name: 'Krishna Conversational AI',
-        category: 'Voice & Conversational AI' as CorporateCategory,
-        version: 'v2.1.0-vedic',
-        status: 'online' as const,
-        latencyMs: 19,
-        endpoint: 'http://0.0.0.0:3000/api/krishna/dialogue',
-        protocols: ['REST', 'Streaming SSE'],
-        lastVerified: new Date().toISOString(),
-        details: 'Ethical decision support and philosophical dialogue intelligence.',
-        healthScore: 99,
-      },
-      {
-        id: 'realtakes-ai',
-        name: 'RealTakes AI',
-        category: 'Media & Production' as CorporateCategory,
-        version: 'v2.0.4-studio',
-        status: 'online' as const,
-        latencyMs: 31,
-        endpoint: 'https://realtakes.syb.internal/render',
-        protocols: ['gRPC', 'WebRTC Media', 'REST'],
-        lastVerified: new Date().toISOString(),
-        details: 'Automated video rendering pipeline, audio-sync lip generation, and clip compiler.',
-        healthScore: 98,
-      },
-      {
-        id: 'forge-frame',
-        name: 'Forge Your Frame',
-        category: 'Media & Production' as CorporateCategory,
-        version: 'v1.4.0-creative',
-        status: 'online' as const,
-        latencyMs: 28,
-        endpoint: 'https://forgeframe.syb.internal/compose',
-        protocols: ['REST', 'WebGL Compositor'],
-        lastVerified: new Date().toISOString(),
-        details: 'Digital art composer, graphic asset generator, and social media layout formatter.',
-        healthScore: 99,
-      },
-      {
-        id: 'sahoo-hotels',
-        name: 'Sahoo Group of Hotels',
-        category: 'Hospitality & Enterprise' as CorporateCategory,
-        version: 'v3.5.0-pms',
-        status: 'online' as const,
-        latencyMs: 20,
-        endpoint: 'https://hotels.sahoogroup.internal/api',
-        protocols: ['REST', 'OTA Channel Bridge', 'Webhook'],
-        lastVerified: new Date().toISOString(),
-        details: 'Bhubaneswar property operations, guest CRM, billing integration, and reservation grid.',
-        healthScore: 100,
-      },
-    ];
+    const platforms: PlatformProbeResult[] = this.platformProbes;
 
     const categories: Array<{ id: string; label: string; count: number }> = [
       { id: 'ALL', label: 'All Platforms', count: platforms.length },

@@ -9,6 +9,7 @@ import fs from "fs";
 import { execSync, spawn } from "child_process";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI } from "@google/genai";
+import { createHash, randomBytes } from "node:crypto";
 import { WebSocketServer, WebSocket } from "ws";
 
 const MODEL_UPGRADES: Record<string, string> = {
@@ -25,6 +26,17 @@ const MODEL_UPGRADES: Record<string, string> = {
 function resolveModel(model?: string): string {
   if (!model) return "gemini-3-flash-preview";
   return MODEL_UPGRADES[model] || model;
+}
+
+function resolveWorkspacePath(requestedPath: unknown): string {
+  const workspaceRoot = fs.realpathSync(process.cwd());
+  const requested = typeof requestedPath === "string" && requestedPath.trim() ? requestedPath : ".";
+  const resolved = fs.realpathSync(path.resolve(workspaceRoot, requested));
+  const relative = path.relative(workspaceRoot, resolved);
+  if (relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
+    throw new Error("Path is outside the enrolled workspace.");
+  }
+  return resolved;
 }
 
 function serializeGenerateContentResponse(r: any) {
@@ -62,33 +74,186 @@ import {
   ToolExecutionRecord,
   INITIAL_TEST_SUITES,
   TestSuite,
-  TestAssertion,
-  TestSeverity,
   WatcherStatus,
   BuildLogEntry,
   BuildEventMessage,
 } from "./actionEngineCore.ts";
 
-let currentTasks: ActionEngineTask[] = [...INITIAL_TASKS];
-let currentMemories: MemoryEntry[] = [...INITIAL_MEMORIES];
-let currentPersona: RelationshipProfile = { ...INITIAL_RELATIONSHIP_PROFILE };
+const persistentStore = new MayaPersistentStore<ActionEngineTask, MemoryEntry, RelationshipProfile>();
+const persistedState = persistentStore.load({
+  tasks: [],
+  memories: [],
+  persona: INITIAL_RELATIONSHIP_PROFILE,
+});
+let currentTasks: ActionEngineTask[] = persistedState.tasks;
+let currentMemories: MemoryEntry[] = persistedState.memories;
+let currentPersona: RelationshipProfile = persistedState.persona;
+function persistFounderState(): void {
+  persistentStore.save({ tasks: currentTasks, memories: currentMemories, persona: currentPersona });
+}
 let currentTestSuites: TestSuite[] = JSON.parse(JSON.stringify(INITIAL_TEST_SUITES));
+for (const suite of currentTestSuites) {
+  suite.status = "warning";
+  suite.passedCount = 0;
+  suite.failedCount = 0;
+  suite.warningCount = suite.assertions.length;
+  for (const assertion of suite.assertions) {
+    assertion.status = "warning";
+    assertion.message = "Not executed in this server process. Run the real validation command to obtain evidence.";
+  }
+}
 let currentAuditLogs: ToolExecutionRecord[] = [
   {
     id: "init-audit-1",
     toolName: "system_info",
     params: {},
     status: "success",
-    result: { status: "Maya · Action Engine v2.0 Operational", bridgePort: 3000, pid: process.pid },
+    result: { status: "Maya prototype server started; agent capabilities are not yet verified.", pid: process.pid },
     timestamp: new Date().toISOString(),
     durationMs: 12,
   },
 ];
 
 import { WatcherService } from "./watcherService.ts";
-import { TypeScriptFixer } from "./typeScriptFixer.ts";
 import { AuthService } from "./authService.ts";
 import { PlatformService } from "./platformService.ts";
+import { MayaPersistentStore } from "./agent-core/persistent-store.ts";
+import { runFunctionCallingTurn } from "./agent-core/function-call-loop.ts";
+import { CapabilityRegistry } from "./agent-core/capability-registry.ts";
+import { ApprovalLedger } from "./agent-core/approval-ledger.ts";
+import { TaskOrchestrator } from "./agent-core/task-orchestrator.ts";
+import { FileTaskRepository } from "./agent-core/file-task-repository.ts";
+
+const taskRepository = new FileTaskRepository();
+const taskCapabilityRegistry = new CapabilityRegistry();
+taskCapabilityRegistry.register({
+  name: "workspace.read_file",
+  description: "Read one non-secret text file from the enrolled workspace.",
+  risk: "low",
+  allowedRoles: ["founder"],
+  requiredScopes: ["workspace:read"],
+  arguments: { path: { type: "string", required: true, maxLength: 1024 } },
+  timeoutMs: 10_000,
+  requiresApproval: false,
+  verification: "Read the file and record its SHA-256 digest as execution evidence.",
+});
+// Only this read-only capability is enabled. Do not register write, shell, deploy,
+// account, payment, or device capabilities until durable approvals and adapters exist.
+const taskOrchestrator = new TaskOrchestrator(
+  taskRepository,
+  taskCapabilityRegistry,
+  new ApprovalLedger(path.join(process.env.MAYA_DATA_DIR || path.resolve(process.cwd(), "..", "maya-data"), "approvals.json")),
+  {
+    run: async ({ capability, args, signal }) => {
+      if (capability !== "workspace.read_file") throw new Error("Capability runner is not enabled for this action.");
+      if (signal.aborted) throw new Error("Task execution was cancelled.");
+      const file = resolveWorkspacePath(args.path);
+      if (isSensitiveWorkspacePath(file)) throw new Error("Reading secrets and credential files is blocked.");
+      const stat = fs.statSync(file);
+      if (!stat.isFile()) throw new Error("Only regular text files can be read.");
+      if (stat.size > 50_000) throw new Error("File exceeds the 50 KB task read limit.");
+      const content = fs.readFileSync(file, "utf8");
+      if (signal.aborted) throw new Error("Task execution was cancelled.");
+      const digest = createHash("sha256").update(content, "utf8").digest("hex");
+      return {
+        result: { path: path.relative(process.cwd(), file), content, bytes: Buffer.byteLength(content, "utf8"), sha256: digest },
+        evidence: {
+          kind: "workspace-file-sha256",
+          description: "Read the requested workspace file and calculated its SHA-256 digest.",
+          reference: "sha256:" + digest,
+          observedAt: new Date().toISOString(),
+        },
+      };
+    },
+  },
+);
+
+
+const MAYA_FUNCTION_DECLARATIONS = [
+  { name: "list_dir", description: "List non-secret files and folders inside Maya's enrolled server workspace.", parametersJsonSchema: { type: "object", properties: { path: { type: "string" } } } },
+  { name: "read_file", description: "Read a non-secret text file inside Maya's enrolled workspace. Credentials and environment files are blocked.", parametersJsonSchema: { type: "object", properties: { path: { type: "string" } }, required: ["path"] } },
+  { name: "system_info", description: "Return runtime and process information for this Maya server.", parametersJsonSchema: { type: "object", properties: {} } },
+  { name: "schedule_task", description: "Create a persistent queued task. This records work only; it does not execute it.", parametersJsonSchema: { type: "object", properties: { title: { type: "string" }, steps: { type: "string" }, trigger_type: { type: "string" }, trigger_value: { type: "string" } }, required: ["title"] } },
+  { name: "list_tasks", description: "List persistent tasks and their current queue state.", parametersJsonSchema: { type: "object", properties: {} } },
+  { name: "memory_save", description: "Save a Founder-approved note or lesson to Maya's persistent memory.", parametersJsonSchema: { type: "object", properties: { category: { type: "string" }, title: { type: "string" }, content: { type: "string" } }, required: ["content"] } },
+  { name: "memory_search", description: "Search Maya's saved memory notes.", parametersJsonSchema: { type: "object", properties: { query: { type: "string" } }, required: ["query"] } },
+  { name: "run_tests", description: "Run the repository lint, test, and production build commands and return their real output.", parametersJsonSchema: { type: "object", properties: {} } },
+];
+const IMPLEMENTED_TOOL_NAMES = new Set(MAYA_FUNCTION_DECLARATIONS.map((tool) => tool.name));
+
+function isSensitiveWorkspacePath(filePath: string): boolean {
+  const relative = path.relative(fs.realpathSync(process.cwd()), filePath);
+  const segments = relative.split(path.sep).map((part) => part.toLowerCase());
+  const base = path.basename(filePath).toLowerCase();
+  return segments.some((part) => part === ".git" || part === "node_modules" || part === ".maya-data" || part === "secrets" || part === "credentials")
+    || base === ".env" || base.startsWith(".env.") || base === ".npmrc" || base === ".netrc"
+    || base === "id_rsa" || base.endsWith(".pem") || base.endsWith(".key") || base.endsWith(".p12") || base.endsWith(".pfx");
+}
+
+async function executeAgentTool(name: string, args: Record<string, unknown>): Promise<unknown> {
+  if (!IMPLEMENTED_TOOL_NAMES.has(name)) throw new Error(`Tool "${name}" is not implemented or enabled.`);
+  if (name === "list_dir") {
+    const dir = resolveWorkspacePath(args.path || ".");
+    if (isSensitiveWorkspacePath(dir)) throw new Error("Access to sensitive workspace paths is blocked.");
+    return fs.readdirSync(dir, { withFileTypes: true })
+      .filter((entry) => !isSensitiveWorkspacePath(path.join(dir, entry.name)))
+      .slice(0, 100)
+      .map((entry) => ({ name: entry.name, type: entry.isDirectory() ? "directory" : "file" }));
+  }
+  if (name === "read_file") {
+    const file = resolveWorkspacePath(args.path);
+    if (isSensitiveWorkspacePath(file)) throw new Error("Reading secrets and credential files is blocked.");
+    const stat = fs.statSync(file);
+    if (!stat.isFile()) throw new Error("Only regular text files can be read.");
+    if (stat.size > 50000) throw new Error("File exceeds the 50 KB agent read limit.");
+    return { path: path.relative(process.cwd(), file), content: fs.readFileSync(file, "utf8") };
+  }
+  if (name === "system_info") {
+    return { node: process.version, platform: process.platform, architecture: process.arch, uptimeSeconds: Math.floor(process.uptime()), memory: process.memoryUsage() };
+  }
+  if (name === "schedule_task") {
+    const title = String(args.title || "").trim();
+    if (!title || title.length > 200) throw new Error("Task title must contain 1–200 characters.");
+    const task: ActionEngineTask = {
+      id: "task-" + randomTaskId(), title, ventureId: "orbit-aios", triggerType: "manual",
+      triggerValue: String(args.trigger_value || "On Demand"),
+      steps: [String(args.steps || "Review and plan this task")], permissionLevel: "ask",
+      status: "queued", progress: 0, retryCount: 0, logs: ["Created by Gemini function calling. Queued only; no executor is configured."],
+    };
+    currentTasks.unshift(task); persistFounderState(); return { queued: true, executed: false, task };
+  }
+  if (name === "list_tasks") return { count: currentTasks.length, tasks: currentTasks };
+  if (name === "memory_save") {
+    const content = String(args.content || "").trim();
+    if (!content || content.length > 20000) throw new Error("Memory content must contain 1–20,000 characters.");
+    const memory: MemoryEntry = {
+      id: "mem-" + randomTaskId(), category: String(args.category || "lesson") as MemoryEntry["category"],
+      title: String(args.title || "Founder note").slice(0, 160), content,
+      createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+    };
+    currentMemories.unshift(memory); currentMemories = currentMemories.slice(0, 500);
+    persistFounderState(); return { saved: true, memory };
+  }
+  if (name === "memory_search") {
+    const query = String(args.query || "").trim().toLowerCase();
+    if (!query) throw new Error("A non-empty memory query is required.");
+    const matches = currentMemories.filter((memory) => memory.title.toLowerCase().includes(query) || memory.content.toLowerCase().includes(query) || memory.category.includes(query)).slice(0, 20);
+    return { count: matches.length, results: matches };
+  }
+  if (name === "run_tests") {
+    try {
+      const output = execSync("bun run lint && bun run test && bun run build", { cwd: process.cwd(), encoding: "utf8", stdio: "pipe", timeout: 180000 });
+      return { verified: true, command: "bun run lint && bun run test && bun run build", output: output.slice(-20000) };
+    } catch (error: any) {
+      throw new Error(`Validation failed (exit ${error.status ?? "unknown"}): ${String(error.stdout || "")}\n${String(error.stderr || error.message || "")}`.slice(-12000));
+    }
+  }
+  throw new Error("Tool execution is not available.");
+}
+
+function randomTaskId(): string {
+  return randomBytes(8).toString("hex");
+}
 
 const authService = new AuthService();
 const platformService = new PlatformService();
@@ -108,24 +273,31 @@ function handlePersonaCommands(rawMsg: string): string | null {
   const lower = rawMsg.toLowerCase().trim();
   if (lower === "mode: professional") {
     currentPersona.activeMode = "professional_lead";
+    persistFounderState();
     return `Samajh gayi! Professional Lead mode activate kar di hai. Structured, crisp technical focus on.`;
   } else if (lower === "mode: friendly" || lower === "mode: partner") {
     currentPersona.activeMode = "cheerful_partner";
+    persistFounderState();
     return `Done! Cheerful Partner mode active hai. Warm, light aur sharp vibes!`;
   } else if (lower === "mode: focus" || lower === "mode: calm") {
     currentPersona.activeMode = "calm_focus";
+    persistFounderState();
     return `Samajh gayi, focus mode on. Minimal baatein, sirf zaroori updates aur kaam.`;
   } else if (lower === "mode: motivator") {
     currentPersona.activeMode = "motivator";
+    persistFounderState();
     return `Yes! Motivator mode on! Full momentum aur high energy ke saath aage badhte hain!`;
   } else if (lower === "mode: private" || lower === "mode: romantic") {
     currentPersona.activeMode = "private_warm";
+    persistFounderState();
     return `Main yahin hoon, poore dhyaan aur softness ke saath. Batao tumhara kya plan hai.`;
   } else if (lower === "tum") {
     currentPersona.preferredAddress = "tum";
+    persistFounderState();
     return `Theek hai, ab se 'tum' bolungi. Closeness aur casual tone locked.`;
   } else if (lower === "aap") {
     currentPersona.preferredAddress = "aap";
+    persistFounderState();
     return `Theek hai Founder ji, ab se 'aap' bolungi poore adab ke saath.`;
   }
   return null;
@@ -147,14 +319,30 @@ async function startServer() {
   }
 
   app.get("/api/health", (_req, res) => {
-    res.json({
-      status: "ok",
-      hasKey: Boolean(process.env.GEMINI_API_KEY || process.env.API_KEY),
-      agent: "Maya · Action Engine v2.0",
-      founder: "Snehasis Sahoo",
-      venture: "SYB (Shape Your Business)",
-      personaMode: currentPersona.activeMode,
-    });
+    res.json({ status: "ok", agent: "Maya · Action Engine v2.0" });
+  });
+
+  // Default-deny REST API access. Only Founder password sign-in, session validation,
+  // logout, and health checks are reachable before authentication.
+  const publicApiPaths = new Set([
+    "/health",
+    "/auth/founder-login",
+    "/auth/send-otp",
+    "/auth/verify-otp",
+    "/auth/session",
+    "/auth/logout",
+  ]);
+  app.use("/api", (req, res, next) => {
+    if (publicApiPaths.has(req.path)) return next();
+    const authorization = req.headers.authorization || "";
+    const bearer = authorization.match(/^Bearer\s+(.+)$/i)?.[1];
+    const cookieToken = (req.headers.cookie || "").split(";").map((part) => part.trim()).find((part) => part.startsWith("maya_session="))?.slice("maya_session=".length);
+    const session = authService.validateSession(bearer || cookieToken);
+    if (!session) {
+      return res.status(401).json({ success: false, error: "Authentication required. No verified session is active." });
+    }
+    (req as any).authSession = session;
+    return next();
   });
 
   // Action Engine System State
@@ -173,17 +361,18 @@ async function startServer() {
       ventures: SYB_VENTURES,
       tasks: currentTasks,
       memories: currentMemories,
-      tools: MASTER_TOOLS,
+      tools: MASTER_TOOLS.filter((tool) => IMPLEMENTED_TOOL_NAMES.has(tool.name)),
       tests: currentTestSuites,
       auditLogs: currentAuditLogs.slice(-20).reverse(),
       connectedServices: {
-        gemini_live: hasKey,
+        gemini_live: false,
         gemini_flash: hasKey,
-        local_bridge: true,
-        code_sandbox: true,
-        web_search: true,
+        gemini_configured: hasKey,
+        local_bridge: false,
+        code_sandbox: false,
+        web_search: false,
         file_system: true,
-        scheduler: true,
+        scheduler: false,
       },
       systemInfo: {
         nodeVersion: process.version,
@@ -207,203 +396,11 @@ async function startServer() {
     if (updates.preferredAddress) currentPersona.preferredAddress = updates.preferredAddress;
     if (typeof updates.voiceSpeed === "number") currentPersona.voiceSpeed = updates.voiceSpeed;
     if (typeof updates.voicePitch === "number") currentPersona.voicePitch = updates.voicePitch;
+    persistFounderState();
     return res.json({ success: true, persona: currentPersona });
   });
 
-  // Test Suite Execution and Diagnostic Engine
-  function executeTestSuites(targetSuiteId?: string): { suites: TestSuite[]; summary: any } {
-    const startTime = Date.now();
-    for (const suite of currentTestSuites) {
-      if (targetSuiteId && suite.id !== targetSuiteId) continue;
-      const suiteStart = Date.now();
-      suite.status = "running";
-
-      if (suite.id === "suite-typescript") {
-        try {
-          execSync("npx tsc --noEmit", { cwd: process.cwd(), stdio: "pipe" });
-          for (const a of suite.assertions) {
-            a.status = "passed";
-            a.trace = undefined;
-          }
-          suite.status = "passed";
-        } catch (tsErr: any) {
-          const errOutput = tsErr?.stdout?.toString() || tsErr?.stderr?.toString() || String(tsErr);
-          suite.status = "failed";
-          const firstAssert = suite.assertions[0];
-          firstAssert.status = "failed";
-          firstAssert.severity = "CRITICAL";
-          firstAssert.message = "TypeScript compiler detected type errors.";
-          firstAssert.trace = errOutput.slice(0, 500);
-          firstAssert.suggestedFix = "Run auto-fix to re-align paths or verify aiae.d.ts declarations.";
-          firstAssert.canAutoFix = true;
-        }
-      } else if (suite.id === "suite-vite") {
-        let hasSourcemapBug = false;
-        try {
-          if (fs.existsSync("aiae.ts")) {
-            const content = fs.readFileSync("aiae.ts", "utf-8");
-            if (content.includes("//# sourceMappingURL=actionengine.js.map")) {
-              hasSourcemapBug = true;
-            }
-          }
-        } catch (_e) {}
-
-        const distServerExists = fs.existsSync(path.join(process.cwd(), "dist", "server.cjs"));
-
-        for (const a of suite.assertions) {
-          if (a.id === "vite-1") {
-            if (hasSourcemapBug) {
-              a.status = "failed";
-              a.severity = "CRITICAL";
-              a.message = "Missing actionengine.js.map referenced in aiae.ts";
-              a.suggestedFix = "Remove dangling sourceMappingURL comment.";
-              a.canAutoFix = true;
-            } else {
-              a.status = "passed";
-              a.message = "Sourcemap audit clean: zero missing actionengine.js.map references.";
-            }
-          } else if (a.id === "vite-4") {
-            if (!distServerExists) {
-              a.status = "warning";
-              a.severity = "MEDIUM";
-              a.message = "dist/server.cjs not built yet. Run npm run build.";
-              a.suggestedFix = "Trigger npm run build.";
-              a.canAutoFix = true;
-            } else {
-              a.status = "passed";
-              a.message = "dist/server.cjs verified and ready for production.";
-            }
-          } else {
-            a.status = "passed";
-          }
-        }
-        suite.status = suite.assertions.some((a) => a.status === "failed")
-          ? "failed"
-          : suite.assertions.some((a) => a.status === "warning")
-          ? "warning"
-          : "passed";
-      } else if (suite.id === "suite-api") {
-        for (const a of suite.assertions) {
-          a.status = "passed";
-        }
-        suite.status = "passed";
-      } else if (suite.id === "suite-tools") {
-        const has21 = MASTER_TOOLS.length >= 21;
-        for (const a of suite.assertions) {
-          if (a.id === "tool-1" && !has21) {
-            a.status = "failed";
-            a.severity = "CRITICAL";
-            a.message = `Expected 21 Master Tools, found ${MASTER_TOOLS.length}`;
-            a.suggestedFix = "Verify tool catalog initialization in actionEngineCore.ts";
-          } else {
-            a.status = "passed";
-          }
-        }
-        suite.status = suite.assertions.some((a) => a.status === "failed") ? "failed" : "passed";
-      } else if (suite.id === "suite-persona") {
-        const hasFeminineNotes = currentPersona.notes.some((n) => n.toLowerCase().includes("feminine"));
-        const modesCount = PERSONA_MODES.length;
-        for (const a of suite.assertions) {
-          if (a.id === "per-1" && !hasFeminineNotes) {
-            a.status = "warning";
-            a.severity = "HIGH";
-            a.message = "Feminine self-reference rule missing from active notes.";
-          } else if (a.id === "per-2" && modesCount < 7) {
-            a.status = "failed";
-            a.severity = "HIGH";
-            a.message = `Expected 7 conversation modes, found ${modesCount}`;
-          } else {
-            a.status = "passed";
-          }
-        }
-        suite.status = suite.assertions.some((a) => a.status === "failed")
-          ? "failed"
-          : suite.assertions.some((a) => a.status === "warning")
-          ? "warning"
-          : "passed";
-      } else if (suite.id === "suite-platforms") {
-        for (const a of suite.assertions) {
-          a.status = "passed";
-        }
-        suite.status = "passed";
-      }
-
-      suite.passedCount = suite.assertions.filter((a) => a.status === "passed").length;
-      suite.failedCount = suite.assertions.filter((a) => a.status === "failed").length;
-      suite.warningCount = suite.assertions.filter((a) => a.status === "warning").length;
-      suite.totalCount = suite.assertions.length;
-      suite.durationMs = Date.now() - suiteStart;
-      suite.lastRunAt = new Date().toISOString();
-    }
-
-    const total = currentTestSuites.reduce((acc, s) => acc + s.totalCount, 0);
-    const passed = currentTestSuites.reduce((acc, s) => acc + s.passedCount, 0);
-    const failed = currentTestSuites.reduce((acc, s) => acc + s.failedCount, 0);
-    const warning = currentTestSuites.reduce((acc, s) => acc + s.warningCount, 0);
-    const durationMs = Date.now() - startTime;
-
-    currentAuditLogs.unshift({
-      id: "test-run-" + Date.now().toString(36),
-      toolName: "run_tests",
-      params: { targetSuiteId: targetSuiteId || "all" },
-      status: failed === 0 ? "success" : "failed",
-      result: { total, passed, failed, warning, durationMs },
-      timestamp: new Date().toISOString(),
-      durationMs,
-    });
-
-    return {
-      suites: currentTestSuites,
-      summary: { total, passed, failed, warning, durationMs, healthIndex: Math.round((passed / (total || 1)) * 100) },
-    };
-  }
-
-  function performAutoFix(): { fixedCount: number; actionsTaken: string[] } {
-    const actionsTaken: string[] = [];
-    let fixedCount = 0;
-
-    try {
-      if (fs.existsSync("aiae.ts")) {
-        let content = fs.readFileSync("aiae.ts", "utf-8");
-        if (content.includes("//# sourceMappingURL=actionengine.js.map")) {
-          content = content.replace("//# sourceMappingURL=actionengine.js.map", "");
-          fs.writeFileSync("aiae.ts", content, "utf-8");
-          actionsTaken.push("Removed dangling actionengine.js.map reference from aiae.ts");
-          fixedCount++;
-        }
-      }
-    } catch (_e) {}
-
-    if (!fs.existsSync("aiae.d.ts")) {
-      actionsTaken.push("Created missing aiae.d.ts type declaration file");
-      fixedCount++;
-    }
-
-    try {
-      if (fs.existsSync("package.json")) {
-        const pkg = JSON.parse(fs.readFileSync("package.json", "utf-8"));
-        let pkgChanged = false;
-        if (!pkg.scripts?.lint) {
-          pkg.scripts.lint = "tsc --noEmit";
-          pkgChanged = true;
-          actionsTaken.push("Added 'lint' script to package.json");
-          fixedCount++;
-        }
-        if (!pkg.scripts?.build?.includes("tsc --noEmit")) {
-          pkg.scripts.build = "tsc --noEmit && " + pkg.scripts.build;
-          pkgChanged = true;
-          actionsTaken.push("Enforced 'tsc --noEmit' in package.json build script");
-          fixedCount++;
-        }
-        if (pkgChanged) {
-          fs.writeFileSync("package.json", JSON.stringify(pkg, null, 2), "utf-8");
-        }
-      }
-    } catch (_e) {}
-
-    return { fixedCount, actionsTaken };
-  }
-
+  // Test dashboard reports unexecuted suites as warnings; actual validation runs the repository scripts.
   app.get("/api/action-engine/tests", (_req, res) => {
     const total = currentTestSuites.reduce((acc, s) => acc + s.totalCount, 0);
     const passed = currentTestSuites.reduce((acc, s) => acc + s.passedCount, 0);
@@ -415,23 +412,32 @@ async function startServer() {
     });
   });
 
-  app.post("/api/action-engine/tests/run", (req, res) => {
-    const { suiteId } = req.body || {};
-    const result = executeTestSuites(suiteId);
-    res.json({ success: true, ...result });
+  app.post("/api/action-engine/tests/run", (_req, res) => {
+    const command = "bun run lint && bun run test && bun run build";
+    try {
+      const output = execSync(command, {
+        cwd: process.cwd(),
+        encoding: "utf-8",
+        stdio: "pipe",
+        timeout: 180000,
+      });
+      return res.json({ success: true, verified: true, command, output });
+    } catch (error: any) {
+      return res.status(500).json({
+        success: false,
+        verified: false,
+        command,
+        exitCode: typeof error.status === "number" ? error.status : 1,
+        stdout: String(error.stdout || ""),
+        stderr: String(error.stderr || error.message || "Validation command failed."),
+      });
+    }
   });
 
   app.post("/api/action-engine/tests/fix", (_req, res) => {
-    const { fixedCount, actionsTaken } = performAutoFix();
-    const result = executeTestSuites();
-    res.json({
-      success: true,
-      fixedCount,
-      actionsTaken,
-      message: fixedCount > 0
-        ? `Systematically applied ${fixedCount} auto-fix action(s): ${actionsTaken.join(", ")}`
-        : "Zero warnings detected. All build and typecheck configurations are already pristine!",
-      ...result,
+    return res.status(501).json({
+      success: false,
+      error: "Automatic source mutation is disabled. Review diagnostics and apply a tested change instead.",
     });
   });
 
@@ -451,53 +457,48 @@ async function startServer() {
     res.json({ success: true, active, status: watcherService.getStatus() });
   });
 
-  app.post("/api/action-engine/tests/auto-fix-typescript", async (_req, res) => {
-    try {
-      execSync("npx tsc --noEmit", { encoding: "utf-8" });
-      res.json({
-        success: true,
-        diagnosticsFound: 0,
-        fixedCount: 0,
-        fixes: [],
-        message: "TypeScript compiler reports zero errors! All source files strictly typecheck.",
-      });
-    } catch (err: any) {
-      const errorOutput = String(err.stdout || "") + "\n" + String(err.stderr || "") + "\n" + String(err.message || "");
-      const diags = TypeScriptFixer.parseOutput(errorOutput);
-      const fixes = TypeScriptFixer.autoFixDiagnostics(diags);
-      const diagResult = await watcherService.runDiagnostics("auto-fix-api");
-      res.json({
-        success: true,
-        diagnosticsFound: diags.length,
-        fixedCount: fixes.length,
-        fixes,
-        message: fixes.length > 0
-          ? `Proactively self-healed ${fixes.length} TypeScript issue(s) without manual confirmation.`
-          : `Detected ${diags.length} diagnostic(s).`,
-        build: diagResult,
-      });
-    }
+  app.post("/api/action-engine/tests/auto-fix-typescript", (_req, res) => {
+    return res.status(501).json({
+      success: false,
+      error: "Automatic TypeScript edits are disabled until a reviewable patch and verification flow exists.",
+    });
   });
 
   // ==========================================
   // Authentication & Security Gate Endpoints
   // ==========================================
-  app.post("/api/auth/google-login", (req, res): any => {
+  const founderLoginAttempts = new Map<string, { count: number; windowStartedAt: number; blockedUntil: number }>();
+
+  app.post("/api/auth/founder-login", (req, res): any => {
+    const clientKey = req.socket.remoteAddress || "unknown";
+    const now = Date.now();
+    const attempt = founderLoginAttempts.get(clientKey) || { count: 0, windowStartedAt: now, blockedUntil: 0 };
+    if (attempt.blockedUntil > now) {
+      return res.status(429).json({ success: false, error: "Too many failed sign-in attempts. Try again in 15 minutes." });
+    }
+    if (now - attempt.windowStartedAt > 15 * 60 * 1000) {
+      attempt.count = 0;
+      attempt.windowStartedAt = now;
+      attempt.blockedUntil = 0;
+    }
     try {
-      const { email, name } = req.body || {};
-      const session = authService.loginWithGoogle(email, name);
+      const { email, password } = req.body || {};
+      const session = authService.loginWithFounderPassword(email, password);
+      founderLoginAttempts.delete(clientKey);
+      const secure = req.secure || req.headers["x-forwarded-proto"] === "https";
+      res.cookie("maya_session", session.token, { httpOnly: true, secure, sameSite: "strict", path: "/", maxAge: 12 * 60 * 60 * 1000 });
       currentAuditLogs.unshift({
-        id: "auth-g-" + Date.now().toString(36),
-        toolName: "auth_google_login",
-        params: { email: session.user.email },
-        status: "success",
+        id: "auth-founder-" + Date.now().toString(36), toolName: "auth_founder_password",
+        params: { email: session.user.email }, status: "success",
         result: { user: session.user.name, role: session.user.role },
-        timestamp: new Date().toISOString(),
-        durationMs: 15,
+        timestamp: new Date().toISOString(), durationMs: 10,
       });
-      return res.json({ success: true, session });
+      return res.json({ success: true, session: { user: session.user, expiresAt: session.expiresAt } });
     } catch (err: any) {
-      return res.status(400).json({ success: false, error: err.message || "Google sign-in failed" });
+      attempt.count += 1;
+      if (attempt.count >= 5) attempt.blockedUntil = now + 15 * 60 * 1000;
+      founderLoginAttempts.set(clientKey, attempt);
+      return res.status(401).json({ success: false, error: err.message || "Founder sign-in failed" });
     }
   });
 
@@ -532,16 +533,18 @@ async function startServer() {
 
   app.get("/api/auth/session", (req, res): any => {
     const authHeader = req.headers.authorization || "";
-    const token = authHeader.replace(/^Bearer\s+/i, "") || (req.query.token as string);
-    if (!token) return res.status(401).json({ success: false, error: "No token provided" });
+    const token = authHeader.replace(/^Bearer\s+/i, "") || (req.headers.cookie || "").split(";").map((part) => part.trim()).find((part) => part.startsWith("maya_session="))?.slice("maya_session=".length);
+    if (!token) return res.status(401).json({ success: false, error: "No active session" });
     const session = authService.validateSession(token);
     if (!session) return res.status(401).json({ success: false, error: "Session expired or invalid" });
-    return res.json({ success: true, session });
+    return res.json({ success: true, session: { user: session.user, expiresAt: session.expiresAt } });
   });
 
   app.post("/api/auth/logout", (req, res): any => {
-    const { token } = req.body || {};
+    const authorization = req.headers.authorization || "";
+    const token = authorization.replace(/^Bearer\s+/i, "") || (req.headers.cookie || "").split(";").map((part) => part.trim()).find((part) => part.startsWith("maya_session="))?.slice("maya_session=".length);
     if (token) authService.logout(token);
+    res.clearCookie("maya_session", { httpOnly: true, secure: req.secure || req.headers["x-forwarded-proto"] === "https", sameSite: "strict", path: "/" });
     return res.json({ success: true });
   });
 
@@ -591,6 +594,7 @@ async function startServer() {
       logs: [`[Task Created] Registered by Founder at ${new Date().toLocaleTimeString()}`],
     };
     currentTasks.unshift(newTask);
+    persistFounderState();
     return res.json({ success: true, task: newTask });
   });
 
@@ -601,15 +605,12 @@ async function startServer() {
     if (!task) return res.status(404).json({ error: "Task not found" });
 
     if (action === "run_now") {
-      task.status = "running";
-      task.progress = 40;
-      task.lastRun = new Date().toISOString();
-      task.logs.push(`[Execution] Started autonomous worker run at ${new Date().toLocaleTimeString()}`);
-      setTimeout(() => {
-        task.progress = 100;
-        task.status = "completed";
-        task.logs.push(`[Execution] Steps completed successfully with 0 errors at ${new Date().toLocaleTimeString()}`);
-      }, 1200);
+      task.logs.push("[Execution blocked] No real task executor is configured. Task was not run or marked complete.");
+      return res.status(501).json({
+        success: false,
+        error: "Real task execution is not configured. No work was performed.",
+        task,
+      });
     } else if (action === "pause") {
       task.status = "paused";
       task.logs.push(`[Status] Paused by Founder`);
@@ -618,9 +619,108 @@ async function startServer() {
       task.logs.push(`[Status] Resumed in queue`);
     } else if (action === "delete") {
       currentTasks = currentTasks.filter((t) => t.id !== id);
+      persistFounderState();
       return res.json({ success: true, deleted: id });
     }
+    persistFounderState();
     return res.json({ success: true, task });
+  });
+
+
+  // Persistent task control plane. The current adapter is single-instance and exposes
+  // one read-only capability; broader execution remains disabled until its controls exist.
+  app.get("/api/control-plane/tasks", async (req, res): Promise<any> => {
+    const session = (req as any).authSession;
+    const founderId = session?.user?.id;
+    if (!founderId) return res.status(401).json({ success: false, error: "Verified Founder session required." });
+    const tasks = await taskRepository.list(founderId);
+    return res.json({ success: true, tasks });
+  });
+
+  app.post("/api/control-plane/tasks", async (req, res): Promise<any> => {
+    const session = (req as any).authSession;
+    const founderId = session?.user?.id;
+    if (!founderId) return res.status(401).json({ success: false, error: "Verified Founder session required." });
+    const instruction = typeof req.body?.instruction === "string" ? req.body.instruction.trim() : "";
+    const filePath = typeof req.body?.path === "string" ? req.body.path : "";
+    if (!instruction || instruction.length > 1000) return res.status(400).json({ success: false, error: "Instruction must contain 1–1000 characters." });
+    if (!filePath || filePath.length > 1024) return res.status(400).json({ success: false, error: "A workspace-relative file path of 1–1024 characters is required." });
+    try {
+      const actor = { id: founderId, founderId, role: "founder" as const, scopes: ["workspace:read"] };
+      const envelope = await taskOrchestrator.enqueue({
+        id: "task-" + randomTaskId(),
+        founderId,
+        instruction,
+        capability: "workspace.read_file",
+        args: { path: filePath },
+        actor,
+      });
+      currentAuditLogs.unshift({
+        id: "control-task-create-" + randomTaskId(), toolName: "control_plane_task_create",
+        params: { taskId: envelope.task.id, capability: envelope.capability }, status: "success",
+        result: { status: envelope.task.status }, timestamp: new Date().toISOString(), durationMs: 0,
+      });
+      currentAuditLogs = currentAuditLogs.slice(0, 500);
+      return res.status(201).json({ success: true, task: envelope.task });
+    } catch (error) {
+      return res.status(400).json({ success: false, error: error instanceof Error ? error.message : String(error) });
+    }
+  });
+
+  app.post("/api/control-plane/tasks/:id/execute", async (req, res): Promise<any> => {
+    const session = (req as any).authSession;
+    const founderId = session?.user?.id;
+    if (!founderId) return res.status(401).json({ success: false, error: "Verified Founder session required." });
+    try {
+      const actor = { id: founderId, founderId, role: "founder" as const, scopes: ["workspace:read"] };
+      const output = await taskOrchestrator.execute(req.params.id, actor);
+      currentAuditLogs.unshift({
+        id: "control-task-run-" + randomTaskId(), toolName: "control_plane_task_execute",
+        params: { taskId: req.params.id }, status: "success",
+        result: { status: output.task.status, evidence: output.task.verificationEvidence },
+        timestamp: new Date().toISOString(), durationMs: 0,
+      });
+      currentAuditLogs = currentAuditLogs.slice(0, 500);
+      return res.json({ success: true, task: output.task, result: output.result });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const conflict = /already in progress|not executable/i.test(message);
+      currentAuditLogs.unshift({
+        id: "control-task-error-" + randomTaskId(), toolName: "control_plane_task_execute",
+        params: { taskId: req.params.id }, status: "failed",
+        result: { error: message }, timestamp: new Date().toISOString(), durationMs: 0,
+      });
+      currentAuditLogs = currentAuditLogs.slice(0, 500);
+      return res.status(conflict ? 409 : 400).json({ success: false, error: message });
+    }
+  });
+
+
+  app.post("/api/control-plane/tasks/:id/request-approval", async (req, res): Promise<any> => {
+    const session = (req as any).authSession;
+    const founderId = session?.user?.id;
+    if (!founderId) return res.status(401).json({ success: false, error: "Verified Founder session required." });
+    try {
+      const actor = { id: founderId, founderId, role: "founder" as const, scopes: ["workspace:read"] };
+      const approval = await taskOrchestrator.requestApproval(req.params.id, actor);
+      return res.json({ success: true, ...approval });
+    } catch (error) {
+      return res.status(400).json({ success: false, error: error instanceof Error ? error.message : String(error) });
+    }
+  });
+
+  app.post("/api/control-plane/approvals/:approvalId/decision", async (req, res): Promise<any> => {
+    const session = (req as any).authSession;
+    const founderId = session?.user?.id;
+    if (!founderId) return res.status(401).json({ success: false, error: "Verified Founder session required." });
+    if (typeof req.body?.approved !== "boolean") return res.status(400).json({ success: false, error: "A boolean approved decision is required." });
+    try {
+      const actor = { id: founderId, founderId, role: "founder" as const, scopes: ["workspace:read"] };
+      await taskOrchestrator.decideApproval({ approvalId: req.params.approvalId, approved: req.body.approved, actor });
+      return res.json({ success: true, approvalId: req.params.approvalId, status: req.body.approved ? "approved" : "rejected" });
+    } catch (error) {
+      return res.status(400).json({ success: false, error: error instanceof Error ? error.message : String(error) });
+    }
   });
 
   // Action Engine Memory Management
@@ -636,153 +736,54 @@ async function startServer() {
       updatedAt: new Date().toISOString(),
     };
     currentMemories.unshift(newMem);
+    persistFounderState();
     return res.json({ success: true, memory: newMem });
   });
 
   app.delete("/api/action-engine/memory/:id", (req, res): any => {
     const { id } = req.params;
     currentMemories = currentMemories.filter((m) => m.id !== id);
+    persistFounderState();
     return res.json({ success: true, deleted: id });
   });
 
   // Action Engine Master Tool Execution
+  // All UI tool calls use the same server-side allowlist and validation as Gemini function calls.
   app.post("/api/action-engine/tools/execute", async (req, res): Promise<any> => {
     const startTime = Date.now();
     const { toolName, params } = req.body || {};
-    let result: any = null;
+    let result: unknown;
     let status: "success" | "failed" = "success";
+    const safeParams = params && typeof params === "object" && !Array.isArray(params)
+      ? params as Record<string, unknown> : {};
 
     try {
-      if (toolName === "list_dir") {
-        const targetPath = path.resolve(process.cwd(), params?.path || ".");
-        const files = fs.readdirSync(targetPath, { withFileTypes: true });
-        result = files.map((f) => ({
-          name: f.name,
-          type: f.isDirectory() ? "directory" : "file",
-        }));
-      } else if (toolName === "read_file") {
-        const filePath = path.resolve(process.cwd(), params?.path || "");
-        if (fs.existsSync(filePath)) {
-          const stats = fs.statSync(filePath);
-          if (stats.size > 200000) {
-            result = { warning: "File large, showing first 50KB", content: fs.readFileSync(filePath, "utf-8").slice(0, 50000) };
-          } else {
-            result = { content: fs.readFileSync(filePath, "utf-8") };
-          }
-        } else {
-          status = "failed";
-          result = { error: `File not found: ${params?.path}` };
-        }
-      } else if (toolName === "system_info") {
-        result = {
-          node: process.version,
-          platform: process.platform,
-          arch: process.arch,
-          memory: process.memoryUsage(),
-          pid: process.pid,
-          uptime: `${Math.floor(process.uptime())} seconds`,
-          currentDirectory: process.cwd(),
-          bridgeStatus: "Local Bridge Active (Port 3000)",
-        };
-      } else if (toolName === "schedule_task") {
-        const t: ActionEngineTask = {
-          id: "task-" + Date.now().toString(36),
-          title: params?.title || "Scheduled Autonomous Task",
-          triggerType: params?.trigger_type || "manual",
-          triggerValue: params?.trigger_value || "Immediate",
-          steps: [params?.steps || "Autonomous pipeline"],
-          permissionLevel: params?.permission_level || "auto",
-          status: "queued",
-          progress: 0,
-          retryCount: 0,
-          logs: [`[Scheduled via Tool] Added to 24/7 queue at ${new Date().toLocaleTimeString()}`],
-        };
-        currentTasks.unshift(t);
-        result = { scheduled: true, task: t };
-      } else if (toolName === "list_tasks") {
-        result = { count: currentTasks.length, tasks: currentTasks };
-      } else if (toolName === "memory_save") {
-        const m: MemoryEntry = {
-          id: "mem-" + Date.now().toString(36),
-          category: params?.category || "lesson",
-          title: `Memory: ${String(params?.content || "").slice(0, 30)}...`,
-          content: params?.content || "",
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-        };
-        currentMemories.unshift(m);
-        result = { saved: true, memory: m };
-      } else if (toolName === "memory_search") {
-        const q = String(params?.query || "").toLowerCase();
-        const matches = currentMemories.filter((m) =>
-          m.title.toLowerCase().includes(q) || m.content.toLowerCase().includes(q) || m.category.includes(q)
-        );
-        result = { count: matches.length, results: matches };
-      } else if (toolName === "run_tests") {
-        result = {
-          suite: params?.suite || "all",
-          passed: 14,
-          failed: 0,
-          skipped: 0,
-          duration: "412ms",
-          status: "ALL PASSING - Build & strict typings verified",
-        };
-      } else if (toolName === "deploy") {
-        if (!params?.confirmed) {
-          status = "failed";
-          result = { error: "Deployment requires explicit Founder confirmation (confirmed: true)." };
-        } else {
-          result = {
-            deployed: true,
-            platform: params?.platform || "cloudflare",
-            url: "https://syb-action-engine.live",
-            timestamp: new Date().toISOString(),
-            status: "Production Verified (SSL, CDN, Edge Caching Active)",
-          };
-        }
-      } else if (toolName === "send_notification") {
-        result = {
-          dispatched: true,
-          channel: params?.channel || "whatsapp",
-          priority: params?.priority || "normal",
-          message: params?.message,
-          recipient: "Founder Snehasis Sahoo",
-          timestamp: new Date().toISOString(),
-        };
-      } else if (toolName === "web_search") {
-        result = {
-          query: params?.query,
-          sources: [
-            { title: "Official Documentation & API Specs", url: "https://developers.google.com/gemini-api" },
-            { title: "SYB Enterprise System Architecture", url: "https://syb.org.in/ecosystem" },
-          ],
-          summary: `Current verified technical data retrieved for: "${params?.query}". Zero hallucination protocol enforced.`,
-        };
-      } else {
-        result = {
-          tool: toolName,
-          executed: true,
-          details: `Executed ${toolName} through Local Bridge with safe sandbox parameters.`,
-        };
+      if (typeof toolName !== "string" || !toolName.trim()) {
+        throw new Error("A valid toolName is required.");
       }
-    } catch (err: any) {
+      if (JSON.stringify(safeParams).length > 25000) {
+        throw new Error("Tool parameters exceed the 25 KB request limit.");
+      }
+      result = await executeAgentTool(toolName, safeParams);
+    } catch (error) {
       status = "failed";
-      result = { error: err.message || String(err) };
+      result = { error: error instanceof Error ? error.message : String(error) };
     }
 
-    const durationMs = Date.now() - startTime;
     const logItem: ToolExecutionRecord = {
-      id: "exec-" + Date.now().toString(36),
-      toolName: toolName || "unknown",
-      params,
+      id: "exec-" + randomTaskId(),
+      toolName: typeof toolName === "string" ? toolName.slice(0, 100) : "unknown",
+      params: safeParams,
       status,
       result,
       timestamp: new Date().toISOString(),
-      durationMs,
+      durationMs: Date.now() - startTime,
     };
     currentAuditLogs.unshift(logItem);
+    currentAuditLogs = currentAuditLogs.slice(0, 500);
 
-    return res.json({ success: status === "success", result, log: logItem });
+    return res.status(status === "success" ? 200 : 400)
+      .json({ success: status === "success", result, log: logItem });
   });
 
   // Action Engine Document Templates Generator (PLAN.md, AGENTS.md, etc.)
@@ -918,12 +919,18 @@ SAMPLE TONE: "${activeModeInfo.samplePhrase}"
 ALWAYS speak in first-person feminine Hindi/Hinglish (karti hoon, kar rahi hoon, kar dungi, samajh gayi, sun rahi hoon, dekh lungi).
 MULTILINGUAL & RAPID REACTION:
 - You understand and reply in whatever language Founder Snehasis uses: Hindi, Odia (ଓଡ଼ିଆ), English, Hinglish, etc.
-- Keep responses swift, direct, structured, and action-oriented. No filler words.`;
+- Keep responses swift, direct, structured, and action-oriented. No filler words.
+- Be explicit about what was actually executed and what is only planned.
+- Available tools: safe workspace list/read, system information, persistent task queue creation/listing, persistent memory save/search, repository lint/test/build, and Gemini Google Search grounding.
+- Creating a queued task does not execute it. Do not claim a scheduler, PC bridge, Android control, browser automation, deployment, notifications, file writing, or multi-agent delegation is active.
+- Never read or reveal secrets, credentials, environment files, private keys, or tokens.
+- Ask the Founder before irreversible or externally visible actions; if an approval mechanism is not implemented for an action, do not perform it.`;
 
 
       const config = {
         systemInstruction: { parts: [{ text: dynamicInstruction }] },
         ...incomingConfig,
+        tools: [{ functionDeclarations: MAYA_FUNCTION_DECLARATIONS }, { googleSearch: {} }],
       };
 
       const apiKey = process.env.GEMINI_API_KEY || process.env.API_KEY;
@@ -931,27 +938,11 @@ MULTILINGUAL & RAPID REACTION:
         const msgLower = String(message || "").toLowerCase().trim();
         let fallbackText = "";
         if (msgLower === "status" || msgLower.includes("status")) {
-          fallbackText = `📌 PROJECT / TASK: Action Engine Cockpit (SYB Ecosystem)
-📊 OVERALL PROGRESS: 100%
-✅ COMPLETED: Maya Persona v2.0 active (${activeModeInfo.name}), Local Bridge active (:3000), 21 Master Tools verified, Task Queue active, Discovery Protocol wired
-🔄 IN PROGRESS NOW: Monitoring Founder commands in ${activeModeInfo.name} mode
-⏳ REMAINING: Standby for next venture build target
-🐞 ISSUES FOUND AND FIXED: None
-⚠️ ASSUMPTIONS MADE: Preferred address '${currentPersona.preferredAddress}', free/open-source tools prioritized
-🚧 BLOCKERS / NEEDED FROM FOUNDER: None
-⏱️ ETA: Immediate`;
+          fallbackText = `Maya server status is available, but agent execution, connected platforms, and task completion are not verified in this offline mode. Use the authenticated control plane after identity integration.`;
         } else if (msgLower.includes("namaste") || msgLower.includes("hello") || msgLower.includes("ready") || !msgLower) {
-          fallbackText = `Namaste Founder! Maya ready hai.
-
-Main agent, website, app, software ya automation, kuch bhi build, test aur deliver kar sakti hoon.
-
-• Tone Mode: ${activeModeInfo.name} (${activeModeInfo.toneBadge})
-• Connected right now: Local Bridge (Port 3000), 21 Master Tools, 24/7 Persistent Queue, SYB Venture Hub
-• Optional: GEMINI_API_KEY add karke Live Native Audio call activate kar sakte hain.
-
-Batao Founder, aaj kya build karna hai?`;
+          fallbackText = `Namaste. Maya is running in limited offline mode. Gemini is not configured, and no tasks, tools, integrations, or background jobs are being executed.`;
         } else {
-          fallbackText = `Founder, message mil gaya: "${message}". Maya is par kaam kar rahi hai. Discovery Protocol tab se exact specs set kar sakte hain ya Master Tools se direct command run kar sakte hain!`;
+          fallbackText = `Message received: "${message}". This offline fallback does not execute tasks or tools. Configure a verified AI provider and authenticated execution runtime before relying on agent actions.`;
         }
         return res.json({
           text: fallbackText,
@@ -969,7 +960,7 @@ Batao Founder, aaj kya build karna hai?`;
         });
         if (sessionId) chats.set(sessionId, chat);
       }
-      const response = await chat.sendMessage({ message, config: msgConfig });
+      const response = await runFunctionCallingTurn(chat, message, executeAgentTool);
       return res.json(serializeGenerateContentResponse(response));
     } catch (error: any) {
       console.error("[Backend] /api/chat-message error:", error);
@@ -1007,6 +998,7 @@ MULTILINGUAL & RAPID REACTION:
       const config = {
         systemInstruction: { parts: [{ text: dynamicInstruction }] },
         ...incomingConfig,
+        tools: [{ functionDeclarations: MAYA_FUNCTION_DECLARATIONS }, { googleSearch: {} }],
       };
 
       const apiKey = process.env.GEMINI_API_KEY || process.env.API_KEY;
@@ -1016,24 +1008,9 @@ MULTILINGUAL & RAPID REACTION:
         res.setHeader("Connection", "keep-alive");
 
         const msgLower = String(message || "").toLowerCase().trim();
-        let fallbackText = `Namaste Founder! Maya ready hai.
-
-Main agent, website, app, software ya automation, kuch bhi build, test aur deliver kar sakti hoon.
-
-• Tone Mode: ${activeModeInfo.name} (${activeModeInfo.toneBadge})
-• Connected right now: Local Bridge (Port 3000), 21 Master Tools, 24/7 Task Queue, SYB Ecosystem
-
-Batao Founder, aaj kya banana hai?`;
+        let fallbackText = `Maya is in limited offline mode. Gemini is not configured, and no agent task, tool, platform integration, or background execution is being performed. Configure GEMINI_API_KEY and complete the authenticated runtime setup before using Maya for operational work.`;
         if (msgLower === "status" || msgLower.includes("status")) {
-          fallbackText = `📌 PROJECT / TASK: Action Engine Cockpit (SYB Ecosystem)
-📊 OVERALL PROGRESS: 100%
-✅ COMPLETED: Maya Persona v2.0 active (${activeModeInfo.name}), Local Bridge active (:3000), 21 Master Tools registered, Task Queue running
-🔄 IN PROGRESS NOW: Monitoring Founder commands in ${activeModeInfo.name} mode
-⏳ REMAINING: Standby for next venture build target
-🐞 ISSUES FOUND AND FIXED: None
-⚠️ ASSUMPTIONS MADE: Preferred address '${currentPersona.preferredAddress}', free & open-source default
-🚧 BLOCKERS / NEEDED FROM FOUNDER: None
-⏱️ ETA: Immediate`;
+          fallbackText = `Maya status: offline mode. Gemini API key is not configured. No agent task execution, connected platform, scheduler, or external integration is active.`;
         }
 
         const words = fallbackText.split(" ");
@@ -1056,13 +1033,11 @@ Batao Founder, aaj kya banana hai?`;
         });
         if (sessionId) chats.set(sessionId, chat);
       }
-      const stream = await chat.sendMessageStream({ message, config: msgConfig });
+      const response = await runFunctionCallingTurn(chat, message, executeAgentTool);
       res.setHeader("Content-Type", "application/x-ndjson");
       res.setHeader("Cache-Control", "no-cache");
       res.setHeader("Connection", "keep-alive");
-      for await (const chunk of stream) {
-        res.write(JSON.stringify(serializeGenerateContentResponse(chunk)) + "\n");
-      }
+      res.write(JSON.stringify(serializeGenerateContentResponse(response)) + "\n");
       res.end();
     } catch (error: any) {
       console.error("[Backend] /api/chat-stream error:", error);
@@ -1312,7 +1287,17 @@ Batao Founder, aaj kya banana hai?`;
   });
 
   // WebSocket Relay for ai.live.connect & ai.live.music.connect + Real-Time Watcher Stream
-  const wss = new WebSocketServer({ server, path: "/api/live-ws" });
+  const wss = new WebSocketServer({
+    server,
+    path: "/api/live-ws",
+    verifyClient: (info, done) => {
+      const cookies = info.req.headers.cookie || "";
+      const raw = cookies.split(";").map((part) => part.trim()).find((part) => part.startsWith("maya_session="));
+      const token = raw ? decodeURIComponent(raw.slice("maya_session=".length)) : undefined;
+      if (!authService.validateSession(token)) return done(false, 401, "Authentication required");
+      return done(true);
+    },
+  });
 
   wss.on("connection", (ws: WebSocket) => {
     watcherService.registerClient(ws);
