@@ -45,7 +45,7 @@ test("executes safe steps, pauses for approval, then resumes sequentially with e
 });
 
 test("does not execute another Founder's plan or approve read-only steps", async () => {
-  const ctx = setup(sample, async () => ({ ok: true }));
+  const ctx = await setup(sample, async () => ({ ok: true }));
   try {
     await assert.rejects(ctx.executor.execute("founder-b", ctx.saved.id), /not found/i);
     await assert.rejects(ctx.executor.approveStep("founder-a", ctx.saved.id, "inspect"), /does not require/);
