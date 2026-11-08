@@ -73,8 +73,6 @@ import {
   ToolExecutionRecord,
   INITIAL_TEST_SUITES,
   TestSuite,
-  TestAssertion,
-  TestSeverity,
   WatcherStatus,
   BuildLogEntry,
   BuildEventMessage,
@@ -116,7 +114,6 @@ let currentAuditLogs: ToolExecutionRecord[] = [
 ];
 
 import { WatcherService } from "./watcherService.ts";
-import { TypeScriptFixer } from "./typeScriptFixer.ts";
 import { AuthService } from "./authService.ts";
 import { PlatformService } from "./platformService.ts";
 import { MayaPersistentStore } from "./agent-core/persistent-store.ts";
@@ -265,200 +262,7 @@ async function startServer() {
     return res.json({ success: true, persona: currentPersona });
   });
 
-  // Test Suite Execution and Diagnostic Engine
-  function executeTestSuites(targetSuiteId?: string): { suites: TestSuite[]; summary: any } {
-    const startTime = Date.now();
-    for (const suite of currentTestSuites) {
-      if (targetSuiteId && suite.id !== targetSuiteId) continue;
-      const suiteStart = Date.now();
-      suite.status = "running";
-
-      if (suite.id === "suite-typescript") {
-        try {
-          execSync("npx tsc --noEmit", { cwd: process.cwd(), stdio: "pipe" });
-          for (const a of suite.assertions) {
-            a.status = "passed";
-            a.trace = undefined;
-          }
-          suite.status = "passed";
-        } catch (tsErr: any) {
-          const errOutput = tsErr?.stdout?.toString() || tsErr?.stderr?.toString() || String(tsErr);
-          suite.status = "failed";
-          const firstAssert = suite.assertions[0];
-          firstAssert.status = "failed";
-          firstAssert.severity = "CRITICAL";
-          firstAssert.message = "TypeScript compiler detected type errors.";
-          firstAssert.trace = errOutput.slice(0, 500);
-          firstAssert.suggestedFix = "Run auto-fix to re-align paths or verify aiae.d.ts declarations.";
-          firstAssert.canAutoFix = true;
-        }
-      } else if (suite.id === "suite-vite") {
-        let hasSourcemapBug = false;
-        try {
-          if (fs.existsSync("aiae.ts")) {
-            const content = fs.readFileSync("aiae.ts", "utf-8");
-            if (content.includes("//# sourceMappingURL=actionengine.js.map")) {
-              hasSourcemapBug = true;
-            }
-          }
-        } catch (_e) {}
-
-        const distServerExists = fs.existsSync(path.join(process.cwd(), "dist", "server.cjs"));
-
-        for (const a of suite.assertions) {
-          if (a.id === "vite-1") {
-            if (hasSourcemapBug) {
-              a.status = "failed";
-              a.severity = "CRITICAL";
-              a.message = "Missing actionengine.js.map referenced in aiae.ts";
-              a.suggestedFix = "Remove dangling sourceMappingURL comment.";
-              a.canAutoFix = true;
-            } else {
-              a.status = "passed";
-              a.message = "Sourcemap audit clean: zero missing actionengine.js.map references.";
-            }
-          } else if (a.id === "vite-4") {
-            if (!distServerExists) {
-              a.status = "warning";
-              a.severity = "MEDIUM";
-              a.message = "dist/server.cjs not built yet. Run npm run build.";
-              a.suggestedFix = "Trigger npm run build.";
-              a.canAutoFix = true;
-            } else {
-              a.status = "passed";
-              a.message = "dist/server.cjs verified and ready for production.";
-            }
-          } else {
-            a.status = "passed";
-          }
-        }
-        suite.status = suite.assertions.some((a) => a.status === "failed")
-          ? "failed"
-          : suite.assertions.some((a) => a.status === "warning")
-          ? "warning"
-          : "passed";
-      } else if (suite.id === "suite-api") {
-        for (const a of suite.assertions) {
-          a.status = "passed";
-        }
-        suite.status = "passed";
-      } else if (suite.id === "suite-tools") {
-        const has21 = MASTER_TOOLS.length >= 21;
-        for (const a of suite.assertions) {
-          if (a.id === "tool-1" && !has21) {
-            a.status = "failed";
-            a.severity = "CRITICAL";
-            a.message = `Expected 21 Master Tools, found ${MASTER_TOOLS.length}`;
-            a.suggestedFix = "Verify tool catalog initialization in actionEngineCore.ts";
-          } else {
-            a.status = "passed";
-          }
-        }
-        suite.status = suite.assertions.some((a) => a.status === "failed") ? "failed" : "passed";
-      } else if (suite.id === "suite-persona") {
-        const hasFeminineNotes = currentPersona.notes.some((n) => n.toLowerCase().includes("feminine"));
-        const modesCount = PERSONA_MODES.length;
-        for (const a of suite.assertions) {
-          if (a.id === "per-1" && !hasFeminineNotes) {
-            a.status = "warning";
-            a.severity = "HIGH";
-            a.message = "Feminine self-reference rule missing from active notes.";
-          } else if (a.id === "per-2" && modesCount < 7) {
-            a.status = "failed";
-            a.severity = "HIGH";
-            a.message = `Expected 7 conversation modes, found ${modesCount}`;
-          } else {
-            a.status = "passed";
-          }
-        }
-        suite.status = suite.assertions.some((a) => a.status === "failed")
-          ? "failed"
-          : suite.assertions.some((a) => a.status === "warning")
-          ? "warning"
-          : "passed";
-      } else if (suite.id === "suite-platforms") {
-        for (const a of suite.assertions) {
-          a.status = "passed";
-        }
-        suite.status = "passed";
-      }
-
-      suite.passedCount = suite.assertions.filter((a) => a.status === "passed").length;
-      suite.failedCount = suite.assertions.filter((a) => a.status === "failed").length;
-      suite.warningCount = suite.assertions.filter((a) => a.status === "warning").length;
-      suite.totalCount = suite.assertions.length;
-      suite.durationMs = Date.now() - suiteStart;
-      suite.lastRunAt = new Date().toISOString();
-    }
-
-    const total = currentTestSuites.reduce((acc, s) => acc + s.totalCount, 0);
-    const passed = currentTestSuites.reduce((acc, s) => acc + s.passedCount, 0);
-    const failed = currentTestSuites.reduce((acc, s) => acc + s.failedCount, 0);
-    const warning = currentTestSuites.reduce((acc, s) => acc + s.warningCount, 0);
-    const durationMs = Date.now() - startTime;
-
-    currentAuditLogs.unshift({
-      id: "test-run-" + Date.now().toString(36),
-      toolName: "run_tests",
-      params: { targetSuiteId: targetSuiteId || "all" },
-      status: failed === 0 ? "success" : "failed",
-      result: { total, passed, failed, warning, durationMs },
-      timestamp: new Date().toISOString(),
-      durationMs,
-    });
-
-    return {
-      suites: currentTestSuites,
-      summary: { total, passed, failed, warning, durationMs, healthIndex: Math.round((passed / (total || 1)) * 100) },
-    };
-  }
-
-  function performAutoFix(): { fixedCount: number; actionsTaken: string[] } {
-    const actionsTaken: string[] = [];
-    let fixedCount = 0;
-
-    try {
-      if (fs.existsSync("aiae.ts")) {
-        let content = fs.readFileSync("aiae.ts", "utf-8");
-        if (content.includes("//# sourceMappingURL=actionengine.js.map")) {
-          content = content.replace("//# sourceMappingURL=actionengine.js.map", "");
-          fs.writeFileSync("aiae.ts", content, "utf-8");
-          actionsTaken.push("Removed dangling actionengine.js.map reference from aiae.ts");
-          fixedCount++;
-        }
-      }
-    } catch (_e) {}
-
-    if (!fs.existsSync("aiae.d.ts")) {
-      actionsTaken.push("Created missing aiae.d.ts type declaration file");
-      fixedCount++;
-    }
-
-    try {
-      if (fs.existsSync("package.json")) {
-        const pkg = JSON.parse(fs.readFileSync("package.json", "utf-8"));
-        let pkgChanged = false;
-        if (!pkg.scripts?.lint) {
-          pkg.scripts.lint = "tsc --noEmit";
-          pkgChanged = true;
-          actionsTaken.push("Added 'lint' script to package.json");
-          fixedCount++;
-        }
-        if (!pkg.scripts?.build?.includes("tsc --noEmit")) {
-          pkg.scripts.build = "tsc --noEmit && " + pkg.scripts.build;
-          pkgChanged = true;
-          actionsTaken.push("Enforced 'tsc --noEmit' in package.json build script");
-          fixedCount++;
-        }
-        if (pkgChanged) {
-          fs.writeFileSync("package.json", JSON.stringify(pkg, null, 2), "utf-8");
-        }
-      }
-    } catch (_e) {}
-
-    return { fixedCount, actionsTaken };
-  }
-
+  // Test dashboard reports unexecuted suites as warnings; actual validation runs the repository scripts.
   app.get("/api/action-engine/tests", (_req, res) => {
     const total = currentTestSuites.reduce((acc, s) => acc + s.totalCount, 0);
     const passed = currentTestSuites.reduce((acc, s) => acc + s.passedCount, 0);
