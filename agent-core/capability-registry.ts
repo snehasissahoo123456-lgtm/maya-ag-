@@ -1,5 +1,5 @@
 export type CapabilityRisk = "low" | "medium" | "high" | "critical";
-export type AgentRole = "founder" | "ceo" | "developer" | "specialist";
+export type AgentRole = "founder" | "ceo" | "developer" | "specialist" | "worker";
 export interface CapabilityArgument {
   type: "string" | "number" | "boolean";
   required?: boolean;
