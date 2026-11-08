@@ -127,3 +127,8 @@ Apply `supabase/migrations/20261109000000_maya_tasks.sql` after the earlier Supa
 ## Persistent CEO orchestration history (development branch)
 
 Founder-authenticated CEO runs are now recorded in a local, atomic `ceo-runs.json` repository. The UI can list and reopen prior reports. A server restart marks in-progress CEO runs as failed with a recovery note; Maya does not silently rerun specialist work. This repository currently uses single-instance file persistence even when other subsystems are configured for Supabase. A Supabase adapter, retention policy, encrypted backup and live migration remain outstanding.
+
+
+## Scheduled read-only jobs (development branch)
+
+The Schedules workspace supports one-time, hourly, daily and weekly jobs that read one existing, non-sensitive workspace file up to 50 KB. When due, the scheduler creates an idempotently identified `workspace.read_file` task; the separate task worker performs the allowlisted read and records verification evidence. The scheduler and task worker are both disabled by default. To enable them, set `MAYA_SCHEDULE_WORKER_ENABLED=true` and `MAYA_TASK_WORKER_ENABLED=true` on a single-instance file-storage server. This module does not run arbitrary prompts, shell commands, writes, browser actions, external messages or payments. The schedule repository is currently local file storage; distributed leases and Supabase persistence remain future work.
