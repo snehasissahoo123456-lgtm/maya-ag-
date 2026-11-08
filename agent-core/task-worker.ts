@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { CapabilityRegistry, AgentIdentity } from "./capability-registry.ts";
 import { digestAction, type ApprovalRepository } from "./approval-ledger.ts";
-import type { TaskOrchestrator, TaskRepository } from "./task-orchestrator.ts";
+import type { TaskEnvelope, TaskOrchestrator, TaskRepository } from "./task-orchestrator.ts";
 
 export interface TaskWorkerStatus {
   enabled: boolean;
@@ -22,8 +22,8 @@ export interface TaskWorkerOptions {
 }
 
 /**
- * Single-process, opt-in worker for the one currently safe capability.
- * Failed work is not retried, and interrupted tasks remain parked for review.
+ * Opt-in worker for read-only file reads and exact-Founder-approved file replacements.
+ * Unknown, unapproved, failed and interrupted work is never broadened or auto-replayed.
  */
 export class TaskWorker {
   private readonly founderId: string;
@@ -77,7 +77,7 @@ export class TaskWorker {
     }
   }
 
-  private async executeAllowed(envelope: Awaited<ReturnType<TaskRepository["get"]>> & {}): Promise<"executed" | "skipped"> {
+  private async executeAllowed(envelope: TaskEnvelope): Promise<"executed" | "skipped"> {
     if (envelope.task.founderId !== this.founderId) return "skipped";
     const isRead = envelope.capability === "workspace.read_file";
     const isApprovedWrite = envelope.capability === "workspace.write_file";
