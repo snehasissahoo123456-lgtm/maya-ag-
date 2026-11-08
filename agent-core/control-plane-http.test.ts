@@ -165,6 +165,8 @@ test("real HTTP control-plane routes enforce Founder auth and execute only the r
     assert.equal(specialistsBeforeAuth.status, 401, "Specialist registry must require Founder authentication");
     const ceoBeforeAuth = await fetch(baseUrl + "/api/agent/ceo/orchestrate", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ objective: "Review the project" }) });
     assert.equal(ceoBeforeAuth.status, 401, "CEO orchestration must require Founder authentication");
+    const ceoRunsBeforeAuth = await fetch(baseUrl + "/api/agent/ceo/runs");
+    assert.equal(ceoRunsBeforeAuth.status, 401, "CEO run history must require Founder authentication");
     const specialistRunBeforeAuth = await fetch(baseUrl + "/api/agent/specialists/run", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ agentId: "research", task: "Review this project" }) });
     assert.equal(specialistRunBeforeAuth.status, 401, "Specialist execution must require Founder authentication");
 
@@ -173,6 +175,11 @@ test("real HTTP control-plane routes enforce Founder auth and execute only the r
 
     const ceoUnavailable = await fetch(baseUrl + "/api/agent/ceo/orchestrate", { method: "POST", headers: { "content-type": "application/json", cookie }, body: JSON.stringify({ objective: "Review the project" }) });
     assert.equal(ceoUnavailable.status, 503, "CEO orchestration must report missing Gemini configuration");
+    const ceoRuns = await fetch(baseUrl + "/api/agent/ceo/runs", { headers: { cookie } });
+    assert.equal(ceoRuns.status, 200);
+    assert.deepEqual((await ceoRuns.json() as any).runs, []);
+    const missingCeoRun = await fetch(baseUrl + "/api/agent/ceo/runs/not-a-real-run", { headers: { cookie } });
+    assert.equal(missingCeoRun.status, 404);
 
     const specialists = await fetch(baseUrl + "/api/agent/specialists", { headers: { cookie } });
     assert.equal(specialists.status, 200);
