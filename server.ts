@@ -651,11 +651,11 @@ async function startServer() {
           triggerType: params?.trigger_type || "manual",
           triggerValue: params?.trigger_value || "Immediate",
           steps: [params?.steps || "Autonomous pipeline"],
-          permissionLevel: params?.permission_level || "auto",
+          permissionLevel: params?.permission_level || "ask",
           status: "queued",
           progress: 0,
           retryCount: 0,
-          logs: [`[Scheduled via Tool] Added to 24/7 queue at ${new Date().toLocaleTimeString()}`],
+          logs: [`[Scheduled via Tool] Added to persistent task queue at ${new Date().toLocaleTimeString()}`],
         };
         currentTasks.unshift(t);
         persistFounderState();
