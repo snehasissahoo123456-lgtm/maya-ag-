@@ -72,10 +72,10 @@ export class TaskOrchestrator {
     }
     envelope.attempts += 1;
     await this.repository.put(envelope);
-    await this.recordAudit(actor, "task.execution_started", envelope, { attempt: envelope.attempts });
     const controller = new AbortController();
     let timeout: ReturnType<typeof setTimeout> | undefined;
     try {
+      await this.recordAudit(actor, "task.execution_started", envelope, { attempt: envelope.attempts });
       const timeoutPromise = new Promise<never>((_resolve, reject) => {
         timeout = setTimeout(() => { controller.abort(); reject(new Error("Capability execution timed out.")); }, definition.timeoutMs);
       });
