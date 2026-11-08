@@ -67,7 +67,7 @@ export class GoalPlanWorker {
       const plans = await this.repository.list(this.founderId);
       // Recover a step that was marked running when the previous process stopped.
       for (const plan of plans) {
-        if (plan.status !== "running") continue;
+        if (plan.founderId !== this.founderId || plan.status !== "running") continue;
         const interrupted = plan.plan.steps.find(step => plan.stepStates[step.id]?.status === "running");
         if (!interrupted) continue;
         const state = plan.stepStates[interrupted.id];
@@ -78,7 +78,7 @@ export class GoalPlanWorker {
         result.recovered++;
       }
 
-      const runnable = plans.filter(plan => plan.status === "running" && !plan.plan.steps.some(step => plan.stepStates[step.id]?.status === "running")).slice(0, this.maxPlansPerCycle);
+      const runnable = plans.filter(plan => plan.founderId === this.founderId && plan.status === "running" && !plan.plan.steps.some(step => plan.stepStates[step.id]?.status === "running")).slice(0, this.maxPlansPerCycle);
       result.scanned = plans.length;
       for (const plan of runnable) {
         result.resumed++;
