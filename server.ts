@@ -316,8 +316,9 @@ async function startServer() {
       tests: currentTestSuites,
       auditLogs: currentAuditLogs.slice(-20).reverse(),
       connectedServices: {
-        gemini_live: hasKey,
+        gemini_live: false,
         gemini_flash: hasKey,
+        gemini_configured: hasKey,
         local_bridge: false,
         code_sandbox: false,
         web_search: false,
