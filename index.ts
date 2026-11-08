@@ -240,6 +240,7 @@ You can use this cockpit to inspect the current development status and configure
           this.sessionToken = null;
           this.currentUser = user;
           this.isAuthenticated = true;
+          void this.restoreConversationHistory();
           this.unmountReactLockScreen();
           this.requestUpdate();
           void this.fetchDashboardData();
@@ -301,6 +302,7 @@ You can use this cockpit to inspect the current development status and configure
       this.currentUser = data.session.user;
 
       this.isAuthenticated = true;
+      void this.restoreConversationHistory();
       this.authSuccessNotice = 'Welcome back Founder Snehasis Sahoo! Authenticated via Google Account.';
     } catch (err: any) {
       this.authError = err.message || 'Authentication error';
@@ -359,6 +361,7 @@ You can use this cockpit to inspect the current development status and configure
       this.currentUser = data.session.user;
 
       this.isAuthenticated = true;
+      void this.restoreConversationHistory();
     } catch (err: any) {
       this.authError = err.message || 'Verification error';
     } finally {
