@@ -65,7 +65,7 @@ test("real HTTP control-plane routes enforce Founder auth and execute only the r
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ email: "founder-test@example.invalid", password }),
     });
-    assert.equal(login.status, 200, await login.text());
+    assert.equal(login.status, 200);
     const cookie = login.headers.get("set-cookie")?.split(";")[0];
     assert.ok(cookie, "Founder login should set an HttpOnly session cookie");
 
@@ -74,7 +74,7 @@ test("real HTTP control-plane routes enforce Founder auth and execute only the r
       headers: { "content-type": "application/json", cookie },
       body: JSON.stringify({ instruction: "Read the project README for verification", path: "README.md" }),
     });
-    assert.equal(created.status, 201, await created.text());
+    assert.equal(created.status, 201);
     const createdBody = await created.json() as any;
     assert.equal(createdBody.task.status, "queued");
     const taskId = createdBody.task.id;
@@ -87,7 +87,7 @@ test("real HTTP control-plane routes enforce Founder auth and execute only the r
     const executed = await fetch(baseUrl + `/api/control-plane/tasks/${encodeURIComponent(taskId)}/execute`, {
       method: "POST", headers: { cookie },
     });
-    assert.equal(executed.status, 200, await executed.text());
+    assert.equal(executed.status, 200);
     const executedBody = await executed.json() as any;
     assert.equal(executedBody.task.status, "completed");
     assert.match(executedBody.task.verificationEvidence[0].reference, /^sha256:[a-f0-9]{64}$/);
