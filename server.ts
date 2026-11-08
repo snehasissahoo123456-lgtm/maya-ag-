@@ -80,8 +80,8 @@ import {
 
 const persistentStore = new MayaPersistentStore<ActionEngineTask, MemoryEntry, RelationshipProfile>();
 const persistedState = persistentStore.load({
-  tasks: INITIAL_TASKS,
-  memories: INITIAL_MEMORIES,
+  tasks: [],
+  memories: [],
   persona: INITIAL_RELATIONSHIP_PROFILE,
 });
 let currentTasks: ActionEngineTask[] = persistedState.tasks;
@@ -230,7 +230,7 @@ async function startServer() {
       connectedServices: {
         gemini_live: hasKey,
         gemini_flash: hasKey,
-        local_bridge: true,
+        local_bridge: false,
         code_sandbox: false,
         web_search: false,
         file_system: true,
@@ -841,15 +841,7 @@ MULTILINGUAL & RAPID REACTION:
         const msgLower = String(message || "").toLowerCase().trim();
         let fallbackText = `Maya is in limited offline mode. Gemini is not configured, and no agent task, tool, platform integration, or background execution is being performed. Configure GEMINI_API_KEY and complete the authenticated runtime setup before using Maya for operational work.`;
         if (msgLower === "status" || msgLower.includes("status")) {
-          fallbackText = `📌 PROJECT / TASK: Action Engine Cockpit (SYB Ecosystem)
-📊 OVERALL PROGRESS: 100%
-✅ COMPLETED: Maya Persona v2.0 active (${activeModeInfo.name}), Local Bridge active (:3000), 21 Master Tools registered, Task Queue running
-🔄 IN PROGRESS NOW: Monitoring Founder commands in ${activeModeInfo.name} mode
-⏳ REMAINING: Standby for next venture build target
-🐞 ISSUES FOUND AND FIXED: None
-⚠️ ASSUMPTIONS MADE: Preferred address '${currentPersona.preferredAddress}', free & open-source default
-🚧 BLOCKERS / NEEDED FROM FOUNDER: None
-⏱️ ETA: Immediate`;
+          fallbackText = `Maya status: offline mode. Gemini API key is not configured. No agent task execution, connected platform, scheduler, or external integration is active.`;
         }
 
         const words = fallbackText.split(" ");
