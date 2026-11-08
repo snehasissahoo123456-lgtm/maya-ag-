@@ -123,6 +123,7 @@ import { CapabilityRegistry } from "./agent-core/capability-registry.ts";
 import { ApprovalLedger } from "./agent-core/approval-ledger.ts";
 import { TaskOrchestrator } from "./agent-core/task-orchestrator.ts";
 import { FileTaskRepository } from "./agent-core/file-task-repository.ts";
+import { TaskWorker } from "./agent-core/task-worker.ts";
 
 const taskRepository = new FileTaskRepository();
 const taskCapabilityRegistry = new CapabilityRegistry();
@@ -130,7 +131,7 @@ taskCapabilityRegistry.register({
   name: "workspace.read_file",
   description: "Read one non-secret text file from the enrolled workspace.",
   risk: "low",
-  allowedRoles: ["founder"],
+  allowedRoles: ["founder", "worker"],
   requiredScopes: ["workspace:read"],
   arguments: { path: { type: "string", required: true, maxLength: 1024 } },
   timeoutMs: 10_000,
@@ -168,6 +169,11 @@ const taskOrchestrator = new TaskOrchestrator(
   },
 );
 
+const taskWorker = new TaskWorker(taskRepository, taskOrchestrator, taskCapabilityRegistry, {
+  founderId: "founder-primary",
+  pollIntervalMs: Number(process.env.MAYA_TASK_WORKER_POLL_MS) || 3000,
+});
+const taskWorkerEnabled = process.env.MAYA_TASK_WORKER_ENABLED === "true";
 
 const MAYA_FUNCTION_DECLARATIONS = [
   { name: "list_dir", description: "List non-secret files and folders inside Maya's enrolled server workspace.", parametersJsonSchema: { type: "object", properties: { path: { type: "string" } } } },
@@ -319,7 +325,7 @@ async function startServer() {
   }
 
   app.get("/api/health", (_req, res) => {
-    res.json({ status: "ok", agent: "Maya · Action Engine v2.0" });
+    res.json({ status: "ok", agent: "Maya · Action Engine v2.0", taskWorker: taskWorker.getStatus() });
   });
 
   // Default-deny REST API access. Only Founder password sign-in, session validation,
@@ -1500,8 +1506,11 @@ MULTILINGUAL & RAPID REACTION:
     });
   }
 
+  server.on("close", () => { void taskWorker.stop(); });
   server.listen(PORT, "0.0.0.0", () => {
+    if (taskWorkerEnabled) taskWorker.start();
     console.log(`[Backend] Server running on http://localhost:${PORT}`);
+    console.log(`[Task Worker] ${taskWorkerEnabled ? "enabled (read-only allowlist)" : "disabled; set MAYA_TASK_WORKER_ENABLED=true to opt in"}`);
   });
 }
 
