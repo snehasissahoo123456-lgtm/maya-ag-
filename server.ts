@@ -125,6 +125,7 @@ import { TaskOrchestrator } from "./agent-core/task-orchestrator.ts";
 import { FileTaskRepository } from "./agent-core/file-task-repository.ts";
 import { TaskWorker } from "./agent-core/task-worker.ts";
 import { ConversationStore } from "./agent-core/conversation-store.ts";
+import { validateGoalPlan, type PlannerToolContract } from "./agent-core/goal-planner.ts";
 
 const conversationStore = new ConversationStore();
 const taskRepository = new FileTaskRepository();
@@ -351,6 +352,44 @@ async function startServer() {
     }
     (req as any).authSession = session;
     return next();
+  });
+
+  // Gemini may propose a bounded tool plan, but this endpoint never executes it.
+  // Model output is treated as untrusted JSON and validated against the server allowlist.
+  app.post("/api/agent/plan", async (req, res): Promise<any> => {
+    const objective = typeof req.body?.objective === "string" ? req.body.objective.trim() : "";
+    if (!objective || objective.length > 2000) return res.status(400).json({ success: false, error: "Objective must contain 1–2,000 characters." });
+    const apiKey = process.env.GEMINI_API_KEY || process.env.API_KEY;
+    if (!apiKey) return res.status(503).json({ success: false, error: "Gemini is not configured. Add GEMINI_API_KEY to the server environment." });
+    try {
+      const ai = new GoogleGenAI({ apiKey });
+      const toolContracts = MAYA_FUNCTION_DECLARATIONS as PlannerToolContract[];
+      const prompt = [
+        "Create a safe, minimal plan for the Founder objective below.",
+        "Return only JSON with this shape: { summary: string, steps: [{ id, title, tool, args, dependsOn, expectedResult }] }.",
+        "Use only tool names and argument schemas in the supplied allowlist. Do not invent tools or arguments.",
+        "Each dependency must refer to an earlier step. Maximum 12 steps.",
+        "This is a proposal only. Do not claim that any step has been executed.",
+        "AVAILABLE TOOLS:",
+        JSON.stringify(toolContracts),
+        "FOUNDER OBJECTIVE:",
+        objective,
+      ].join("\n\n");
+      const response = await ai.models.generateContent({
+        model: resolveModel("gemini-3-flash-preview"),
+        contents: [{ role: "user", parts: [{ text: prompt }] }],
+        config: { responseMimeType: "application/json" },
+      });
+      const raw = String(response.text || "").trim();
+      if (!raw) return res.status(502).json({ success: false, error: "Gemini returned an empty plan." });
+      let draft: unknown;
+      try { draft = JSON.parse(raw); }
+      catch { return res.status(502).json({ success: false, error: "Gemini returned invalid JSON; no plan was accepted." }); }
+      const plan = validateGoalPlan(draft, objective, toolContracts);
+      return res.json({ success: true, plan, executionStatus: "not_executed", note: "This is a validated plan proposal. No tools were executed and no tasks were queued." });
+    } catch (error) {
+      return res.status(422).json({ success: false, error: error instanceof Error ? error.message : String(error) });
+    }
   });
 
   // Founder-scoped persistent conversation history. Every route is protected by the
