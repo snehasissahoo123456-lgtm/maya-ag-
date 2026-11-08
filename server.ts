@@ -503,7 +503,8 @@ async function startServer() {
     try {
       const existing = goalPlanStore.get(founderId, req.params.id);
       if (!existing) return res.status(404).json({ success: false, error: "Plan not found." });
-      validateGoalPlan(existing.plan, existing.plan.objective, MAYA_FUNCTION_DECLARATIONS as PlannerToolContract[]);
+      const revalidated = validateGoalPlan(existing.plan, existing.plan.objective, MAYA_FUNCTION_DECLARATIONS as PlannerToolContract[]);
+      if (JSON.stringify(revalidated) !== JSON.stringify(existing.plan)) throw new Error("Stored plan integrity check failed; create a new plan.");
       const plan = goalPlanExecutor.approveStep(founderId, req.params.id, req.body.stepId);
       return res.json({ success: true, plan });
     } catch (error) {
@@ -517,7 +518,8 @@ async function startServer() {
     try {
       const existing = goalPlanStore.get(founderId, req.params.id);
       if (!existing) return res.status(404).json({ success: false, error: "Plan not found." });
-      validateGoalPlan(existing.plan, existing.plan.objective, MAYA_FUNCTION_DECLARATIONS as PlannerToolContract[]);
+      const revalidated = validateGoalPlan(existing.plan, existing.plan.objective, MAYA_FUNCTION_DECLARATIONS as PlannerToolContract[]);
+      if (JSON.stringify(revalidated) !== JSON.stringify(existing.plan)) throw new Error("Stored plan integrity check failed; create a new plan.");
       const plan = await goalPlanExecutor.execute(founderId, req.params.id);
       return res.json({ success: true, plan, executionStatus: plan.status });
     } catch (error) {
