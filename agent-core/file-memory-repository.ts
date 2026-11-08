@@ -29,6 +29,20 @@ export class FileMemoryRepository implements MemoryRepository {
     this.persist(structuredClone(this.memories));
     return true;
   }
+  async recordFeedback(founderId: string, memoryId: string, rating: "helpful" | "not_helpful"): Promise<MemoryEntry> {
+    if (!founderId) throw new Error("Founder identity is required.");
+    if (rating !== "helpful" && rating !== "not_helpful") throw new Error("Memory feedback rating is invalid.");
+    const index = this.memories.findIndex(item => item.id === memoryId);
+    if (index < 0) throw new Error("Memory not found for this Founder.");
+    const current = this.memories[index];
+    const count = Math.max(0, current.feedbackCount || 0);
+    const prior = Number.isFinite(current.feedbackScore) ? current.feedbackScore! : 0;
+    const value = rating === "helpful" ? 1 : -1;
+    const updated: MemoryEntry = { ...current, feedbackScore: (prior * count + value) / (count + 1), feedbackCount: count + 1, updatedAt: new Date().toISOString() };
+    this.memories[index] = updated;
+    this.persist(structuredClone(this.memories));
+    return structuredClone(updated);
+  }
   async search(founderId: string, query: string, limit = 20): Promise<MemoryEntry[]> {
     const needle = query.trim().toLocaleLowerCase();
     if (!needle) throw new Error("A non-empty memory query is required.");
