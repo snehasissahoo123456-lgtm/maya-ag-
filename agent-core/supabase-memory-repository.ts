@@ -57,15 +57,24 @@ export class SupabaseMemoryRepository implements MemoryRepository {
             method: "POST",
             body: JSON.stringify({ p_founder_id: founderId, p_query_embedding: queryEmbedding, p_limit: bounded }),
           });
-          if (Array.isArray(rows) && rows.length > 0) return rows.map(row => this.fromRow(row));
+          if (Array.isArray(rows) && rows.length > 0) {
+            const semantic = rows.map(row => this.fromRow(row));
+            const keyword = await this.keywordSearch(founderId, needle, bounded);
+            const seen = new Set(semantic.map(item => item.id));
+            return [...semantic, ...keyword.filter(item => !seen.has(item.id))].slice(0, bounded);
+          }
         }
       } catch {
         // Semantic retrieval is an enhancement; bounded keyword search remains the fallback.
       }
     }
+    return this.keywordSearch(founderId, needle, bounded);
+  }
+
+  private async keywordSearch(founderId: string, needle: string, limit: number): Promise<MemoryEntry[]> {
     const memories = await this.list(founderId);
     return memories.filter(item => item.title.toLocaleLowerCase().includes(needle) ||
-      item.content.toLocaleLowerCase().includes(needle) || item.category.includes(needle)).slice(0, bounded);
+      item.content.toLocaleLowerCase().includes(needle) || item.category.includes(needle)).slice(0, limit);
   }
   private async ensureLegacyImport(founderId: string): Promise<void> {
     if (this.initializedFounders.has(founderId)) return;
