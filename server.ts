@@ -80,9 +80,18 @@ import {
   BuildEventMessage,
 } from "./actionEngineCore.ts";
 
-let currentTasks: ActionEngineTask[] = [...INITIAL_TASKS];
-let currentMemories: MemoryEntry[] = [...INITIAL_MEMORIES];
-let currentPersona: RelationshipProfile = { ...INITIAL_RELATIONSHIP_PROFILE };
+const persistentStore = new MayaPersistentStore<ActionEngineTask, MemoryEntry, RelationshipProfile>();
+const persistedState = persistentStore.load({
+  tasks: INITIAL_TASKS,
+  memories: INITIAL_MEMORIES,
+  persona: INITIAL_RELATIONSHIP_PROFILE,
+});
+let currentTasks: ActionEngineTask[] = persistedState.tasks;
+let currentMemories: MemoryEntry[] = persistedState.memories;
+let currentPersona: RelationshipProfile = persistedState.persona;
+function persistFounderState(): void {
+  persistentStore.save({ tasks: currentTasks, memories: currentMemories, persona: currentPersona });
+}
 let currentTestSuites: TestSuite[] = JSON.parse(JSON.stringify(INITIAL_TEST_SUITES));
 for (const suite of currentTestSuites) {
   suite.status = "warning";
@@ -110,6 +119,7 @@ import { WatcherService } from "./watcherService.ts";
 import { TypeScriptFixer } from "./typeScriptFixer.ts";
 import { AuthService } from "./authService.ts";
 import { PlatformService } from "./platformService.ts";
+import { MayaPersistentStore } from "./agent-core/persistent-store.ts";
 
 const authService = new AuthService();
 const platformService = new PlatformService();
@@ -129,24 +139,31 @@ function handlePersonaCommands(rawMsg: string): string | null {
   const lower = rawMsg.toLowerCase().trim();
   if (lower === "mode: professional") {
     currentPersona.activeMode = "professional_lead";
+    persistFounderState();
     return `Samajh gayi! Professional Lead mode activate kar di hai. Structured, crisp technical focus on.`;
   } else if (lower === "mode: friendly" || lower === "mode: partner") {
     currentPersona.activeMode = "cheerful_partner";
+    persistFounderState();
     return `Done! Cheerful Partner mode active hai. Warm, light aur sharp vibes!`;
   } else if (lower === "mode: focus" || lower === "mode: calm") {
     currentPersona.activeMode = "calm_focus";
+    persistFounderState();
     return `Samajh gayi, focus mode on. Minimal baatein, sirf zaroori updates aur kaam.`;
   } else if (lower === "mode: motivator") {
     currentPersona.activeMode = "motivator";
+    persistFounderState();
     return `Yes! Motivator mode on! Full momentum aur high energy ke saath aage badhte hain!`;
   } else if (lower === "mode: private" || lower === "mode: romantic") {
     currentPersona.activeMode = "private_warm";
+    persistFounderState();
     return `Main yahin hoon, poore dhyaan aur softness ke saath. Batao tumhara kya plan hai.`;
   } else if (lower === "tum") {
     currentPersona.preferredAddress = "tum";
+    persistFounderState();
     return `Theek hai, ab se 'tum' bolungi. Closeness aur casual tone locked.`;
   } else if (lower === "aap") {
     currentPersona.preferredAddress = "aap";
+    persistFounderState();
     return `Theek hai Founder ji, ab se 'aap' bolungi poore adab ke saath.`;
   }
   return null;
@@ -244,6 +261,7 @@ async function startServer() {
     if (updates.preferredAddress) currentPersona.preferredAddress = updates.preferredAddress;
     if (typeof updates.voiceSpeed === "number") currentPersona.voiceSpeed = updates.voiceSpeed;
     if (typeof updates.voicePitch === "number") currentPersona.voicePitch = updates.voicePitch;
+    persistFounderState();
     return res.json({ success: true, persona: currentPersona });
   });
 
@@ -617,6 +635,7 @@ async function startServer() {
       logs: [`[Task Created] Registered by Founder at ${new Date().toLocaleTimeString()}`],
     };
     currentTasks.unshift(newTask);
+    persistFounderState();
     return res.json({ success: true, task: newTask });
   });
 
@@ -641,8 +660,10 @@ async function startServer() {
       task.logs.push(`[Status] Resumed in queue`);
     } else if (action === "delete") {
       currentTasks = currentTasks.filter((t) => t.id !== id);
+      persistFounderState();
       return res.json({ success: true, deleted: id });
     }
+    persistFounderState();
     return res.json({ success: true, task });
   });
 
@@ -659,12 +680,14 @@ async function startServer() {
       updatedAt: new Date().toISOString(),
     };
     currentMemories.unshift(newMem);
+    persistFounderState();
     return res.json({ success: true, memory: newMem });
   });
 
   app.delete("/api/action-engine/memory/:id", (req, res): any => {
     const { id } = req.params;
     currentMemories = currentMemories.filter((m) => m.id !== id);
+    persistFounderState();
     return res.json({ success: true, deleted: id });
   });
 
@@ -721,6 +744,7 @@ async function startServer() {
           logs: [`[Scheduled via Tool] Added to 24/7 queue at ${new Date().toLocaleTimeString()}`],
         };
         currentTasks.unshift(t);
+        persistFounderState();
         result = { scheduled: true, task: t };
       } else if (toolName === "list_tasks") {
         result = { count: currentTasks.length, tasks: currentTasks };
@@ -734,6 +758,7 @@ async function startServer() {
           updatedAt: new Date().toISOString(),
         };
         currentMemories.unshift(m);
+        persistFounderState();
         result = { saved: true, memory: m };
       } else if (toolName === "memory_search") {
         const q = String(params?.query || "").toLowerCase();
