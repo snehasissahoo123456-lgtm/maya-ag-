@@ -25,6 +25,14 @@ export class GoalPlanExecutor {
   private readonly executing = new Set<string>();
   constructor(private readonly store: GoalPlanRepository, private readonly executeTool: PlannedToolExecutor) {}
 
+  async start(founderId: string, planId: string): Promise<StoredGoalPlan> {
+    const plan = await this.requirePlan(founderId, planId);
+    if (plan.status === "completed" || plan.status === "failed") throw new Error("Terminal plans cannot be started again.");
+    plan.status = "running";
+    await this.store.save(founderId, plan);
+    return await this.requirePlan(founderId, planId);
+  }
+
   async approveStep(founderId: string, planId: string, stepId: string): Promise<StoredGoalPlan> {
     const plan = await this.requirePlan(founderId, planId);
     const step = plan.plan.steps.find(item => item.id === stepId);
@@ -32,7 +40,7 @@ export class GoalPlanExecutor {
     if (!requiresApproval(step)) throw new Error("This step does not require Founder approval.");
     if (plan.stepStates[stepId].status === "completed") throw new Error("Completed steps cannot be re-approved.");
     plan.stepStates[stepId].approvedDigest = stepDigest(step);
-    if (plan.status === "proposed" || plan.status === "awaiting_approval") plan.status = "proposed";
+    if (plan.status === "awaiting_approval") plan.status = "running";
     await this.store.save(founderId, plan);
     return await this.requirePlan(founderId, planId);
   }
