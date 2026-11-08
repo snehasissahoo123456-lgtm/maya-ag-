@@ -1,6 +1,11 @@
 import { LitElement, html, css } from "lit";
 import { customElement, state } from "lit/decorators.js";
 
+function localDateTimeValue(date: Date): string {
+  const local = new Date(date.getTime() - date.getTimezoneOffset() * 60_000);
+  return local.toISOString().slice(0, 16);
+}
+
 interface ScheduledJob {
   id: string; title: string; path: string; status: string; nextRunAt: string;
   intervalMs: number | null; runCount: number; failureCount: number; lastRunAt?: string; lastError?: string;
@@ -11,7 +16,7 @@ export class MayaSchedulesWorkspace extends LitElement {
   @state() private schedules: ScheduledJob[] = [];
   @state() private jobTitle = "";
   @state() private filePath = "README.md";
-  @state() private runAt = new Date(Date.now() + 5 * 60_000).toISOString().slice(0, 16);
+  @state() private runAt = localDateTimeValue(new Date(Date.now() + 5 * 60_000));
   @state() private repeat: "once" | "hourly" | "daily" | "weekly" = "once";
   @state() private message = "";
   @state() private busy = false;
@@ -79,8 +84,8 @@ export class MayaSchedulesWorkspace extends LitElement {
   private intervalLabel(ms: number | null) {
     if (ms === null) return "One time";
     if (ms === 60 * 60_000) return "Hourly";
-    if (ms === 24 * 60 * 60_000) return "Daily";
-    if (ms === 7 * 24 * 60 * 60_000) return "Weekly";
+    if (ms === 24 * 60 * 60_000) return "Every 24 hours";
+    if (ms === 7 * 24 * 60 * 60_000) return "Every 7 days";
     return `Every ${Math.round(ms / 60_000)} minutes`;
   }
 
@@ -106,7 +111,7 @@ export class MayaSchedulesWorkspace extends LitElement {
             <label class="space-y-1"><span class="muted">Workspace-relative file path</span><input .value=${this.filePath} @input=${(e: Event) => this.filePath = (e.target as HTMLInputElement).value} placeholder="README.md"></label>
             <label class="space-y-1"><span class="muted">First run time</span><input type="datetime-local" .value=${this.runAt} @input=${(e: Event) => this.runAt = (e.target as HTMLInputElement).value}></label>
             <label class="space-y-1"><span class="muted">Repeat</span><select .value=${this.repeat} @change=${(e: Event) => this.repeat = (e.target as HTMLSelectElement).value as any}>
-              <option value="once">One time</option><option value="hourly">Hourly</option><option value="daily">Daily</option><option value="weekly">Weekly</option>
+              <option value="once">One time</option><option value="hourly">Every hour</option><option value="daily">Every 24 hours</option><option value="weekly">Every 7 days</option>
             </select></label>
           </div>
           <div class="flex flex-wrap items-center justify-between gap-3">
