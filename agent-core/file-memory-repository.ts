@@ -35,10 +35,9 @@ export class FileMemoryRepository implements MemoryRepository {
     const index = this.memories.findIndex(item => item.id === memoryId);
     if (index < 0) throw new Error("Memory not found for this Founder.");
     const current = this.memories[index];
-    const count = Math.max(0, current.feedbackCount || 0);
-    const prior = Number.isFinite(current.feedbackScore) ? current.feedbackScore! : 0;
     const value = rating === "helpful" ? 1 : -1;
-    const updated: MemoryEntry = { ...current, feedbackScore: (prior * count + value) / (count + 1), feedbackCount: count + 1, updatedAt: new Date().toISOString() };
+    // File mode is single-Founder; retain one current rating per memory, matching Supabase.
+    const updated: MemoryEntry = { ...current, feedbackScore: value, feedbackCount: 1, updatedAt: new Date().toISOString() };
     this.memories[index] = updated;
     this.persist(structuredClone(this.memories));
     return structuredClone(updated);
