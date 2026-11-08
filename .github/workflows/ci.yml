@@ -16,6 +16,7 @@ on:
       - maya/ceo-orchestrator
       - maya/supabase-persistence
       - maya/supabase-agent-state
+      - maya/supabase-task-queue
   pull_request:
     branches:
       - main
