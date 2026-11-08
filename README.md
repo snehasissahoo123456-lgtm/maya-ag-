@@ -100,3 +100,8 @@ Approval requests, decisions and single-use consumption now have an asynchronous
 ## Supabase task leases (development branch)
 
 When using the Supabase task repository, the worker claims only queued `workspace.read_file` tasks that do not require approval. Claims use `FOR UPDATE SKIP LOCKED`, a bounded owner lease and an explicit release RPC. Expired leases on tasks already marked running/verifying are parked as `requires_recovery`; they are never automatically replayed. Apply `supabase/migrations/20261108040000_maya_task_leases.sql` after the task table migration. Configure `MAYA_TASK_WORKER_LEASE_MS` and `MAYA_TASK_WORKER_MAX_TASKS_PER_CYCLE`. The worker remains opt-in and disabled by default; this is not yet a general-purpose distributed executor.
+
+
+## Founder memory repository (development branch)
+
+Maya's saved memory notes now use a Founder-scoped repository contract. File mode continues to store notes inside the existing protected `state.json` store. Supabase mode stores notes in `maya_memories`, with a one-time import of the existing local memory notes tracked by `maya_memory_imports`. Search and retrieval remain bounded keyword retrieval; this is persistent memory, not automatic self-training or model fine-tuning. Apply `supabase/migrations/20261108050000_maya_memories.sql` before enabling Supabase storage. No live database was modified.
