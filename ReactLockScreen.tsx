@@ -250,39 +250,9 @@ export const ReactLockScreen: React.FC<ReactLockScreenProps> = ({
               </div>
             )}
 
-            {/* Authentication Method Tabs */}
-            <div className="grid grid-cols-2 p-1 bg-slate-950/90 rounded-2xl border border-slate-800 text-xs font-semibold">
-              <button
-                type="button"
-                onClick={() => {
-                  setAuthTab('google');
-                  ((setErrorMsg as any) as any)(null);
-                }}
-                className={`py-2.5 rounded-xl transition-all flex items-center justify-center gap-2 ${
-                  authTab === 'google'
-                    ? 'bg-gradient-to-r from-indigo-600 to-indigo-700 text-white shadow-lg shadow-indigo-600/30'
-                    : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900/50'
-                }`}
-              >
-                <Mail className="w-4 h-4 text-cyan-300" />
-                <span>Gmail Login</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => {
-                  setAuthTab('phone');
-                  ((setErrorMsg as any) as any)(null);
-                }}
-                className={`py-2.5 rounded-xl transition-all flex items-center justify-center gap-2 ${
-                  authTab === 'phone'
-                    ? 'bg-gradient-to-r from-indigo-600 to-indigo-700 text-white shadow-lg shadow-indigo-600/30'
-                    : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900/50'
-                }`}
-              >
-                <Smartphone className="w-4 h-4 text-purple-300" />
-                <span>Mobile OTP</span>
-              </button>
+            <div className="flex items-center gap-2 rounded-xl border border-slate-800 bg-slate-950/80 p-3 text-xs text-slate-300">
+              <ShieldCheck className="h-4 w-4 text-emerald-400" />
+              <span>Founder-only password authentication · SMS and unverified Google login are disabled</span>
             </div>
 
             {/* TAB 1: GMAIL AUTHENTICATION */}
@@ -334,113 +304,6 @@ export const ReactLockScreen: React.FC<ReactLockScreenProps> = ({
                   {isLoading ? 'Verifying Founder credentials…' : 'Unlock Maya'}
                 </button>
 
-                {/* Divider */}
-                <div className="relative flex items-center justify-center my-3">
-                  <div className="border-t border-slate-800 w-full" />
-                  <span className="bg-[#0d1322] px-3 text-[10px] text-slate-500 uppercase tracking-wider font-semibold">
-                    Or Alternate Authorized Email
-                  </span>
-                </div>
-
-                {/* Alternate Gmail input */}
-                <div className="space-y-2">
-                  <div className="flex gap-2">
-                    <input
-                      type="email"
-                      value={googleEmail}
-                      onChange={(e) => setGoogleEmail(e.target.value)}
-                      placeholder="snehasissahoo123456@gmail.com"
-                      className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-indigo-500 font-mono tracking-wide"
-                    />
-                    <button
-                      type="button"
-                      disabled={((isLoading as any) as any)}
-                      onClick={() => handleGoogleLogin(googleEmail)}
-                      className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-semibold whitespace-nowrap transition-all border border-slate-700 cursor-pointer disabled:opacity-50"
-                    >
-                      Authorize
-                    </button>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* TAB 2: MOBILE NUMBER & 6-BOX OTP */}
-            {authTab === 'phone' && (
-              <div className="space-y-4 pt-1 animate-fadeIn">
-                {/* Mobile Phone Input with Flag */}
-                <div className="space-y-2">
-                  <label className="block text-xs text-slate-400 font-medium">
-                    Founder Mobile Number (India +91)
-                  </label>
-                  <div className="flex gap-2">
-                    <div className="relative flex-1">
-                      <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-xs font-bold text-indigo-400">
-                        🇮🇳 +91
-                      </div>
-                      <input
-                        type="tel"
-                        value={phone.replace(/^\+91\s*/, '')}
-                        onChange={(e) => setPhone('+91 ' + e.target.value.replace(/[^\d\s]/g, ''))}
-                        placeholder="98765 43210"
-                        className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-16 pr-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-indigo-500 font-mono tracking-wider font-medium"
-                      />
-                    </div>
-                    <button
-                      type="button"
-                      disabled={((isLoading as any) as any) || countdown > 0}
-                      onClick={handleSendOtp}
-                      className="px-4 py-2.5 bg-gradient-to-r from-indigo-600 to-indigo-700 hover:from-indigo-500 hover:to-indigo-600 text-white rounded-xl text-xs font-semibold whitespace-nowrap transition-all shadow-md shadow-indigo-600/20 disabled:opacity-50 cursor-pointer"
-                    >
-                      {countdown > 0 ? `${countdown}s` : otpSent ? 'Resend' : 'Send SMS OTP'}
-                    </button>
-                  </div>
-                </div>
-
-                {/* OTP Entry Grid (Triggered when OTP dispatched) */}
-                {otpSent && (
-                  <div className="space-y-4 pt-2 animate-fadeIn">
-                    <div className="space-y-2">
-                      <div className="flex items-center justify-between text-xs">
-                        <label className="text-slate-300 font-semibold uppercase tracking-wider text-[11px]">
-                          Enter 6-Digit Verification Code
-                        </label>
-                        <span className="text-[11px] font-mono text-cyan-400">
-                          Auto-focus & 1-click paste
-                        </span>
-                      </div>
-
-                      {/* Modular 6-Box Auto-Focus OTP Input Component */}
-                      <OtpInput
-                        length={6}
-                        value={otpCode}
-                        onChange={setOtpCode}
-                        onComplete={(code) => handleVerifyOtpWithCode(code)}
-                        disabled={((isLoading as any) as any)}
-                        demoCode={demoCode || '123456'}
-                        hasError={Boolean(((errorMsg as any) as any))}
-                      />
-                    </div>
-
-                    {/* Verify & Launch Button */}
-                    <button
-                      type="button"
-                      disabled={((isLoading as any) as any) || otpCode.length < 6}
-                      onClick={() => handleVerifyOtpWithCode(otpCode)}
-                      className="w-full py-3.5 bg-gradient-to-r from-indigo-600 via-purple-600 to-cyan-600 hover:from-indigo-500 hover:via-purple-500 hover:to-cyan-500 text-white rounded-2xl text-xs font-bold transition-all shadow-xl shadow-indigo-600/30 flex items-center justify-center gap-2 disabled:opacity-50 cursor-pointer hover:scale-[1.01] active:scale-[0.99]"
-                    >
-                      {((isLoading as any) as any) ? (
-                        <RefreshCw className="w-4 h-4 animate-spin text-white" />
-                      ) : (
-                        <ShieldCheck className="w-4 h-4 text-emerald-300" />
-                      )}
-                      <span>
-                        {((isLoading as any) as any) ? 'Verifying Credentials...' : 'Verify OTP & Launch Cockpit'}
-                      </span>
-                      <ArrowRight className="w-4 h-4" />
-                    </button>
-                  </div>
-                )}
               </div>
             )}
 
