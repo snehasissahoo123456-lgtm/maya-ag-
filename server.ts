@@ -120,7 +120,7 @@ import { PlatformService } from "./platformService.ts";
 import { MayaPersistentStore } from "./agent-core/persistent-store.ts";
 import { runFunctionCallingTurn } from "./agent-core/function-call-loop.ts";
 import { CapabilityRegistry } from "./agent-core/capability-registry.ts";
-import { ApprovalLedger } from "./agent-core/approval-ledger.ts";
+import { createApprovalRepository } from "./agent-core/create-approval-repository.ts";
 import { TaskOrchestrator } from "./agent-core/task-orchestrator.ts";
 import { createTaskRepository } from "./agent-core/create-task-repository.ts";
 import { createAuditRepository } from "./agent-core/create-audit-repository.ts";
@@ -154,7 +154,7 @@ taskCapabilityRegistry.register({
 const taskOrchestrator = new TaskOrchestrator(
   taskRepository,
   taskCapabilityRegistry,
-  new ApprovalLedger(path.join(process.env.MAYA_DATA_DIR || path.resolve(process.cwd(), "..", "maya-data"), "approvals.json")),
+  createApprovalRepository(),
   {
     run: async ({ capability, args, signal }) => {
       if (capability !== "workspace.read_file") throw new Error("Capability runner is not enabled for this action.");
