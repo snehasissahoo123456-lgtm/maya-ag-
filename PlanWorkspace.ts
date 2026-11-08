@@ -5,16 +5,19 @@ export class MayaPlanWorkspace extends LitElement {
     plans: { state: true },
     busy: { state: true },
     error: { state: true },
+    workerStatus: { state: true },
   };
   override createRenderRoot() { return this; }
   objective = '';
   plans: any[] = [];
   busy = false;
   error: string | null = null;
+  workerStatus: any = null;
 
   override connectedCallback() {
     super.connectedCallback();
     void this.loadPlans();
+    void this.loadWorkerStatus();
   }
 
   private async loadPlans() {
@@ -60,6 +63,28 @@ export class MayaPlanWorkspace extends LitElement {
     } catch (error: any) { this.error = error.message || String(error); }
   }
 
+  private async loadWorkerStatus() {
+    try {
+      const response = await fetch('/api/health');
+      if (!response.ok) return;
+      const data = await response.json();
+      this.workerStatus = data.goalPlanWorker || null;
+    } catch { this.workerStatus = null; }
+  }
+
+  private async startBackgroundPlan(planId: string) {
+    this.error = null;
+    try {
+      const response = await fetch(`/api/agent/plans/${encodeURIComponent(planId)}/start`, {
+        method: 'POST', credentials: 'same-origin',
+      });
+      const data = await response.json();
+      if (!response.ok || !data.success) throw new Error(data.error || 'Could not start background plan.');
+      this.replacePlan(planId, data.plan);
+      this.workerStatus = data.worker || this.workerStatus;
+    } catch (error: any) { this.error = error.message || String(error); }
+  }
+
   private async executePlan(planId: string) {
     this.error = null;
     try {
@@ -85,7 +110,7 @@ export class MayaPlanWorkspace extends LitElement {
               <h2 class='text-sm font-semibold text-white'>Goal planner & execution</h2>
               <p class='text-xs text-slate-400 mt-1'>Create a bounded plan, review each step, approve state changes and run it sequentially.</p>
             </div>
-            <span class='text-[10px] uppercase tracking-wide text-slate-400 border border-slate-700 rounded-md px-2 py-1'>Founder control</span>
+            <span class='text-[10px] uppercase tracking-wide text-slate-400 border border-slate-700 rounded-md px-2 py-1'>Founder control · background worker ${this.workerStatus?.enabled ? 'enabled' : 'disabled'}</span>
           </div>
           <textarea class='w-full min-h-28 rounded-xl bg-slate-950 border border-slate-700 p-3 text-sm text-slate-100 outline-none focus:border-indigo-500'
             .value=${this.objective} @input=${(event: any) => this.objective = event.target.value}
@@ -120,7 +145,10 @@ export class MayaPlanWorkspace extends LitElement {
                 </div>`;
               })}
             </div>
-            ${plan.status !== 'completed' && plan.status !== 'failed' ? html`<div class='flex justify-end'><button class='px-3 py-2 rounded-lg bg-emerald-600/90 hover:bg-emerald-500 text-white text-xs font-semibold' @click=${() => this.executePlan(plan.id)}>Run / resume plan</button></div>` : ''}
+            ${plan.status !== 'completed' && plan.status !== 'failed' ? html`<div class='flex flex-wrap justify-end gap-2'>
+              ${this.workerStatus?.enabled ? html`<button class='px-3 py-2 rounded-lg border border-cyan-500/40 text-cyan-200 text-xs font-semibold hover:bg-cyan-500/10' @click=${() => this.startBackgroundPlan(plan.id)}>Start background</button>` : ''}
+              <button class='px-3 py-2 rounded-lg bg-emerald-600/90 hover:bg-emerald-500 text-white text-xs font-semibold' @click=${() => this.executePlan(plan.id)}>Run / resume now</button>
+            </div>` : ''}
           </section>
         `)}
       </div>
