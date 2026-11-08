@@ -74,3 +74,7 @@ Authenticated APIs expose the specialist registry and a bounded specialist-run e
 ## CEO specialist orchestration (current development branch)
 
 The authenticated CEO orchestration endpoint uses Gemini to select one to four distinct specialists from the registered manifests, validates the dispatch, runs each specialist sequentially, and asks the CEO layer to synthesize their findings. A dedicated CEO Orchestration workspace exposes this flow. This is a reasoning-only workflow: specialist agents have no tools and cannot execute external actions, spawn more agents or claim work was completed. The run is not yet a durable distributed workflow and its findings are not yet persisted as a long-term project record.
+
+## Supabase conversation database (optional deployment mode)
+
+The conversation repository now supports either local atomic JSON storage or Supabase PostgREST storage. To use Supabase, apply `supabase/migrations/20261108000000_maya_conversations.sql`, set `MAYA_STORAGE_DRIVER=supabase`, `SUPABASE_URL`, and `SUPABASE_SERVICE_ROLE_KEY` in the **server environment**, then restart Maya. The service-role key is server-only and must never be placed in browser configuration or committed. With `MAYA_STORAGE_DRIVER=file` (default), local JSON storage remains active. The migration enables RLS, denies direct anon/authenticated table access, and exposes only a Founder-scoped atomic append RPC to the service role. Goal plans, tasks and memory notes still use their existing file-backed repositories; their database migration is not complete.
