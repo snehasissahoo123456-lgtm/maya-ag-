@@ -36,6 +36,7 @@ test("high-risk task cannot execute until exact Founder approval is granted", as
  await assert.rejects(() => orchestrator.execute("t-high", developer), /approval/i);
  const pending = await orchestrator.requestApproval("t-high", founder);
  await orchestrator.decideApproval({ approvalId: pending.approvalId, approved: true, actor: founder });
+ assert.equal((await orchestrator.get("t-high", "f1"))?.task.status, "queued", "approved tasks return to the background worker queue");
  const result = await orchestrator.execute("t-high", developer, pending.approvalId);
  assert.equal(result.task.status, "completed");
  assert.equal(getRuns(), 1);
@@ -85,4 +86,13 @@ test("audit failure after a capability runs parks task in requires_recovery", as
  await orchestrator.enqueue({ id: "t-audit-failure", founderId: "f1", instruction: "Write a report", capability: "workspace.write", args: { file: "report.md" }, actor: developer });
  await assert.rejects(() => orchestrator.execute("t-audit-failure", developer), /audit database unavailable/);
  assert.equal((await repository.get("t-audit-failure"))?.task.status, "requires_recovery");
+});
+
+test("rejected high-risk task is cancelled and cannot be executed", async () => {
+ const { orchestrator } = setup("high");
+ await orchestrator.enqueue({ id: "t-reject", founderId: "f1", instruction: "Replace a file", capability: "workspace.write", args: { file: "notes.md" }, actor: developer });
+ const pending = await orchestrator.requestApproval("t-reject", founder);
+ await orchestrator.decideApproval({ approvalId: pending.approvalId, approved: false, actor: founder });
+ assert.equal((await orchestrator.get("t-reject", "f1"))?.task.status, "cancelled");
+ await assert.rejects(() => orchestrator.execute("t-reject", developer, pending.approvalId), /not executable/i);
 });
