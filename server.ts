@@ -1673,21 +1673,15 @@ MULTILINGUAL & RAPID REACTION:
     }
   });
 
-  // Separate authenticated-by-pairing-token channel for the explicitly enrolled local device.
-  // It accepts no browser session or origin-based trust; pairing code/device token are required by the bridge manager.
-  const deviceWss = new WebSocketServer({
-    server,
-    path: "/api/device-bridge",
-    maxPayload: 256 * 1024,
-    perMessageDeflate: false,
-  });
+  // Both WebSocket endpoints share one HTTP upgrade dispatcher. Multiple WebSocketServer
+  // instances attached directly to the same HTTP server reject each other's paths.
+  const deviceWss = new WebSocketServer({ noServer: true, maxPayload: 256 * 1024, perMessageDeflate: false });
   deviceWss.on("connection", (socket: WebSocket) => deviceBridgeManager.accept(socket));
   deviceWss.on("error", (error) => console.error("[Device Bridge] WebSocket server error:", error));
 
   // WebSocket Relay for ai.live.connect & ai.live.music.connect + Real-Time Watcher Stream
   const wss = new WebSocketServer({
-    server,
-    path: "/api/live-ws",
+    noServer: true,
     verifyClient: (info, done) => {
       const cookies = info.req.headers.cookie || "";
       const raw = cookies.split(";").map((part) => part.trim()).find((part) => part.startsWith("maya_session="));
@@ -1695,6 +1689,21 @@ MULTILINGUAL & RAPID REACTION:
       if (!authService.validateSession(token)) return done(false, 401, "Authentication required");
       return done(true);
     },
+  });
+
+  server.on("upgrade", (request, socket, head) => {
+    let pathname = "";
+    try { pathname = new URL(request.url || "/", "http://localhost").pathname; }
+    catch { socket.destroy(); return; }
+    if (pathname === "/api/device-bridge") {
+      deviceWss.handleUpgrade(request, socket, head, (webSocket) => deviceWss.emit("connection", webSocket, request));
+      return;
+    }
+    if (pathname === "/api/live-ws") {
+      wss.handleUpgrade(request, socket, head, (webSocket) => wss.emit("connection", webSocket, request));
+      return;
+    }
+    socket.destroy();
   });
 
   wss.on("connection", (ws: WebSocket) => {
@@ -1899,7 +1908,7 @@ MULTILINGUAL & RAPID REACTION:
   }
 
   server.on("close", () => { void taskWorker.stop(); });
-  server.on("close", () => { deviceWss.close(); });
+  server.on("close", () => { deviceWss.close(); wss.close(); });
   server.listen(PORT, "0.0.0.0", () => {
     if (taskWorkerEnabled) taskWorker.start();
     console.log(`[Backend] Server running on http://localhost:${PORT}`);
