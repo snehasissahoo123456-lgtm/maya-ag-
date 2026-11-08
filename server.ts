@@ -449,7 +449,8 @@ async function startServer() {
     if (!objective || objective.length > 2000) return res.status(400).json({ success: false, error: "Objective must contain 1–2,000 characters." });
     const startedAt = Date.now();
     try {
-      const context = formatMemoryContext(retrieveRelevantMemories(objective, currentMemories, { limit: 5 }));
+      const memories = await getFounderMemories(founderId);
+      const context = formatMemoryContext(retrieveRelevantMemories(objective, memories, { limit: 5 }));
       const result = await ceoOrchestrator.run({ objective, context });
       currentAuditLogs.unshift({
         id: "ceo-" + randomTaskId(),
@@ -482,7 +483,8 @@ async function startServer() {
     const task = typeof req.body?.task === "string" ? req.body.task : "";
     if (!agentId || !task.trim()) return res.status(400).json({ success: false, error: "agentId and task are required." });
     try {
-      const context = formatMemoryContext(retrieveRelevantMemories(task, currentMemories, { limit: 5 }));
+      const memories = await getFounderMemories(founderId);
+      const context = formatMemoryContext(retrieveRelevantMemories(task, memories, { limit: 5 }));
       const result = await specialistRuntime.run({ agentId, task, context });
       currentAuditLogs.unshift({
         id: "specialist-" + randomTaskId(),
@@ -556,7 +558,8 @@ async function startServer() {
     try {
       const ai = new GoogleGenAI({ apiKey });
       const toolContracts = MAYA_FUNCTION_DECLARATIONS as PlannerToolContract[];
-      const planMemoryContext = formatMemoryContext(retrieveRelevantMemories(objective, currentMemories, { limit: 5 }));
+      const memories = await getFounderMemories(founderId);
+      const planMemoryContext = formatMemoryContext(retrieveRelevantMemories(objective, memories, { limit: 5 }));
       const prompt = [
         "Create a safe, minimal plan for the Founder objective below.",
         "Return only JSON with this shape: { summary: string, steps: [{ id, title, tool, args, dependsOn, expectedResult }] }.",
@@ -630,7 +633,10 @@ async function startServer() {
   }
 
   // Action Engine System State
-  app.get("/api/action-engine/state", (_req, res) => {
+  app.get("/api/action-engine/state", async (req, res): Promise<any> => {
+    const founderId = (req as any).authSession?.user?.id;
+    if (!founderId) return res.status(401).json({ success: false, error: "Verified Founder session required." });
+    const memories = await getFounderMemories(founderId);
     const hasKey = Boolean(process.env.GEMINI_API_KEY || process.env.API_KEY);
     res.json({
       founder: {
@@ -644,7 +650,7 @@ async function startServer() {
       personaModes: PERSONA_MODES,
       ventures: SYB_VENTURES,
       tasks: currentTasks,
-      memories: currentMemories,
+      memories,
       tools: MASTER_TOOLS.filter((tool) => IMPLEMENTED_TOOL_NAMES.has(tool.name)),
       tests: currentTestSuites,
       auditLogs: currentAuditLogs.slice(-20).reverse(),
@@ -1020,33 +1026,47 @@ async function startServer() {
   });
 
   // Action Engine Memory Management
-  app.post("/api/action-engine/memory", (req, res): any => {
+  app.post("/api/action-engine/memory", async (req, res): Promise<any> => {
+    const founderId = (req as any).authSession?.user?.id;
+    if (!founderId) return res.status(401).json({ success: false, error: "Verified Founder session required." });
     const { category, title, content } = req.body || {};
-    if (!content) return res.status(400).json({ error: "Content is required" });
+    if (typeof content !== "string" || !content.trim() || content.length > 20000) return res.status(400).json({ success: false, error: "Content must contain 1–20,000 characters." });
     const newMem: MemoryEntry = {
-      id: "mem-" + Date.now().toString(36),
-      category: category || "lesson",
-      title: title || `${category || "Memory"} Entry`,
-      content,
+      id: "mem-" + randomTaskId(),
+      category: (category || "lesson") as MemoryEntry["category"],
+      title: String(title || `${category || "Memory"} Entry`).slice(0, 160),
+      content: content.trim(),
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
-    currentMemories.unshift(newMem);
-    persistFounderState();
-    return res.json({ success: true, memory: newMem });
+    try {
+      await memoryRepository.save(founderId, newMem);
+      const memories = await getFounderMemories(founderId);
+      return res.json({ success: true, memory: newMem, count: memories.length });
+    } catch (error) {
+      return res.status(400).json({ success: false, error: error instanceof Error ? error.message : String(error) });
+    }
   });
 
-  app.delete("/api/action-engine/memory/:id", (req, res): any => {
-    const { id } = req.params;
-    currentMemories = currentMemories.filter((m) => m.id !== id);
-    persistFounderState();
-    return res.json({ success: true, deleted: id });
+  app.delete("/api/action-engine/memory/:id", async (req, res): Promise<any> => {
+    const founderId = (req as any).authSession?.user?.id;
+    if (!founderId) return res.status(401).json({ success: false, error: "Verified Founder session required." });
+    try {
+      const deleted = await memoryRepository.delete(founderId, req.params.id);
+      if (!deleted) return res.status(404).json({ success: false, error: "Memory not found for this Founder." });
+      const memories = await getFounderMemories(founderId);
+      return res.json({ success: true, deleted: req.params.id, count: memories.length });
+    } catch (error) {
+      return res.status(503).json({ success: false, error: error instanceof Error ? error.message : String(error) });
+    }
   });
 
   // Action Engine Master Tool Execution
   // All UI tool calls use the same server-side allowlist and validation as Gemini function calls.
   app.post("/api/action-engine/tools/execute", async (req, res): Promise<any> => {
     const startTime = Date.now();
+    const founderId = (req as any).authSession?.user?.id;
+    if (!founderId) return res.status(401).json({ success: false, error: "Verified Founder session required." });
     const { toolName, params } = req.body || {};
     let result: unknown;
     let status: "success" | "failed" = "success";
@@ -1060,7 +1080,7 @@ async function startServer() {
       if (JSON.stringify(safeParams).length > 25000) {
         throw new Error("Tool parameters exceed the 25 KB request limit.");
       }
-      result = await executeAgentTool(toolName, safeParams);
+      result = await executeAgentTool(toolName, safeParams, founderId);
     } catch (error) {
       status = "failed";
       result = { error: error instanceof Error ? error.message : String(error) };
@@ -1208,7 +1228,8 @@ You act as an autonomous founder-grade CTO, lead engineer, and QA engineer.
         });
       }
 
-      const memoryContext = formatMemoryContext(retrieveRelevantMemories(String(message || ""), currentMemories, { limit: 5 }));
+      const memories = await getFounderMemories(conversationContext.founderId);
+      const memoryContext = formatMemoryContext(retrieveRelevantMemories(String(message || ""), memories, { limit: 5 }));
       const activeModeInfo = PERSONA_MODES.find((m) => m.id === currentPersona.activeMode) || PERSONA_MODES[0];
       const dynamicInstruction = `${ACTION_ENGINE_SYSTEM_PROMPT}
 
