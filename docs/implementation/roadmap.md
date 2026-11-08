@@ -108,3 +108,16 @@ This module is intentionally described as file-backed persistence, not a product
 - [ ] Add explicit memory review, correction, expiry and deletion UI
 - [ ] Add transactional database storage and encryption/key management
 
+
+
+## Specialist reasoning runtime — development branch
+
+- [x] Expose Founder-authenticated specialist registry
+- [x] Run bounded Gemini reasoning calls using specialist role manifests
+- [x] Provide a dedicated Specialist Agents UI
+- [x] Inject relevant saved notes as untrusted reference context
+- [x] Enforce reasoning-only boundary with no tools or further delegation
+- [ ] Build CEO orchestration and real specialist-to-specialist delegation
+- [ ] Add per-agent durable work queues, budgets, concurrency controls and result verification
+- [ ] Connect scoped tools through approval-aware adapters
+
