@@ -17,6 +17,9 @@ WORKDIR /app
 COPY --from=build --chown=node:node /app/node_modules ./node_modules
 COPY --from=build --chown=node:node /app/dist ./dist
 COPY --chown=node:node package.json ./package.json
+# Keep the source workspace available for read-only scheduled analysis tools.
+# .dockerignore excludes local secrets, data, node_modules and build output.
+COPY --chown=node:node . .
 
 RUN mkdir -p /data && chown node:node /data
 USER node
