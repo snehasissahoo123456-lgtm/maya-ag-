@@ -9,7 +9,7 @@ import os from "node:os";
 import path from "node:path";
 
 class FakeSocket extends EventEmitter {
-  readyState = WebSocket.OPEN;
+  readyState: number = WebSocket.OPEN;
   sent: any[] = [];
   send(value: string) { this.sent.push(JSON.parse(value)); }
   close() { this.readyState = WebSocket.CLOSED; this.emit("close"); }
