@@ -28,6 +28,7 @@ on:
     branches:
       - main
       - maya/semantic-memory-retrieval
+      - maya/memory-feedback-loop
       - maya/supabase-memory-store
       - maya/distributed-task-leases
       - maya/durable-audit-trail
