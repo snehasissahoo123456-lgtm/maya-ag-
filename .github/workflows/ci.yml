@@ -19,6 +19,7 @@ on:
       - maya/supabase-task-queue
       - maya/durable-audit-trail
       - maya/supabase-approval-ledger
+      - maya/distributed-task-leases
   pull_request:
     branches:
       - main
