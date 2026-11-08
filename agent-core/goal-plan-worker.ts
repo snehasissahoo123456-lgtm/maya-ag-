@@ -23,16 +23,20 @@ export class GoalPlanWorker {
   private cyclePromise?: Promise<{ scanned: number; resumed: number; completed: number; awaitingApproval: number; recovered: number; failed: number; busy?: boolean }>;
   private stopped = true;
   private cycleActive = false;
+  private readonly pollIntervalMs: number;
+  private readonly maxPlansPerCycle: number;
   private status: GoalPlanWorkerStatus = { enabled: false, running: false, resumed: 0, completed: 0, awaitingApproval: 0, recovered: 0, failed: 0 };
 
   constructor(
     private readonly repository: GoalPlanRepository,
     private readonly executor: GoalPlanExecutor,
     private readonly founderId: string,
-    private readonly pollIntervalMs = 3000,
-    private readonly maxPlansPerCycle = 10,
+    pollIntervalMs = 3000,
+    maxPlansPerCycle = 10,
   ) {
     if (!founderId.trim()) throw new Error("Plan worker Founder scope is required.");
+    this.pollIntervalMs = Math.min(60_000, Math.max(1_000, Number.isFinite(pollIntervalMs) ? pollIntervalMs : 3_000));
+    this.maxPlansPerCycle = Math.min(50, Math.max(1, Number.isFinite(maxPlansPerCycle) ? Math.floor(maxPlansPerCycle) : 10));
   }
 
   getStatus(): GoalPlanWorkerStatus { return { ...this.status, enabled: !this.stopped, running: this.cycleActive }; }
