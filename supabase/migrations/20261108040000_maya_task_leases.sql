@@ -84,8 +84,11 @@ declare changed_count integer;
 begin
   update public.maya_tasks
     set envelope = jsonb_set(
-      jsonb_set(envelope, '{task,status}', to_jsonb('requires_recovery'::text), true),
-      '{task,lastError}', to_jsonb('Worker lease expired during execution; inspect side effects before retrying.'::text), true
+      jsonb_set(
+        jsonb_set(envelope, '{task,status}', to_jsonb('requires_recovery'::text), true),
+        '{task,lastError}', to_jsonb('Worker lease expired during execution; inspect side effects before retrying.'::text), true
+      ),
+      '{task,updatedAt}', to_jsonb(now()::text), true
     ),
     updated_at = now(), lease_owner = null, lease_expires_at = null
     where founder_id = p_founder_id
