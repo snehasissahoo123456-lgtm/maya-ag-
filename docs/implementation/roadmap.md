@@ -4,6 +4,7 @@ Branch: maya/foundation-architecture
 Status: Foundation and first security-hardening pass are implemented. Latest CI validates install, typecheck, tests, and production build. No Android APK or production deployment is claimed.
 
 ## Phase 0 — Baseline and contracts
+- [x] Replace the legacy sign-in mockup with a focused Founder password screen backed by the server-issued HttpOnly session cookie; hide unconfigured Google/SMS paths and remove misleading security claims.
 - [x] Capture target cloud + local architecture.
 - [x] Define task states and verification gate in shared TypeScript primitives.
 - [x] Run repository typecheck, unit tests, and production build in GitHub Actions.
