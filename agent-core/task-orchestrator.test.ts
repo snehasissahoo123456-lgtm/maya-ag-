@@ -61,3 +61,28 @@ test("rejects concurrent duplicate execution for the same task", async () => {
  assert.equal(completed.task.status, "completed");
  assert.equal(runs, 1);
 });
+
+test("records Founder-scoped task lifecycle audit events", async () => {
+ const registry = new CapabilityRegistry();
+ registry.register({ name: "workspace.write", description: "Write a generated artifact", risk: "low", allowedRoles: ["developer"], requiredScopes: ["workspace:write"], arguments: { file: { type: "string", required: true, maxLength: 100 } }, timeoutMs: 5000, requiresApproval: false, verification: "Read back artifact and compare checksum." });
+ const repository = new MemoryRepo();
+ const events: any[] = [];
+ const audit = { append: async (event: any) => { events.push(event); }, list: async () => events };
+ const orchestrator = new TaskOrchestrator(repository, registry, new ApprovalLedger(), { run: async () => ({ result: "ok", evidence: { kind: "test", description: "Verified", reference: "sha256:" + "a".repeat(64), observedAt: new Date().toISOString() } }) }, audit);
+ await orchestrator.enqueue({ id: "t-audit", founderId: "f1", instruction: "Write a report", capability: "workspace.write", args: { file: "report.md" }, actor: developer });
+ await orchestrator.execute("t-audit", developer);
+ assert.deepEqual(events.map(event => event.type), ["task.enqueued", "task.execution_started", "task.execution_verified"]);
+ assert.ok(events.every(event => event.founderId === "f1" && event.actorId === developer.id));
+ assert.ok(events.every(event => /^[a-f0-9]{64}$/.test(event.actionDigest)));
+});
+
+test("audit failure after a capability runs parks task in requires_recovery", async () => {
+ const registry = new CapabilityRegistry();
+ registry.register({ name: "workspace.write", description: "Write a generated artifact", risk: "low", allowedRoles: ["developer"], requiredScopes: ["workspace:write"], arguments: { file: { type: "string", required: true, maxLength: 100 } }, timeoutMs: 5000, requiresApproval: false, verification: "Read back artifact and compare checksum." });
+ const repository = new MemoryRepo();
+ const audit = { append: async (event: any) => { if (event.type === "task.execution_verified") throw new Error("audit database unavailable"); }, list: async () => [] };
+ const orchestrator = new TaskOrchestrator(repository, registry, new ApprovalLedger(), { run: async () => ({ result: "possibly-applied", evidence: { kind: "test", description: "Verified", observedAt: new Date().toISOString() } }) }, audit);
+ await orchestrator.enqueue({ id: "t-audit-failure", founderId: "f1", instruction: "Write a report", capability: "workspace.write", args: { file: "report.md" }, actor: developer });
+ await assert.rejects(() => orchestrator.execute("t-audit-failure", developer), /audit database unavailable/);
+ assert.equal((await repository.get("t-audit-failure"))?.task.status, "requires_recovery");
+});
