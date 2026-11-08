@@ -70,3 +70,16 @@ Maya is operational only when actual builds, tests, integrations, device actions
 - [ ] Add conversation search, explicit memory extraction/approval, and retrieval evaluation
 
 This module is intentionally described as file-backed persistence, not a production database. It does not itself implement continuous learning.
+
+
+## Goal planner module — development branch
+
+- [x] Authenticated Gemini-backed goal-to-plan endpoint
+- [x] Validate model output as untrusted JSON against registered tool names and argument schemas
+- [x] Bound plan size and enforce earlier-step dependencies
+- [x] Mark state-mutating proposal steps as requiring Founder approval
+- [x] Keep planner strictly plan-only; no implicit execution or task enqueue
+- [ ] Persist plans and expose plan review/approval UI
+- [ ] Connect approved plans to a dependency-aware executor with idempotency and evidence
+- [ ] Add multi-step recovery, retry budgets, and end-to-end execution verification
+
