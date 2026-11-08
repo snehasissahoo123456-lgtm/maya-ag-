@@ -7,6 +7,7 @@
  * Dedicated to Founder Snehasis Sahoo (SYB - Shape Your Business)
  */
 
+import './pwa-register.ts';
 import * as aiae from 'aiae';
 import React from 'react';
 import { createRoot, Root } from 'react-dom/client';
