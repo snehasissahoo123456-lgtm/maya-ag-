@@ -184,8 +184,9 @@ async function startServer() {
   app.use("/api", (req, res, next) => {
     if (publicApiPaths.has(req.path)) return next();
     const authorization = req.headers.authorization || "";
-    const token = authorization.match(/^Bearer\s+(.+)$/i)?.[1];
-    const session = authService.validateSession(token);
+    const bearer = authorization.match(/^Bearer\s+(.+)$/i)?.[1];
+    const cookieToken = (req.headers.cookie || "").split(";").map((part) => part.trim()).find((part) => part.startsWith("maya_session="))?.slice("maya_session=".length);
+    const session = authService.validateSession(bearer || cookieToken);
     if (!session) {
       return res.status(401).json({ success: false, error: "Authentication required. No verified session is active." });
     }
@@ -506,22 +507,21 @@ async function startServer() {
   // ==========================================
   // Authentication & Security Gate Endpoints
   // ==========================================
-  app.post("/api/auth/google-login", (req, res): any => {
+  app.post("/api/auth/founder-login", (req, res): any => {
     try {
-      const { email, name } = req.body || {};
-      const session = authService.loginWithGoogle(email, name);
+      const { email, password } = req.body || {};
+      const session = authService.loginWithFounderPassword(email, password);
+      const secure = req.secure || req.headers["x-forwarded-proto"] === "https";
+      res.cookie("maya_session", session.token, { httpOnly: true, secure, sameSite: "strict", path: "/", maxAge: 12 * 60 * 60 * 1000 });
       currentAuditLogs.unshift({
-        id: "auth-g-" + Date.now().toString(36),
-        toolName: "auth_google_login",
-        params: { email: session.user.email },
-        status: "success",
+        id: "auth-founder-" + Date.now().toString(36), toolName: "auth_founder_password",
+        params: { email: session.user.email }, status: "success",
         result: { user: session.user.name, role: session.user.role },
-        timestamp: new Date().toISOString(),
-        durationMs: 15,
+        timestamp: new Date().toISOString(), durationMs: 10,
       });
-      return res.json({ success: true, session });
+      return res.json({ success: true, session: { user: session.user, expiresAt: session.expiresAt } });
     } catch (err: any) {
-      return res.status(400).json({ success: false, error: err.message || "Google sign-in failed" });
+      return res.status(401).json({ success: false, error: err.message || "Founder sign-in failed" });
     }
   });
 
@@ -556,16 +556,18 @@ async function startServer() {
 
   app.get("/api/auth/session", (req, res): any => {
     const authHeader = req.headers.authorization || "";
-    const token = authHeader.replace(/^Bearer\s+/i, "");
-    if (!token) return res.status(401).json({ success: false, error: "No token provided" });
+    const token = authHeader.replace(/^Bearer\s+/i, "") || (req.headers.cookie || "").split(";").map((part) => part.trim()).find((part) => part.startsWith("maya_session="))?.slice("maya_session=".length);
+    if (!token) return res.status(401).json({ success: false, error: "No active session" });
     const session = authService.validateSession(token);
     if (!session) return res.status(401).json({ success: false, error: "Session expired or invalid" });
     return res.json({ success: true, session });
   });
 
   app.post("/api/auth/logout", (req, res): any => {
-    const { token } = req.body || {};
+    const authorization = req.headers.authorization || "";
+    const token = authorization.replace(/^Bearer\s+/i, "") || (req.headers.cookie || "").split(";").map((part) => part.trim()).find((part) => part.startsWith("maya_session="))?.slice("maya_session=".length);
     if (token) authService.logout(token);
+    res.clearCookie("maya_session", { httpOnly: true, secure: req.secure || req.headers["x-forwarded-proto"] === "https", sameSite: "strict", path: "/" });
     return res.json({ success: true });
   });
 
