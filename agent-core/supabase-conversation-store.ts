@@ -71,11 +71,15 @@ export class SupabaseConversationStore implements ConversationRepository {
     const existing = await this.get(founderId, id);
     if (existing) return existing;
     const now = new Date().toISOString();
-    await this.request<SupabaseConversationRow[]>("maya_conversations", {
-      method: "POST",
-      headers: { Prefer: "resolution=ignore-duplicates,return=representation" },
-      body: JSON.stringify({ id, founder_id: founderId, title: firstMessage.trim().slice(0, 72) || "New conversation", created_at: now, updated_at: now }),
-    });
+    try {
+      await this.request<SupabaseConversationRow[]>("maya_conversations", {
+        method: "POST",
+        headers: { Prefer: "resolution=ignore-duplicates,return=representation" },
+        body: JSON.stringify({ id, founder_id: founderId, title: firstMessage.trim().slice(0, 72) || "New conversation", created_at: now, updated_at: now }),
+      });
+    } catch (error) {
+      if (!(error instanceof Error) || !error.message.includes("(409)")) throw error;
+    }
     const created = await this.get(founderId, id);
     if (!created) throw new Error("Conversation could not be created for this Founder.");
     return created;
@@ -99,7 +103,7 @@ export class SupabaseConversationStore implements ConversationRepository {
     const rows = await this.request<Array<{ id: string }>>(`maya_conversations?${query}`, {
       method: "DELETE", headers: { Prefer: "return=representation" },
     });
-    return rows.length > 0;
+    return Array.isArray(rows) && rows.length > 0;
   }
 
   private async request<T>(path: string, init: RequestInit = {}): Promise<T> {
