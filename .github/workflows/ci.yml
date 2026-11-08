@@ -25,6 +25,7 @@ on:
   pull_request:
     branches:
       - main
+      - maya/supabase-memory-store
       - maya/distributed-task-leases
       - maya/durable-audit-trail
       - maya/supabase-approval-ledger
