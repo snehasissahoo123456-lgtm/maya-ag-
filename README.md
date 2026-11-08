@@ -31,6 +31,7 @@ bun run build
 \`\`\`
 
 ## Read next
+- [Product and capability contract](docs/product/agent-capability-contract.md)
 - [Target architecture](docs/architecture/target-architecture.md)
 - [Security baseline](docs/security/security-baseline.md)
 - [Implementation roadmap](docs/implementation/roadmap.md)
