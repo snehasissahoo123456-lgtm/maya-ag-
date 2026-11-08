@@ -175,7 +175,7 @@ async function startServer() {
   // provider can be integrated; the current AuthService intentionally issues no sessions.
   const publicApiPaths = new Set([
     "/health",
-    "/auth/google-login",
+    "/auth/founder-login",
     "/auth/send-otp",
     "/auth/verify-otp",
     "/auth/session",
@@ -560,7 +560,7 @@ async function startServer() {
     if (!token) return res.status(401).json({ success: false, error: "No active session" });
     const session = authService.validateSession(token);
     if (!session) return res.status(401).json({ success: false, error: "Session expired or invalid" });
-    return res.json({ success: true, session });
+    return res.json({ success: true, session: { user: session.user, expiresAt: session.expiresAt } });
   });
 
   app.post("/api/auth/logout", (req, res): any => {
