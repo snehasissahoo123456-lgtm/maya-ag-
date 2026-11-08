@@ -36,7 +36,8 @@ test("Supabase task reads and lists are Founder-scoped", async () => {
   const urls: string[] = [];
   const repository = new SupabaseTaskRepository("https://maya-test.supabase.co", "service-secret", async url => {
     urls.push(String(url));
-    return jsonResponse([{ id: task.task.id, founder_id: task.task.founderId, envelope: task }]);
+    const owner = new URL(String(url)).searchParams.get("founder_id");
+    return jsonResponse(owner === "eq.founder-a" ? [{ id: task.task.id, founder_id: task.task.founderId, envelope: task }] : []);
   });
   assert.equal((await repository.get("task-1", "founder-a"))?.task.id, "task-1");
   assert.equal((await repository.get("task-1", "founder-b")), undefined);
