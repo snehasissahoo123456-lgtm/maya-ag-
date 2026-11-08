@@ -115,3 +115,10 @@ When Gemini embeddings are available, new Supabase memory notes are embedded wit
 ## Founder memory feedback (development branch)
 
 The memory workspace now accepts explicit `helpful` / `not_helpful` ratings for a Founder-owned note. File mode stores one current rating per memory; Supabase mode uses a Founder-scoped RPC and persists feedback metadata. Feedback influences retrieval ordering but does not change model weights, prompts, code or permissions. Apply `supabase/migrations/20261108070000_maya_memory_feedback.sql` after the vector memory migration.
+
+
+## Local device bridge (development branch)
+
+A separate `maya/secure-device-bridge` workspace can pair an explicitly enrolled PC using a five-minute one-time code. The local connector uses WSS for remote servers, stores a device token locally with restrictive file permissions, and the server stores only a SHA-256 token hash. Founder-authenticated APIs expose device inventory, revocation, and three read-only commands: `system.info`, `workspace.list`, and `workspace.read_file`. File access is limited to the enrolled workspace, rejects symlinks/path escapes, blocks credential paths, and limits reads to 50 KB. No shell, file writes/deletes, browser control, keystrokes, screenshots, or arbitrary application control are enabled. Start the Windows connector with `scripts/Start-Maya-Bridge.ps1`. Device registry is currently local file storage; apply persistent storage/backup and production TLS policies before hosting across multiple server instances.
+
+Apply `supabase/migrations/20261109000000_maya_tasks.sql` after the earlier Supabase conversation and goal-plan migrations to create the Founder-scoped task table and atomic owner-bound save RPC. Supabase task storage is opt-in through `MAYA_STORAGE_DRIVER=supabase`; the default remains local file storage. Live migration application has not been performed.
