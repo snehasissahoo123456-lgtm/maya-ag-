@@ -85,3 +85,19 @@ test("rejects task id ownership collisions", async () => {
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("rolls back in-memory task mutation when durable write fails", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "maya-task-write-failure-"));
+  const file = path.join(dir, "tasks.json");
+  try {
+    const repository = new FileTaskRepository(file);
+    await repository.put(envelope("task-safe"));
+    fs.rmSync(file);
+    fs.mkdirSync(file); // A directory at the target path forces atomic rename to fail.
+    await assert.rejects(() => repository.put(envelope("task-failed")));
+    assert.equal(await repository.get("task-failed"), undefined);
+    assert.equal((await repository.get("task-safe"))?.task.status, "queued");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
