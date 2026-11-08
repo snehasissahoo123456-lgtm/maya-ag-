@@ -22,10 +22,11 @@ export class SupabaseGoalPlanStore implements GoalPlanRepository {
     const stepStates: Record<string, GoalPlanStepState> = {};
     for (const step of plan.steps) stepStates[step.id] = { status: "queued" };
     const stored: StoredGoalPlan = { id: randomUUID(), founderId, plan: structuredClone(plan), status: "proposed", createdAt: now, updatedAt: now, stepStates };
-    await this.request<PlanRow[]>("maya_goal_plans", {
+    const rows = await this.request<PlanRow[]>("maya_goal_plans", {
       method: "POST", headers: { Prefer: "return=representation" },
       body: JSON.stringify({ id: stored.id, founder_id: founderId, plan: stored.plan, status: stored.status, created_at: now, updated_at: now, step_states: stepStates }),
     });
+    if (!Array.isArray(rows) || rows.length !== 1) throw new Error("Goal plan was not persisted by Supabase.");
     return stored;
   }
   async list(founderId: string): Promise<StoredGoalPlan[]> {
