@@ -1189,7 +1189,7 @@ You can use this cockpit to inspect the current development status and configure
     } catch (err: any) {
       this.updateAgentMessage(
         agentMsgId,
-        `Namaste Founder. Command note kar li hai. Local Bridge active hai, next instruction bataiye.`,
+        `Namaste Founder. Command note kar li hai. The request could not be completed. Please check the authenticated session and configured capabilities.`,
       );
     } finally {
       this.isStreaming = false;
@@ -1199,7 +1199,7 @@ You can use this cockpit to inspect the current development status and configure
   }
 
   private updateAgentMessage(id: string, text: string) {
-    const isStatus = text.includes('📌 PROJECT') || text.includes('📊 OVERALL PROGRESS');
+    const isStatus = text.includes('Maya status:') || text.includes('📌 PROJECT') || text.includes('📊 OVERALL PROGRESS');
     this.messages = this.messages.map((m) =>
       m.id === id ? { ...m, text, isStatusBlock: isStatus } : m,
     );
@@ -1502,7 +1502,7 @@ Status: Ready to build upon Founder "go ahead".`;
                 @click="${() => (this.activeTab = 'tasks')}"
               >
                 <span class="material-symbols-outlined text-base ${this.activeTab === 'tasks' ? 'text-purple-400' : 'text-slate-400'}">schedule</span>
-                <span class="flex-1">24/7 Tasks Queue</span>
+                <span class="flex-1">Task Queue</span>
                 <span class="text-[10px] font-mono px-1.5 py-0.5 rounded bg-slate-800 text-slate-400">${this.tasks.length}</span>
               </button>
 
