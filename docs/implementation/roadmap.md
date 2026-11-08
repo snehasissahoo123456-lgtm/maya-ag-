@@ -57,3 +57,16 @@ Exit gate: sub-agents produce measurable artifacts and test evidence; they canno
 
 ## Release principle
 Maya is operational only when actual builds, tests, integrations, device actions, and security acceptance checks have evidence. Roadmap completion, a green dashboard, model-generated text, or a successful API response alone is not proof of real-world execution.
+
+
+## Conversation persistence module — development branch
+
+- [x] Founder-scoped conversation repository with atomic JSON writes
+- [x] Authenticated list/read/delete endpoints
+- [x] Persist user and assistant chat turns and restore the latest conversation in the UI
+- [x] Unit tests for restart persistence, Founder isolation, and bounded message history
+- [ ] Replace single-instance JSON persistence with a transactional database adapter (SQLite/PostgreSQL)
+- [ ] Add encryption-at-rest/key-management policy and backup/restore verification
+- [ ] Add conversation search, explicit memory extraction/approval, and retrieval evaluation
+
+This module is intentionally described as file-backed persistence, not a production database. It does not itself implement continuous learning.
