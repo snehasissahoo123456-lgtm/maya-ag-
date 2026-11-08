@@ -58,3 +58,26 @@ test("Supabase URL requires HTTPS outside localhost", () => {
   assert.throws(() => new SupabaseTaskRepository("http://maya-test.supabase.co", "service-secret"), /HTTPS/);
   assert.throws(() => new SupabaseTaskRepository("https://maya-test.supabase.co", " "), /service-role key/);
 });
+
+test("Supabase task repository claims, releases and recovers expired leases through atomic RPCs", async () => {
+  const task = envelope();
+  const calls: Array<{ url: string; body: any }> = [];
+  const repository = new SupabaseTaskRepository("https://maya-test.supabase.co", "service-secret", async (input, init) => {
+    const url = String(input);
+    const body = init?.body ? JSON.parse(String(init.body)) : {};
+    calls.push({ url, body });
+    if (url.endsWith("maya_claim_next_task")) return jsonResponse([{ id: task.task.id, founder_id: task.task.founderId, envelope: task }]);
+    if (url.endsWith("maya_release_task_claim")) return jsonResponse([{ id: task.task.id, founder_id: task.task.founderId, envelope: task }]);
+    if (url.endsWith("maya_recover_expired_task_claims")) return jsonResponse([{ recovered: 2 }]);
+    throw new Error("Unexpected RPC");
+  });
+  const claimed = await repository.claimNext("founder-a", "worker-a", 999999);
+  assert.equal(claimed?.task.id, "task-1");
+  assert.equal(calls[0].body.p_founder_id, "founder-a");
+  assert.equal(calls[0].body.p_worker_id, "worker-a");
+  assert.equal(calls[0].body.p_lease_ms, 300000);
+  await repository.releaseClaim("task-1", "founder-a", "worker-a");
+  assert.equal(calls[1].body.p_task_id, "task-1");
+  assert.equal(calls[1].body.p_worker_id, "worker-a");
+  assert.equal(await repository.recoverExpiredClaims("founder-a"), 2);
+});
