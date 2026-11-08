@@ -61,6 +61,10 @@ test("real HTTP control-plane routes enforce Founder auth and execute only the r
     assert.equal(unauthenticated.status, 401);
     const unauthenticatedAudit = await fetch(baseUrl + "/api/audit-events");
     assert.equal(unauthenticatedAudit.status, 401, "Audit history must require Founder authentication");
+    const unauthenticatedMemory = await fetch(baseUrl + "/api/action-engine/memory", {
+      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ content: "Unauthenticated memory must not persist." }),
+    });
+    assert.equal(unauthenticatedMemory.status, 401, "Memory writes must require Founder authentication");
 
     const login = await fetch(baseUrl + "/api/auth/founder-login", {
       method: "POST",
@@ -70,6 +74,20 @@ test("real HTTP control-plane routes enforce Founder auth and execute only the r
     assert.equal(login.status, 200);
     const cookie = login.headers.get("set-cookie")?.split(";")[0];
     assert.ok(cookie, "Founder login should set an HttpOnly session cookie");
+
+    const savedMemory = await fetch(baseUrl + "/api/action-engine/memory", {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie },
+      body: JSON.stringify({ category: "lesson", title: "HTTP memory test", content: "Persistent Founder memory works." }),
+    });
+    assert.equal(savedMemory.status, 200);
+    const savedMemoryBody = await savedMemory.json() as any;
+    const stateResponse = await fetch(baseUrl + "/api/action-engine/state", { headers: { cookie } });
+    assert.equal(stateResponse.status, 200);
+    const stateBody = await stateResponse.json() as any;
+    assert.ok(stateBody.memories.some((item: any) => item.id === savedMemoryBody.memory.id));
+    const deletedMemory = await fetch(baseUrl + `/api/action-engine/memory/${savedMemoryBody.memory.id}`, { method: "DELETE", headers: { cookie } });
+    assert.equal(deletedMemory.status, 200);
 
     const conversationsBeforeAuth = await fetch(baseUrl + "/api/conversations");
     assert.equal(conversationsBeforeAuth.status, 401, "Conversation history must require Founder authentication");
