@@ -11,6 +11,8 @@ import { createServer as createViteServer } from "vite";
 import { GoogleGenAI } from "@google/genai";
 import { createHash, randomBytes } from "node:crypto";
 import { WebSocketServer, WebSocket } from "ws";
+import { DeviceBridgeManager } from "./agent-core/device-bridge-manager.ts";
+import { createDeviceRegistry } from "./agent-core/create-device-registry.ts";
 
 const MODEL_UPGRADES: Record<string, string> = {
   "gemini-2.5-flash": "gemini-3-flash-preview",
@@ -415,6 +417,7 @@ async function startServer() {
   const app = express();
   const server = http.createServer(app);
   const PORT = Number(process.env.PORT) || 3000;
+  const deviceBridgeManager = new DeviceBridgeManager(createDeviceRegistry());
 
   app.use(express.json({ limit: "50mb" }));
   app.use(express.urlencoded({ limit: "50mb", extended: true }));
@@ -451,6 +454,43 @@ async function startServer() {
     }
     (req as any).authSession = session;
     return next();
+  });
+
+  app.post("/api/devices/pairing", async (req, res): Promise<any> => {
+    const founderId = (req as any).authSession?.user?.id;
+    if (!founderId) return res.status(401).json({ success: false, error: "Verified Founder session required." });
+    try {
+      const pairing = await deviceBridgeManager.createPairing(founderId);
+      return res.status(201).json({ success: true, ...pairing, instructions: "Use this one-time code in the Maya local bridge. It expires in five minutes." });
+    } catch (error) {
+      return res.status(400).json({ success: false, error: error instanceof Error ? error.message : "Unable to create pairing code." });
+    }
+  });
+
+  app.get("/api/devices", async (req, res): Promise<any> => {
+    const founderId = (req as any).authSession?.user?.id;
+    if (!founderId) return res.status(401).json({ success: false, error: "Verified Founder session required." });
+    return res.json({ success: true, devices: await deviceBridgeManager.list(founderId) });
+  });
+
+  app.post("/api/devices/:id/commands", async (req, res): Promise<any> => {
+    const founderId = (req as any).authSession?.user?.id;
+    if (!founderId) return res.status(401).json({ success: false, error: "Verified Founder session required." });
+    const command = typeof req.body?.command === "string" ? req.body.command : "";
+    const args = req.body?.args && typeof req.body.args === "object" && !Array.isArray(req.body.args) ? req.body.args : {};
+    try {
+      const result = await deviceBridgeManager.executeCommand({ deviceId: req.params.id, founderId, command, args });
+      return res.json({ success: true, result });
+    } catch (error) {
+      return res.status(400).json({ success: false, error: error instanceof Error ? error.message : "Device command failed." });
+    }
+  });
+
+  app.delete("/api/devices/:id", async (req, res): Promise<any> => {
+    const founderId = (req as any).authSession?.user?.id;
+    if (!founderId) return res.status(401).json({ success: false, error: "Verified Founder session required." });
+    const revoked = await deviceBridgeManager.revoke(req.params.id, founderId);
+    return revoked ? res.json({ success: true, revoked: req.params.id }) : res.status(404).json({ success: false, error: "Device not found." });
   });
 
   app.post("/api/agent/ceo/orchestrate", async (req, res): Promise<any> => {
@@ -1633,6 +1673,17 @@ MULTILINGUAL & RAPID REACTION:
     }
   });
 
+  // Separate authenticated-by-pairing-token channel for the explicitly enrolled local device.
+  // It accepts no browser session or origin-based trust; pairing code/device token are required by the bridge manager.
+  const deviceWss = new WebSocketServer({
+    server,
+    path: "/api/device-bridge",
+    maxPayload: 256 * 1024,
+    perMessageDeflate: false,
+  });
+  deviceWss.on("connection", (socket: WebSocket) => deviceBridgeManager.accept(socket));
+  deviceWss.on("error", (error) => console.error("[Device Bridge] WebSocket server error:", error));
+
   // WebSocket Relay for ai.live.connect & ai.live.music.connect + Real-Time Watcher Stream
   const wss = new WebSocketServer({
     server,
@@ -1848,6 +1899,7 @@ MULTILINGUAL & RAPID REACTION:
   }
 
   server.on("close", () => { void taskWorker.stop(); });
+  server.on("close", () => { deviceWss.close(); });
   server.listen(PORT, "0.0.0.0", () => {
     if (taskWorkerEnabled) taskWorker.start();
     console.log(`[Backend] Server running on http://localhost:${PORT}`);
