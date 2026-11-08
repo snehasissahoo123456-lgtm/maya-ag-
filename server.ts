@@ -1190,17 +1190,21 @@ async function startServer() {
     const founderId = session?.user?.id;
     if (!founderId) return res.status(401).json({ success: false, error: "Verified Founder session required." });
     const instruction = typeof req.body?.instruction === "string" ? req.body.instruction.trim() : "";
+    const capability = typeof req.body?.capability === "string" ? req.body.capability : "workspace.read_file";
     const filePath = typeof req.body?.path === "string" ? req.body.path : "";
+    const content = req.body?.content;
     if (!instruction || instruction.length > 1000) return res.status(400).json({ success: false, error: "Instruction must contain 1–1000 characters." });
+    if (capability !== "workspace.read_file" && capability !== "workspace.write_file") return res.status(400).json({ success: false, error: "Only workspace.read_file and approval-gated workspace.write_file are enabled." });
     if (!filePath || filePath.length > 1024) return res.status(400).json({ success: false, error: "A workspace-relative file path of 1–1024 characters is required." });
+    if (capability === "workspace.write_file" && (typeof content !== "string" || Buffer.byteLength(content, "utf8") > 100_000)) return res.status(400).json({ success: false, error: "Write content must be text no larger than 100 KB." });
     try {
-      const actor = { id: founderId, founderId, role: "founder" as const, scopes: ["workspace:read"] };
+      const actor = { id: founderId, founderId, role: "founder" as const, scopes: capability === "workspace.write_file" ? ["workspace:read", "workspace:write"] : ["workspace:read"] };
       const envelope = await taskOrchestrator.enqueue({
         id: "task-" + randomTaskId(),
         founderId,
         instruction,
-        capability: "workspace.read_file",
-        args: { path: filePath },
+        capability,
+        args: capability === "workspace.write_file" ? { path: filePath, content } : { path: filePath },
         actor,
       });
       currentAuditLogs.unshift({
@@ -1220,8 +1224,9 @@ async function startServer() {
     const founderId = session?.user?.id;
     if (!founderId) return res.status(401).json({ success: false, error: "Verified Founder session required." });
     try {
-      const actor = { id: founderId, founderId, role: "founder" as const, scopes: ["workspace:read"] };
-      const output = await taskOrchestrator.execute(req.params.id, actor);
+      const actor = { id: founderId, founderId, role: "founder" as const, scopes: ["workspace:read", "workspace:write"] };
+      const approvalId = typeof req.body?.approvalId === "string" ? req.body.approvalId : undefined;
+      const output = await taskOrchestrator.execute(req.params.id, actor, approvalId);
       currentAuditLogs.unshift({
         id: "control-task-run-" + randomTaskId(), toolName: "control_plane_task_execute",
         params: { taskId: req.params.id }, status: "success",
@@ -1249,12 +1254,18 @@ async function startServer() {
     const founderId = session?.user?.id;
     if (!founderId) return res.status(401).json({ success: false, error: "Verified Founder session required." });
     try {
-      const actor = { id: founderId, founderId, role: "founder" as const, scopes: ["workspace:read"] };
+      const actor = { id: founderId, founderId, role: "founder" as const, scopes: ["workspace:read", "workspace:write"] };
       const approval = await taskOrchestrator.requestApproval(req.params.id, actor);
       return res.json({ success: true, ...approval });
     } catch (error) {
       return res.status(400).json({ success: false, error: error instanceof Error ? error.message : String(error) });
     }
+  });
+
+  app.get("/api/control-plane/approvals", async (req, res) => {
+    const founderId = (req as any).authSession?.user?.id;
+    if (!founderId) return res.status(401).json({ success: false, error: "Verified Founder session required." });
+    return res.json({ success: true, approvals: await approvalRepository.listForFounder(founderId) });
   });
 
   app.post("/api/control-plane/approvals/:approvalId/decision", async (req, res): Promise<any> => {
