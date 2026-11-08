@@ -9,7 +9,7 @@ import fs from "fs";
 import { execSync, spawn } from "child_process";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI } from "@google/genai";
-import { createHash, randomBytes } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { WebSocketServer, WebSocket } from "ws";
 import { DeviceBridgeManager } from "./agent-core/device-bridge-manager.ts";
 import { createDeviceRegistry } from "./agent-core/create-device-registry.ts";
@@ -178,10 +178,11 @@ taskCapabilityRegistry.register({
 });
 // Only this read-only capability is enabled. Do not register write, shell, deploy,
 // account, payment, or device capabilities until durable approvals and adapters exist.
+const approvalRepository = createApprovalRepository();
 const taskOrchestrator = new TaskOrchestrator(
   taskRepository,
   taskCapabilityRegistry,
-  createApprovalRepository(),
+  approvalRepository,
   {
     run: async ({ capability, args, signal }) => {
       if (capability !== "workspace.read_file") throw new Error("Capability runner is not enabled for this action.");
@@ -213,7 +214,7 @@ const taskWorker = new TaskWorker(taskRepository, taskOrchestrator, taskCapabili
   pollIntervalMs: Number(process.env.MAYA_TASK_WORKER_POLL_MS) || 3000,
   leaseMs: Number(process.env.MAYA_TASK_WORKER_LEASE_MS) || 60_000,
   maxTasksPerCycle: Number(process.env.MAYA_TASK_WORKER_MAX_TASKS_PER_CYCLE) || 20,
-});
+}, approvalRepository);
 const taskWorkerEnabled = process.env.MAYA_TASK_WORKER_ENABLED === "true";
 const scheduleRepository = createScheduledJobRepository();
 const scheduleWorkerEnabled = process.env.MAYA_SCHEDULE_WORKER_ENABLED === "true";
