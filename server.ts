@@ -1018,14 +1018,7 @@ MULTILINGUAL & RAPID REACTION:
         res.setHeader("Connection", "keep-alive");
 
         const msgLower = String(message || "").toLowerCase().trim();
-        let fallbackText = `Namaste Founder! Maya ready hai.
-
-Main agent, website, app, software ya automation, kuch bhi build, test aur deliver kar sakti hoon.
-
-• Tone Mode: ${activeModeInfo.name} (${activeModeInfo.toneBadge})
-• Connected right now: Local Bridge (Port 3000), 21 Master Tools, 24/7 Task Queue, SYB Ecosystem
-
-Batao Founder, aaj kya banana hai?`;
+        let fallbackText = `Maya is in limited offline mode. Gemini is not configured, and no agent task, tool, platform integration, or background execution is being performed. Configure GEMINI_API_KEY and complete the authenticated runtime setup before using Maya for operational work.`;
         if (msgLower === "status" || msgLower.includes("status")) {
           fallbackText = `📌 PROJECT / TASK: Action Engine Cockpit (SYB Ecosystem)
 📊 OVERALL PROGRESS: 100%
