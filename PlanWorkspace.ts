@@ -1,13 +1,16 @@
 import { html, LitElement } from 'lit';
-import { customElement, state } from 'lit/decorators.js';
-
-@customElement('maya-plan-workspace')
 export class MayaPlanWorkspace extends LitElement {
+  static properties = {
+    objective: { state: true },
+    plans: { state: true },
+    busy: { state: true },
+    error: { state: true },
+  };
   override createRenderRoot() { return this; }
-  @state() accessor objective = '';
-  @state() accessor plans: any[] = [];
-  @state() accessor busy = false;
-  @state() accessor error: string | null = null;
+  objective = '';
+  plans: any[] = [];
+  busy = false;
+  error: string | null = null;
 
   override connectedCallback() {
     super.connectedCallback();
@@ -123,4 +126,8 @@ export class MayaPlanWorkspace extends LitElement {
       </div>
     `;
   }
+}
+
+if (typeof customElements !== 'undefined' && !customElements.get('maya-plan-workspace')) {
+  customElements.define('maya-plan-workspace', MayaPlanWorkspace);
 }
