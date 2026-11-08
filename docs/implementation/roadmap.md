@@ -23,7 +23,7 @@ Exit gate: security tests pass; no route exposes Founder state unauthenticated; 
 - Device registry and device-bound credentials.
 - Durable task queue, planner, scheduler, policy engine, event stream, and observability.
 - AI provider adapter with server-side secrets and configurable quotas.
-- Specialist agent registry with task-scoped capabilities and budget limits.
+- [x] Specialist agent manifests and bounded delegation policy (templates only; live model-backed agents and persistent budgets remain future work).
 Exit gate: two devices can share tasks securely; retries and restarts preserve state; approvals are bound to exact actions.
 
 ## Phase 3 — PC and VS Code runtime
