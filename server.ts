@@ -171,8 +171,8 @@ async function startServer() {
     res.json({ status: "ok", agent: "Maya · Action Engine v2.0" });
   });
 
-  // Default-deny REST API access. Authentication endpoints remain reachable so a real
-  // provider can be integrated; the current AuthService intentionally issues no sessions.
+  // Default-deny REST API access. Only Founder password sign-in, session validation,
+  // logout, and health checks are reachable before authentication.
   const publicApiPaths = new Set([
     "/health",
     "/auth/founder-login",
