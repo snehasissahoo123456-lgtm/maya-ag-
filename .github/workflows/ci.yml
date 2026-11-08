@@ -5,9 +5,12 @@ on:
     branches:
       - main
       - maya/foundation-architecture
+      - maya/dashboard-foundation
+      - maya/task-worker-foundation
   pull_request:
     branches:
       - main
+      - maya/dashboard-foundation
 
 permissions:
   contents: read
