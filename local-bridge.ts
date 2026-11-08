@@ -20,15 +20,28 @@ function isSensitive(target: string): boolean {
 }
 function resolveAllowedPath(root: string, relativePath: unknown): string {
   if (typeof relativePath !== "string" || relativePath.length > 1024) throw new Error("A valid relative path is required.");
-  const lexicalTarget = path.resolve(root, relativePath || ".");
-  if (!isWithinRoot(root, lexicalTarget)) throw new Error("Path escapes the configured workspace root.");
   let realRoot: string;
-  let realTarget: string;
-  try { realRoot = fs.realpathSync(root); realTarget = fs.realpathSync(lexicalTarget); }
-  catch { throw new Error("Workspace path does not exist or cannot be resolved."); }
-  if (!isWithinRoot(realRoot, realTarget)) throw new Error("Resolved workspace path escapes the configured workspace root.");
-  if (isSensitive(realTarget)) throw new Error("Access to sensitive workspace paths is blocked.");
-  return realTarget;
+  try { realRoot = fs.realpathSync(root); }
+  catch { throw new Error("Configured workspace root cannot be resolved."); }
+  const lexicalTarget = path.resolve(realRoot, relativePath || ".");
+  if (!isWithinRoot(realRoot, lexicalTarget)) throw new Error("Path escapes the configured workspace root.");
+  // Reject symlinks in every path component, not only the final file. Resolving first
+  // and lstat'ing only the resolved target would silently follow a symlinked parent.
+  const relative = path.relative(realRoot, lexicalTarget);
+  let cursor = realRoot;
+  try {
+    for (const segment of relative.split(path.sep).filter(Boolean)) {
+      cursor = path.join(cursor, segment);
+      if (fs.lstatSync(cursor).isSymbolicLink()) throw new Error("Symbolic links are blocked in the enrolled workspace.");
+    }
+    const realTarget = fs.realpathSync(lexicalTarget);
+    if (!isWithinRoot(realRoot, realTarget)) throw new Error("Resolved workspace path escapes the configured workspace root.");
+    if (isSensitive(realTarget)) throw new Error("Access to sensitive workspace paths is blocked.");
+    return realTarget;
+  } catch (error) {
+    if (error instanceof Error && error.message.includes("Symbolic links")) throw error;
+    throw new Error("Workspace path does not exist or cannot be resolved.");
+  }
 }
 
 export async function executeLocalBridgeCommand(rootInput: string, command: string, args: Record<string, unknown> = {}): Promise<unknown> {
