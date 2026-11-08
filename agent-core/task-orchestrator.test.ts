@@ -39,3 +39,24 @@ test("high-risk task cannot execute until exact Founder approval is granted", as
  assert.equal(result.task.status, "completed");
  assert.equal(getRuns(), 1);
 });
+
+test("rejects concurrent duplicate execution for the same task", async () => {
+ const registry = new CapabilityRegistry();
+ registry.register({ name: "workspace.write", description: "Write a generated artifact", risk: "low", allowedRoles: ["developer"], requiredScopes: ["workspace:write"], arguments: { file: { type: "string", required: true, maxLength: 100 } }, timeoutMs: 5000, requiresApproval: false, verification: "Read back artifact and compare checksum." });
+ const repository = new MemoryRepo();
+ let runs = 0;
+ let release!: () => void;
+ const gate = new Promise<void>(resolve => { release = resolve; });
+ const orchestrator = new TaskOrchestrator(repository, registry, new ApprovalLedger(), { run: async () => {
+   runs++;
+   await gate;
+   return { result: "ok", evidence: { kind: "test", description: "Verified", observedAt: new Date().toISOString() } };
+ } });
+ await orchestrator.enqueue({ id: "t-race", founderId: "f1", instruction: "Write a report", capability: "workspace.write", args: { file: "report.md" }, actor: developer });
+ const first = orchestrator.execute("t-race", developer);
+ await assert.rejects(() => orchestrator.execute("t-race", developer), /already in progress/i);
+ release();
+ const completed = await first;
+ assert.equal(completed.task.status, "completed");
+ assert.equal(runs, 1);
+});
