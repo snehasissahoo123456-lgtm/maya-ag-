@@ -46,9 +46,11 @@ export class TaskWorker {
     if (!options.founderId.trim()) throw new Error("Worker Founder scope is required.");
     this.founderId = options.founderId;
     this.workerId = (options.workerId || randomUUID()).slice(0, 128);
-    this.leaseMs = Math.min(300_000, Math.max(5_000, options.leaseMs ?? 60_000));
-    this.maxTasksPerCycle = Math.min(100, Math.max(1, Math.floor(options.maxTasksPerCycle ?? 20)));
-    const requestedInterval = options.pollIntervalMs ?? 3000;
+    const requestedLease = Number.isFinite(options.leaseMs) ? options.leaseMs! : 60_000;
+    const requestedMaxTasks = Number.isFinite(options.maxTasksPerCycle) ? Math.floor(options.maxTasksPerCycle!) : 20;
+    this.leaseMs = Math.min(300_000, Math.max(5_000, requestedLease));
+    this.maxTasksPerCycle = Math.min(100, Math.max(1, requestedMaxTasks));
+    const requestedInterval = Number.isFinite(options.pollIntervalMs) ? options.pollIntervalMs! : 3000;
     this.pollIntervalMs = Math.min(60_000, Math.max(1_000, requestedInterval));
   }
 
