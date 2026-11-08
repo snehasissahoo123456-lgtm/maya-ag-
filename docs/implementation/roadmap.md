@@ -8,16 +8,17 @@ Status: Foundation and first security-hardening pass are implemented. Latest CI 
 - [x] Define task states and verification gate in shared TypeScript primitives.
 - [x] Run repository typecheck, unit tests, and production build in GitHub Actions.
 - [ ] Complete route and tool policy mapping, including WebSocket upgrade and every tool adapter.
+- [x] Add a production-server HTTP integration test for the authenticated task API and real read-only capability.
 - [x] Add repository CI. Branch protection remains unconfigured.
 
 ## Phase 1 — Make the existing server safe
 - Integrate verified Google OAuth/SMS identity providers, secure session issuance, HttpOnly cookie lifecycle, CSRF/origin controls, and revocation.
 - Complete route/tool authorization mapping and add security acceptance tests.
-- [x] Add a single-instance file-backed task repository for the new control plane, with serialized writes, corrupt-store fail-closed behavior, and interrupted-task recovery. This is not a multi-instance database.
+- [x] Add a single-instance file-backed task repository for the new control plane, with serialized writes, corrupt-store fail-closed behavior, interrupted-task recovery, and rollback when durable writes fail. This is not a multi-instance database.
 - [x] Persist the exact-action approval ledger to a single-instance file store and expose authenticated Founder request/decision endpoints. No high-risk capability is enabled.
 - [x] Implement one read-only workspace-file execution adapter with path containment, secret-file blocking, size limit, and SHA-256 evidence.
 - Extend workspace containment to every future file and command adapter; unrestricted shell execution remains disabled.
-Exit gate: security tests pass; no route exposes Founder state unauthenticated; tasks survive restart; fake success paths cannot mark tasks complete.
+Exit gate: partial evidence exists for the task API and its read-only capability. Still required: comprehensive route/tool authorization tests, CSRF/origin protection, durable sessions/audit, and security acceptance testing. No general-purpose worker or privileged action is enabled.
 
 ## Phase 2 — Cloud control plane
 - Device registry and device-bound credentials.
