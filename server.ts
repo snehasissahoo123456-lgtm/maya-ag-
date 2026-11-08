@@ -123,6 +123,7 @@ import { CapabilityRegistry } from "./agent-core/capability-registry.ts";
 import { ApprovalLedger } from "./agent-core/approval-ledger.ts";
 import { TaskOrchestrator } from "./agent-core/task-orchestrator.ts";
 import { createTaskRepository } from "./agent-core/create-task-repository.ts";
+import { createAuditRepository } from "./agent-core/create-audit-repository.ts";
 import { TaskWorker } from "./agent-core/task-worker.ts";
 import { createConversationRepository } from "./agent-core/create-conversation-repository.ts";
 import { validateGoalPlan, type PlannerToolContract } from "./agent-core/goal-planner.ts";
@@ -135,6 +136,7 @@ import { CEOOrchestrator } from "./agent-core/ceo-orchestrator.ts";
 
 const conversationStore = createConversationRepository();
 const taskRepository = createTaskRepository();
+const auditRepository = createAuditRepository();
 const taskCapabilityRegistry = new CapabilityRegistry();
 taskCapabilityRegistry.register({
   name: "workspace.read_file",
@@ -176,6 +178,7 @@ const taskOrchestrator = new TaskOrchestrator(
       };
     },
   },
+  auditRepository,
 );
 
 const taskWorker = new TaskWorker(taskRepository, taskOrchestrator, taskCapabilityRegistry, {
@@ -902,6 +905,18 @@ async function startServer() {
     if (!founderId) return res.status(401).json({ success: false, error: "Verified Founder session required." });
     const tasks = await taskRepository.list(founderId);
     return res.json({ success: true, tasks });
+  });
+
+  app.get("/api/audit-events", async (req, res): Promise<any> => {
+    const founderId = (req as any).authSession?.user?.id;
+    if (!founderId) return res.status(401).json({ success: false, error: "Verified Founder session required." });
+    try {
+      const requested = Number(req.query.limit || 100);
+      const events = await auditRepository.list(founderId, Number.isFinite(requested) ? requested : 100);
+      return res.json({ success: true, events });
+    } catch (error) {
+      return res.status(503).json({ success: false, error: error instanceof Error ? error.message : String(error) });
+    }
   });
 
   app.post("/api/control-plane/tasks", async (req, res): Promise<any> => {
