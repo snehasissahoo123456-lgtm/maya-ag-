@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { executeLocalBridgeCommand } from "../local-bridge.ts";
+import { executeLocalBridgeCommand } from "./local-bridge.ts";
 
 test("local bridge reads only regular files inside the enrolled workspace", async () => {
   const parent = fs.mkdtempSync(path.join(os.tmpdir(), "maya-bridge-root-"));
