@@ -53,14 +53,13 @@ export class TaskOrchestrator {
     }
     envelope.attempts += 1;
     await this.repository.put(envelope);
+    const controller = new AbortController();
+    let timeout: ReturnType<typeof setTimeout> | undefined;
     try {
-      const controller = new AbortController();
-      let timeout: ReturnType<typeof setTimeout> | undefined;
       const timeoutPromise = new Promise<never>((_resolve, reject) => {
         timeout = setTimeout(() => { controller.abort(); reject(new Error("Capability execution timed out.")); }, definition.timeoutMs);
       });
       const output = await Promise.race([this.runner.run({ capability: definition.name, args: envelope.args, timeoutMs: definition.timeoutMs, idempotencyKey: envelope.idempotencyKey, signal: controller.signal }), timeoutPromise]);
-      if (timeout) clearTimeout(timeout);
       envelope.task = transitionTask(envelope.task, "verifying");
       envelope.task = transitionTask(envelope.task, "completed", { evidence: output.evidence });
       await this.repository.put(envelope);
@@ -70,7 +69,7 @@ export class TaskOrchestrator {
       await this.repository.put(envelope);
       throw error;
     } finally {
-      // The timeout promise is settled or cleared by the runner completion path.
+      if (timeout) clearTimeout(timeout);
     }
   }
   private async requireTask(id: string): Promise<TaskEnvelope> {
