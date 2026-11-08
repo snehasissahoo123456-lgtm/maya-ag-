@@ -13,9 +13,9 @@ Status: Foundation and first security-hardening pass are implemented. Latest CI 
 ## Phase 1 — Make the existing server safe
 - Integrate verified Google OAuth/SMS identity providers, secure session issuance, HttpOnly cookie lifecycle, CSRF/origin controls, and revocation.
 - Complete route/tool authorization mapping and add security acceptance tests.
-- Replace in-memory task/memory state with durable storage and migrations.
-- Add a persisted, server-validated approval ledger bound to exact action arguments and targets.
-- Implement real, sandboxed execution adapters; unsupported actions currently fail closed.
+- [x] Add a single-instance file-backed task repository for the new control plane, with serialized writes, corrupt-store fail-closed behavior, and interrupted-task recovery. This is not a multi-instance database.
+- Persist the exact-action approval ledger and expose Founder-only approval endpoints before enabling any high-risk capability. Current ledger is in-memory; no high-risk capability is enabled.
+- [x] Implement one read-only workspace-file execution adapter with path containment, secret-file blocking, size limit, and SHA-256 evidence.
 - Extend workspace containment to every future file and command adapter; unrestricted shell execution remains disabled.
 Exit gate: security tests pass; no route exposes Founder state unauthenticated; tasks survive restart; fake success paths cannot mark tasks complete.
 
