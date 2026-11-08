@@ -159,6 +159,8 @@ test("real HTTP control-plane routes enforce Founder auth and execute only the r
 
     const planBeforeAuth = await fetch(baseUrl + "/api/agent/plan", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ objective: "Inspect the repository" }) });
     assert.equal(planBeforeAuth.status, 401, "Goal planning must require Founder authentication");
+    const planWorkerBeforeAuth = await fetch(baseUrl + "/api/agent/plans/not-a-real-plan/start", { method: "POST" });
+    assert.equal(planWorkerBeforeAuth.status, 401, "Background plan start must require Founder authentication");
     const specialistsBeforeAuth = await fetch(baseUrl + "/api/agent/specialists");
     assert.equal(specialistsBeforeAuth.status, 401, "Specialist registry must require Founder authentication");
     const ceoBeforeAuth = await fetch(baseUrl + "/api/agent/ceo/orchestrate", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ objective: "Review the project" }) });
@@ -178,6 +180,9 @@ test("real HTTP control-plane routes enforce Founder auth and execute only the r
     assert.ok(specialistsBody.specialists.some((agent: any) => agent.id === "research"));
     const unavailableSpecialist = await fetch(baseUrl + "/api/agent/specialists/run", { method: "POST", headers: { "content-type": "application/json", cookie }, body: JSON.stringify({ agentId: "research", task: "Review this project" }) });
     assert.equal(unavailableSpecialist.status, 503, "Specialist execution must report missing Gemini configuration");
+
+    const disabledPlanWorker = await fetch(baseUrl + "/api/agent/plans/not-a-real-plan/start", { method: "POST", headers: { cookie } });
+    assert.equal(disabledPlanWorker.status, 503, "Background plan start must report the disabled worker explicitly");
 
     const emptyPlans = await fetch(baseUrl + "/api/agent/plans", { headers: { cookie } });
     assert.equal(emptyPlans.status, 200);
