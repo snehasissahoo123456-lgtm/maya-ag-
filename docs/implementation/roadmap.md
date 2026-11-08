@@ -274,3 +274,16 @@ Current connector is intentionally read-only. It is not a general remote desktop
 - [ ] Enable only after the operator configures a single-instance persistent data directory and validates the approval workflow
 
 The plan worker is disabled by default. It currently requires the file storage driver and one server instance; it must not be enabled with Supabase until distributed goal-plan leases exist.
+
+
+## Persistent CEO orchestration history — development branch
+
+- [x] Founder-scoped durable run records for objectives, assignments, findings, synthesis, timing and status
+- [x] Persist successful and failed orchestration outcomes
+- [x] Authenticated list and detail endpoints
+- [x] CEO workspace history list and report reopening
+- [x] Mark interrupted runs failed on server restart; do not silently replay specialist work
+- [ ] Add Supabase-backed CEO run repository and RLS migration
+- [ ] Add resumable specialist assignments with bounded retries, cancellation and run-level budgets
+- [ ] Add durable per-specialist queues and cross-process concurrency control
+- [ ] Add report export and evaluation metrics for specialist quality
