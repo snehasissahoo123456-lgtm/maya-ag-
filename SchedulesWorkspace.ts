@@ -9,7 +9,7 @@ interface ScheduledJob {
 @customElement("maya-schedules-workspace")
 export class MayaSchedulesWorkspace extends LitElement {
   @state() private schedules: ScheduledJob[] = [];
-  @state() private title = "";
+  @state() private jobTitle = "";
   @state() private filePath = "README.md";
   @state() private runAt = new Date(Date.now() + 5 * 60_000).toISOString().slice(0, 16);
   @state() private repeat: "once" | "hourly" | "daily" | "weekly" = "once";
@@ -47,17 +47,17 @@ export class MayaSchedulesWorkspace extends LitElement {
   }
 
   private async createSchedule() {
-    if (!this.title.trim() || !this.filePath.trim() || this.busy) return;
+    if (!this.jobTitle.trim() || !this.filePath.trim() || this.busy) return;
     this.busy = true; this.message = "";
     try {
       const intervalMs = this.repeat === "once" ? null : this.repeat === "hourly" ? 60 * 60_000 : this.repeat === "daily" ? 24 * 60 * 60_000 : 7 * 24 * 60 * 60_000;
       const response = await this.request("/api/schedules", {
         method: "POST",
-        body: JSON.stringify({ title: this.title, path: this.filePath, runAt: new Date(this.runAt).toISOString(), intervalMs }),
+        body: JSON.stringify({ title: this.jobTitle, path: this.filePath, runAt: new Date(this.runAt).toISOString(), intervalMs }),
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || "Schedule creation failed.");
-      this.title = "";
+      this.jobTitle = "";
       await this.refresh();
       this.message = "Schedule created. It will enqueue a read-only task when due.";
     } catch (error) { this.message = error instanceof Error ? error.message : "Schedule creation failed."; }
@@ -92,7 +92,7 @@ export class MayaSchedulesWorkspace extends LitElement {
         <section class="panel space-y-4">
           <div><h3 class="font-medium text-white">Create schedule</h3><p class="muted">Current scheduler supports reading one enrolled workspace file only (maximum 50 KB). It does not run arbitrary instructions.</p></div>
           <div class="grid gap-3 md:grid-cols-2">
-            <label class="space-y-1"><span class="muted">Job title</span><input .value=${this.title} @input=${(e: Event) => this.title = (e.target as HTMLInputElement).value} placeholder="Daily project status check"></label>
+            <label class="space-y-1"><span class="muted">Job title</span><input .value=${this.jobTitle} @input=${(e: Event) => this.jobTitle = (e.target as HTMLInputElement).value} placeholder="Daily project status check"></label>
             <label class="space-y-1"><span class="muted">Workspace-relative file path</span><input .value=${this.filePath} @input=${(e: Event) => this.filePath = (e.target as HTMLInputElement).value} placeholder="README.md"></label>
             <label class="space-y-1"><span class="muted">First run time</span><input type="datetime-local" .value=${this.runAt} @input=${(e: Event) => this.runAt = (e.target as HTMLInputElement).value}></label>
             <label class="space-y-1"><span class="muted">Repeat</span><select .value=${this.repeat} @change=${(e: Event) => this.repeat = (e.target as HTMLSelectElement).value as any}>
@@ -101,7 +101,7 @@ export class MayaSchedulesWorkspace extends LitElement {
           </div>
           <div class="flex flex-wrap items-center justify-between gap-3">
             <div class="muted">Scheduler: ${this.scheduleWorker?.enabled ? "enabled" : "disabled"} · Task worker: ${this.taskWorker?.enabled ? "enabled" : "disabled"}</div>
-            <button class="btn primary" ?disabled=${this.busy || !this.title.trim() || !this.filePath.trim()} @click=${() => this.createSchedule()}>${this.busy ? "Saving…" : "Create schedule"}</button>
+            <button class="btn primary" ?disabled=${this.busy || !this.jobTitle.trim() || !this.filePath.trim()} @click=${() => this.createSchedule()}>${this.busy ? "Saving…" : "Create schedule"}</button>
           </div>
           ${this.message ? html`<p class="muted">${this.message}</p>` : ""}
         </section>
