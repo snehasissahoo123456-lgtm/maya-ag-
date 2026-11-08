@@ -1510,7 +1510,7 @@ Status: Ready to build upon Founder "go ahead".`;
             <button
               class="w-full py-2.5 px-3 rounded-xl bg-slate-800/70 hover:bg-slate-800 border border-slate-700/60 hover:border-slate-600 text-xs font-semibold text-slate-200 flex items-center justify-between transition-all group shadow-sm"
               @click="${() => {
-                this.messages = [this.messages[0]];
+                this.messages = [{ id: 'welcome-' + Date.now(), role: 'action_engine', text: 'New Maya conversation. Founder authentication and configured capabilities determine which actions are available.', timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) }];
                 this.activeConversationId = null;
                 this.currentInput = '';
                 this.activeTab = 'console';
