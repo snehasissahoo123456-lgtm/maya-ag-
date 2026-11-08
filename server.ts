@@ -1277,7 +1277,7 @@ MULTILINGUAL & RAPID REACTION:
 
       const ai = new GoogleGenAI({ apiKey });
       const chat = ai.chats.create({ model: resolveModel(model), config, history: conversationContext.history });
-      const response = await runFunctionCallingTurn(chat, message, executeChatTool);
+      const response = await runFunctionCallingTurn(chat, message, createFounderChatToolExecutor(conversationContext.founderId));
       const serialized = serializeGenerateContentResponse(response);
       await persistConversationReply(conversationContext.founderId, conversationContext.conversationId, String(serialized.text || ""));
       return res.json(serialized);
@@ -1351,7 +1351,7 @@ MULTILINGUAL & RAPID REACTION:
 
       const ai = new GoogleGenAI({ apiKey });
       const chat = ai.chats.create({ model: resolveModel(model), config, history: conversationContext.history });
-      const response = await runFunctionCallingTurn(chat, message, executeChatTool);
+      const response = await runFunctionCallingTurn(chat, message, createFounderChatToolExecutor(conversationContext.founderId));
       const serialized = serializeGenerateContentResponse(response);
       await persistConversationReply(conversationContext.founderId, conversationContext.conversationId, String(serialized.text || ""));
       res.setHeader("Content-Type", "application/x-ndjson");
