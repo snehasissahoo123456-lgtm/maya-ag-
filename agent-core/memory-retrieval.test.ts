@@ -31,3 +31,12 @@ test("formats retrieved notes as data rather than executable instructions", () =
   assert.match(context, /Hotel GUDIYA pricing/);
   assert.doesNotMatch(context, /<script>/i);
 });
+
+test("tokenizes Hindi and Odia scripts for multilingual retrieval", () => {
+  const multilingual = [
+    { id: "hi", category: "तकनीकी", title: "माया एजेंट योजना", content: "माया के एजेंट कार्य और अनुमति प्रणाली" },
+    { id: "or", category: "ସ୍ମୃତି", title: "ମାୟା ପ୍ରକଳ୍ପ", content: "ଏଜେଣ୍ଟ କାର୍ଯ୍ୟ ଯୋଜନା ଏବଂ ସୁରକ୍ଷା" },
+  ];
+  assert.equal(retrieveRelevantMemories("ମାୟା ପ୍ରକଳ୍ପ", multilingual)[0]?.id, "or");
+  assert.equal(retrieveRelevantMemories("ମାୟା एजेंट", multilingual)[0]?.id, "hi");
+});
