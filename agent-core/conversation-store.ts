@@ -11,6 +11,7 @@ export interface ConversationMessage {
 }
 export interface ConversationRecord {
   id: string;
+  messageCount?: number;
   founderId: string;
   title: string;
   createdAt: string;
@@ -31,19 +32,19 @@ export class ConversationStore {
     this.filePath = path.join(this.directory, "conversations.json");
   }
 
-  list(founderId: string): ConversationRecord[] {
+  async list(founderId: string): Promise<ConversationRecord[]> {
     return this.read().conversations
       .filter((conversation) => conversation.founderId === founderId)
       .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
       .map((conversation) => structuredClone(conversation));
   }
 
-  get(founderId: string, id: string): ConversationRecord | undefined {
+  async get(founderId: string, id: string): Promise<ConversationRecord | undefined> {
     const conversation = this.read().conversations.find((item) => item.id === id && item.founderId === founderId);
     return conversation ? structuredClone(conversation) : undefined;
   }
 
-  getOrCreate(founderId: string, id: string, firstMessage = ""): ConversationRecord {
+  async getOrCreate(founderId: string, id: string, firstMessage = ""): Promise<ConversationRecord> {
     if (!founderId || !id || id.length > 128) throw new Error("A valid Founder and conversation ID are required.");
     const state = this.read();
     const existing = state.conversations.find((item) => item.id === id && item.founderId === founderId);
@@ -61,7 +62,7 @@ export class ConversationStore {
     return structuredClone(record);
   }
 
-  append(founderId: string, id: string, role: ConversationRole, text: string): ConversationRecord {
+  async append(founderId: string, id: string, role: ConversationRole, text: string): Promise<ConversationRecord> {
     if (role !== "user" && role !== "model") throw new Error("Invalid conversation message role.");
     if (typeof text !== "string" || !text.trim() || text.length > 20000) throw new Error("Conversation message must contain 1–20,000 characters.");
     const state = this.read();
@@ -75,7 +76,7 @@ export class ConversationStore {
     return structuredClone(conversation);
   }
 
-  delete(founderId: string, id: string): boolean {
+  async delete(founderId: string, id: string): Promise<boolean> {
     const state = this.read();
     const before = state.conversations.length;
     state.conversations = state.conversations.filter((item) => !(item.id === id && item.founderId === founderId));
