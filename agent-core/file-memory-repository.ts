@@ -49,6 +49,7 @@ export class FileMemoryRepository implements MemoryRepository {
     const bounded = Math.max(1, Math.min(Math.floor(limit), 100));
     return this.memories.filter(item => item.title.toLocaleLowerCase().includes(needle) ||
       item.content.toLocaleLowerCase().includes(needle) || item.category.includes(needle))
+      .sort((a, b) => (b.feedbackScore || 0) - (a.feedbackScore || 0))
       .slice(0, bounded).map(item => structuredClone(item));
   }
   private validate(memory: MemoryEntry): void {
