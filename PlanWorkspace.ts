@@ -146,8 +146,9 @@ export class MayaPlanWorkspace extends LitElement {
               })}
             </div>
             ${plan.status !== 'completed' && plan.status !== 'failed' ? html`<div class='flex flex-wrap justify-end gap-2'>
-              ${this.workerStatus?.enabled ? html`<button class='px-3 py-2 rounded-lg border border-cyan-500/40 text-cyan-200 text-xs font-semibold hover:bg-cyan-500/10' @click=${() => this.startBackgroundPlan(plan.id)}>Start background</button>` : ''}
-              <button class='px-3 py-2 rounded-lg bg-emerald-600/90 hover:bg-emerald-500 text-white text-xs font-semibold' @click=${() => this.executePlan(plan.id)}>Run / resume now</button>
+              ${this.workerStatus?.enabled
+                ? html`<button class='px-3 py-2 rounded-lg border border-cyan-500/40 text-cyan-200 text-xs font-semibold hover:bg-cyan-500/10' @click=${() => this.startBackgroundPlan(plan.id)}>Start / resume in background</button>`
+                : html`<button class='px-3 py-2 rounded-lg bg-emerald-600/90 hover:bg-emerald-500 text-white text-xs font-semibold' @click=${() => this.executePlan(plan.id)}>Run / resume now</button>`}
             </div>` : ''}
           </section>
         `)}
