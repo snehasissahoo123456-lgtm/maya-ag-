@@ -234,11 +234,15 @@ Batao Founder, aaj kya build karna hai? Chaaho toh pehle Discovery Protocol se 5
     this.reactAuthRoot.render(
       React.createElement(ReactLockScreen, {
         onAuthenticated: (user: AuthenticatedUser, token: string) => {
-          this.sessionToken = token;
+          this.sessionToken = null;
           this.currentUser = user;
           this.isAuthenticated = true;
           this.unmountReactLockScreen();
           this.requestUpdate();
+          void this.fetchServerState();
+          void this.fetchWatcherStatus();
+          void this.fetchPlatformProbes();
+          this.initCockpitWsStream();
         },
         onSwitchToLit: () => {
           this.authUiMode = 'lit';
