@@ -50,6 +50,7 @@ export class FileScheduledJobRepository implements ScheduledJobRepository {
       if (!job || job.status !== "active" || job.nextRunAt !== scheduledAt) throw new Error("Scheduled job is no longer active at this run time.");
       job.lastRunAt = scheduledAt;
       job.runCount++;
+      job.failureCount = 0;
       job.lastError = undefined;
       job.updatedAt = new Date().toISOString();
       if (nextRunAt) {
