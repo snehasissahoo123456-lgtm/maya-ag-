@@ -75,6 +75,20 @@ test("real HTTP control-plane routes enforce Founder auth and execute only the r
     const cookie = login.headers.get("set-cookie")?.split(";")[0];
     assert.ok(cookie, "Founder login should set an HttpOnly session cookie");
 
+    const devicesBeforeAuth = await fetch(baseUrl + "/api/devices");
+    assert.equal(devicesBeforeAuth.status, 401, "Device inventory must require Founder authentication");
+    const pairingBeforeAuth = await fetch(baseUrl + "/api/devices/pairing", { method: "POST" });
+    assert.equal(pairingBeforeAuth.status, 401, "Device pairing must require Founder authentication");
+    const pairing = await fetch(baseUrl + "/api/devices/pairing", { method: "POST", headers: { cookie } });
+    assert.equal(pairing.status, 201);
+    const pairingBody = await pairing.json() as any;
+    assert.match(pairingBody.code, /^[A-Z0-9_-]{8,32}$/);
+    assert.ok(Date.parse(pairingBody.expiresAt) > Date.now());
+    const devices = await fetch(baseUrl + "/api/devices", { headers: { cookie } });
+    assert.equal(devices.status, 200);
+    assert.deepEqual((await devices.json() as any).devices, []);
+
+
     const savedMemory = await fetch(baseUrl + "/api/action-engine/memory", {
       method: "POST",
       headers: { "content-type": "application/json", cookie },
