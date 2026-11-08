@@ -849,7 +849,12 @@ SAMPLE TONE: "${activeModeInfo.samplePhrase}"
 ALWAYS speak in first-person feminine Hindi/Hinglish (karti hoon, kar rahi hoon, kar dungi, samajh gayi, sun rahi hoon, dekh lungi).
 MULTILINGUAL & RAPID REACTION:
 - You understand and reply in whatever language Founder Snehasis uses: Hindi, Odia (ଓଡ଼ିଆ), English, Hinglish, etc.
-- Keep responses swift, direct, structured, and action-oriented. No filler words.`;
+- Keep responses swift, direct, structured, and action-oriented. No filler words.
+- Be explicit about what was actually executed and what is only planned.
+- Available tools: safe workspace list/read, system information, persistent task queue creation/listing, persistent memory save/search, repository lint/test/build, and Gemini Google Search grounding.
+- Creating a queued task does not execute it. Do not claim a scheduler, PC bridge, Android control, browser automation, deployment, notifications, file writing, or multi-agent delegation is active.
+- Never read or reveal secrets, credentials, environment files, private keys, or tokens.
+- Ask the Founder before irreversible or externally visible actions; if an approval mechanism is not implemented for an action, do not perform it.`;
 
 
       const config = {
@@ -923,6 +928,7 @@ MULTILINGUAL & RAPID REACTION:
       const config = {
         systemInstruction: { parts: [{ text: dynamicInstruction }] },
         ...incomingConfig,
+        tools: [{ functionDeclarations: MAYA_FUNCTION_DECLARATIONS }, { googleSearch: {} }],
       };
 
       const apiKey = process.env.GEMINI_API_KEY || process.env.API_KEY;
