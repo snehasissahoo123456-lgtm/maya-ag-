@@ -602,119 +602,42 @@ async function startServer() {
   });
 
   // Action Engine Master Tool Execution
+  // All UI tool calls use the same server-side allowlist and validation as Gemini function calls.
   app.post("/api/action-engine/tools/execute", async (req, res): Promise<any> => {
     const startTime = Date.now();
     const { toolName, params } = req.body || {};
-    let result: any = null;
+    let result: unknown;
     let status: "success" | "failed" = "success";
+    const safeParams = params && typeof params === "object" && !Array.isArray(params)
+      ? params as Record<string, unknown> : {};
 
     try {
-      if (toolName === "list_dir") {
-        const targetPath = resolveWorkspacePath(params?.path || ".");
-        if (isSensitiveWorkspacePath(targetPath)) throw new Error("Access to sensitive workspace paths is blocked.");
-        const files = fs.readdirSync(targetPath, { withFileTypes: true })
-          .filter((entry) => !isSensitiveWorkspacePath(path.join(targetPath, entry.name)))
-          .slice(0, 100);
-        result = files.map((f) => ({
-          name: f.name,
-          type: f.isDirectory() ? "directory" : "file",
-        }));
-      } else if (toolName === "read_file") {
-        const filePath = resolveWorkspacePath(params?.path || ".");
-        if (isSensitiveWorkspacePath(filePath)) throw new Error("Reading secrets and credential files is blocked.");
-        if (fs.existsSync(filePath)) {
-          const stats = fs.statSync(filePath);
-          if (stats.size > 200000) {
-            result = { warning: "File large, showing first 50KB", content: fs.readFileSync(filePath, "utf-8").slice(0, 50000) };
-          } else {
-            result = { content: fs.readFileSync(filePath, "utf-8") };
-          }
-        } else {
-          status = "failed";
-          result = { error: `File not found: ${params?.path}` };
-        }
-      } else if (toolName === "system_info") {
-        result = {
-          node: process.version,
-          platform: process.platform,
-          arch: process.arch,
-          memory: process.memoryUsage(),
-          pid: process.pid,
-          uptime: `${Math.floor(process.uptime())} seconds`,
-          currentDirectory: process.cwd(),
-          bridgeStatus: "Maya API process active",
-        };
-      } else if (toolName === "schedule_task") {
-        const t: ActionEngineTask = {
-          id: "task-" + Date.now().toString(36),
-          title: params?.title || "Scheduled Autonomous Task",
-          triggerType: params?.trigger_type || "manual",
-          triggerValue: params?.trigger_value || "Immediate",
-          steps: [params?.steps || "Autonomous pipeline"],
-          permissionLevel: params?.permission_level || "ask",
-          status: "queued",
-          progress: 0,
-          retryCount: 0,
-          logs: [`[Scheduled via Tool] Added to persistent task queue at ${new Date().toLocaleTimeString()}`],
-        };
-        currentTasks.unshift(t);
-        persistFounderState();
-        result = { scheduled: true, task: t };
-      } else if (toolName === "list_tasks") {
-        result = { count: currentTasks.length, tasks: currentTasks };
-      } else if (toolName === "memory_save") {
-        const m: MemoryEntry = {
-          id: "mem-" + Date.now().toString(36),
-          category: params?.category || "lesson",
-          title: `Memory: ${String(params?.content || "").slice(0, 30)}...`,
-          content: params?.content || "",
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-        };
-        currentMemories.unshift(m);
-        persistFounderState();
-        result = { saved: true, memory: m };
-      } else if (toolName === "memory_search") {
-        const q = String(params?.query || "").toLowerCase();
-        const matches = currentMemories.filter((m) =>
-          m.title.toLowerCase().includes(q) || m.content.toLowerCase().includes(q) || m.category.includes(q)
-        );
-        result = { count: matches.length, results: matches };
-      } else if (toolName === "run_tests") {
-        const command = "bun run test";
-        const output = execSync(command, { cwd: process.cwd(), encoding: "utf-8", stdio: "pipe", timeout: 120000 });
-        result = { verified: true, command, output };
-      } else if (toolName === "deploy") {
-        status = "failed";
-        result = { error: "Deployment adapter is not configured. No deployment was attempted." };
-      } else if (toolName === "send_notification") {
-        status = "failed";
-        result = { error: "Notification provider is not configured. No notification was sent." };
-      } else if (toolName === "web_search") {
-        status = "failed";
-        result = { error: "A real web-search provider is not configured. No search was performed.", query: params?.query };
-      } else {
-        status = "failed";
-        result = { error: `Tool "${String(toolName || "unknown")}" has no implemented execution adapter. No action was performed.` };
+      if (typeof toolName !== "string" || !toolName.trim()) {
+        throw new Error("A valid toolName is required.");
       }
-    } catch (err: any) {
+      if (JSON.stringify(safeParams).length > 25000) {
+        throw new Error("Tool parameters exceed the 25 KB request limit.");
+      }
+      result = await executeAgentTool(toolName, safeParams);
+    } catch (error) {
       status = "failed";
-      result = { error: err.message || String(err) };
+      result = { error: error instanceof Error ? error.message : String(error) };
     }
 
-    const durationMs = Date.now() - startTime;
     const logItem: ToolExecutionRecord = {
-      id: "exec-" + Date.now().toString(36),
-      toolName: toolName || "unknown",
-      params,
+      id: "exec-" + randomTaskId(),
+      toolName: typeof toolName === "string" ? toolName.slice(0, 100) : "unknown",
+      params: safeParams,
       status,
       result,
       timestamp: new Date().toISOString(),
-      durationMs,
+      durationMs: Date.now() - startTime,
     };
     currentAuditLogs.unshift(logItem);
+    currentAuditLogs = currentAuditLogs.slice(0, 500);
 
-    return res.json({ success: status === "success", result, log: logItem });
+    return res.status(status === "success" ? 200 : 400)
+      .json({ success: status === "success", result, log: logItem });
   });
 
   // Action Engine Document Templates Generator (PLAN.md, AGENTS.md, etc.)
