@@ -60,7 +60,7 @@ export class ActionEngineApp extends LitElement {
 
   // Authentication & Security Lock Gate States
   @state() accessor isAuthenticated = false;
-  @state() accessor authUiMode: 'react' | 'lit' = (localStorage.getItem('cockpit_auth_ui_mode') as 'react' | 'lit') || 'react';
+  @state() accessor authUiMode: 'react' | 'lit' = 'react';
   private reactAuthRoot: Root | null = null;
   @state() accessor currentUser: AuthenticatedUser | null = null;
   @state() accessor sessionToken: string | null = null;
