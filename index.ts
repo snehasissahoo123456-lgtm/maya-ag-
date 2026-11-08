@@ -86,7 +86,7 @@ export class ActionEngineApp extends LitElement {
   @state() accessor activeTab: 'dashboard' | 'console' | 'discovery' | 'tasks' | 'ecosystem' | 'tools' | 'memory' | 'artifacts' | 'tests' | 'platforms' = 'dashboard';
   @state() accessor dashboardApiStatus: 'checking' | 'online' | 'offline' = 'checking';
   @state() accessor dashboardTasksStatus: 'checking' | 'available' | 'unauthenticated' | 'unavailable' = 'checking';
-  @state() accessor controlPlaneTasks: Array<{ id: string; instruction: string; capability: string; status: string; createdAt?: string; updatedAt?: string; verificationEvidence?: string[] }> = [];
+  @state() accessor controlPlaneTasks: Array<{ task: { id: string; instruction: string; status: string; createdAt?: string; updatedAt?: string; verificationEvidence?: unknown[] }; capability: string; args: Record<string, unknown> }> = [];
 
   // Test Runner & Diagnostic Suite States
   @state() accessor testSuites: TestSuite[] = [...INITIAL_TEST_SUITES];
@@ -1780,7 +1780,7 @@ Status: Ready to build upon Founder "go ahead".`;
 
   private renderDashboardTab() {
     const taskCounts = this.controlPlaneTasks.reduce<Record<string, number>>((counts, task) => {
-      counts[task.status] = (counts[task.status] || 0) + 1;
+      counts[task.task.status] = (counts[task.task.status] || 0) + 1;
       return counts;
     }, {});
     const serverLabel = this.dashboardApiStatus === 'online' ? 'Reachable' : this.dashboardApiStatus === 'offline' ? 'Unavailable' : 'Checking';
@@ -1856,10 +1856,10 @@ Status: Ready to build upon Founder "go ahead".`;
                 ${this.controlPlaneTasks.length ? this.controlPlaneTasks.slice(0, 5).map((task) => html`
                   <div class="flex items-start justify-between gap-3 rounded-xl border border-slate-800/80 bg-slate-950/50 p-3">
                     <div class="min-w-0">
-                      <div class="truncate text-xs font-semibold text-slate-200">${task.instruction}</div>
-                      <div class="mt-1 text-[10px] font-mono text-slate-500">${task.capability} · ${task.id}</div>
+                      <div class="truncate text-xs font-semibold text-slate-200">${task.task.instruction}</div>
+                      <div class="mt-1 text-[10px] font-mono text-slate-500">${task.capability} · ${task.task.id}</div>
                     </div>
-                    <span class="shrink-0 rounded-lg border border-slate-700 px-2 py-1 text-[10px] uppercase text-slate-300">${task.status}</span>
+                    <span class="shrink-0 rounded-lg border border-slate-700 px-2 py-1 text-[10px] uppercase text-slate-300">${task.task.status}</span>
                   </div>
                 `) : html`<p class="rounded-xl border border-dashed border-slate-800 p-4 text-xs text-slate-500">No control-plane tasks are recorded yet.</p>`}
               </div>
