@@ -9,7 +9,7 @@ function response(value: unknown, status = 200) { return new Response(JSON.strin
 test("Supabase memory repository performs one-time legacy import and Founder-scoped listing", async () => {
   const urls: string[] = [];
   const bodies: any[] = [];
-  const repository = new SupabaseMemoryRepository("https://maya.supabase.co", "service-secret", [memory], async (input, init) => {
+  const repository = new SupabaseMemoryRepository("https://maya.supabase.co", "service-secret", [memory], undefined, async (input, init) => {
     urls.push(String(input));
     if (String(input).endsWith("maya_import_legacy_memories")) {
       bodies.push(JSON.parse(String(init?.body)));
@@ -30,7 +30,7 @@ test("Supabase memory repository performs one-time legacy import and Founder-sco
 
 test("Supabase memory save/delete use server credentials and Founder scope", async () => {
   const calls: Array<{ url: string; init?: RequestInit }> = [];
-  const repository = new SupabaseMemoryRepository("https://maya.supabase.co", "service-secret", [], async (input, init) => {
+  const repository = new SupabaseMemoryRepository("https://maya.supabase.co", "service-secret", [], undefined, async (input, init) => {
     const url = String(input); calls.push({ url, init });
     if (url.endsWith("maya_import_legacy_memories")) return response([{ imported: true }]);
     if (init?.method === "POST") return response([{ id: "m1", founder_id: "founder-a" }]);
@@ -48,6 +48,34 @@ test("Supabase memory save/delete use server credentials and Founder scope", asy
 
 test("Supabase memory adapter rejects insecure URLs and invalid memory categories", async () => {
   assert.throws(() => new SupabaseMemoryRepository("http://maya.supabase.co", "service-secret"), /HTTPS/);
-  const repository = new SupabaseMemoryRepository("https://maya.supabase.co", "service-secret", [], async () => response([{ imported: true }]));
+  const repository = new SupabaseMemoryRepository("https://maya.supabase.co", "service-secret", [], undefined, async () => response([{ imported: true }]));
   await assert.rejects(() => repository.save("founder-a", { ...memory, category: "unknown" as any }), /category/i);
+});
+
+test("Supabase memory repository stores document embeddings and uses vector similarity search", async () => {
+  const embedding = Array.from({ length: 768 }, (_, index) => index === 0 ? 1 : 0);
+  const calls: Array<{ url: string; body: any }> = [];
+  const embedCalls: string[] = [];
+  const repository = new SupabaseMemoryRepository(
+    "https://maya.supabase.co", "service-secret", [],
+    async (text, purpose) => { embedCalls.push(purpose + ":" + text); return embedding; },
+    async (input, init) => {
+      const url = String(input);
+      const body = init?.body ? JSON.parse(String(init.body)) : {};
+      calls.push({ url, body });
+      if (url.endsWith("maya_import_legacy_memories")) return response([{ imported: true }]);
+      if (url.endsWith("maya_memories")) return response([{ id: "m1", founder_id: "founder-a" }]);
+      if (url.endsWith("maya_search_memories")) return response([{ id: "m1", founder_id: "founder-a", category: "lesson", title: memory.title, content: memory.content, created_at: memory.createdAt, updated_at: memory.updatedAt, similarity: 0.91 }]);
+      throw new Error("Unexpected request");
+    },
+  );
+  await repository.save("founder-a", memory);
+  const results = await repository.search("founder-a", "preferred language");
+  assert.equal(results[0].id, "m1");
+  assert.deepEqual(embedCalls.map(call => call.split(":")[0]), ["document", "query"]);
+  const saveCall = calls.find(call => call.url.endsWith("maya_memories"))!;
+  assert.equal(saveCall.body.embedding.length, 768);
+  const searchCall = calls.find(call => call.url.endsWith("maya_search_memories"))!;
+  assert.equal(searchCall.body.p_founder_id, "founder-a");
+  assert.equal(searchCall.body.p_query_embedding.length, 768);
 });
