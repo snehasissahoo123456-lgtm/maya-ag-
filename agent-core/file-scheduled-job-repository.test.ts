@@ -30,8 +30,11 @@ test("recurring schedules advance, pause and automatically pause after repeated 
     const repository = new FileScheduledJobRepository(directory);
     await repository.create(job("daily", "founder-a", 24 * 60 * 60_000));
     const due = (await repository.get("founder-a", "daily"))!;
+    await repository.recordFailure("founder-a", "daily", "transient failure");
+    assert.equal((await repository.get("founder-a", "daily"))?.failureCount, 1);
     await repository.markEnqueued("founder-a", "daily", due.nextRunAt, new Date(Date.now() + 24 * 60 * 60_000).toISOString());
     assert.equal((await repository.get("founder-a", "daily"))?.status, "active");
+    assert.equal((await repository.get("founder-a", "daily"))?.failureCount, 0, "successful enqueue resets consecutive failure count");
     await repository.recordFailure("founder-a", "daily", "first failure");
     await repository.recordFailure("founder-a", "daily", "second failure");
     await repository.recordFailure("founder-a", "daily", "third failure");
