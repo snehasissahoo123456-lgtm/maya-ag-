@@ -1,3 +1,4 @@
+import type { ConversationRepository } from "./conversation-repository.ts";
 import fs from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
@@ -24,7 +25,7 @@ interface ConversationFile { version: 1; conversations: ConversationRecord[]; }
  * Founder-scoped, atomic JSON conversation repository for a single Maya instance.
  * This is durable file storage, not a relational database or multi-instance queue.
  */
-export class ConversationStore {
+export class ConversationStore implements ConversationRepository {
   private readonly directory: string;
   private readonly filePath: string;
   constructor(directory = process.env.MAYA_DATA_DIR || path.resolve(process.cwd(), "..", "maya-data")) {
