@@ -19,6 +19,17 @@ The cloud service is the coordination and durable-state layer. Local runtimes ar
 8. Local connectors: Windows/macOS/Linux PC connector, Android personal app, and Android dedicated-device/kiosk profile.
 9. Observability: structured logs, task traces, device heartbeats, provider usage, cost limits, and alerting.
 
+## Implemented architecture primitives (development branch)
+The current branch now contains reusable TypeScript primitives for:
+- Capability registration with argument schemas, allowed agent roles, required scopes, risk, timeout and verification contract.
+- Exact-action approval records using a canonical SHA-256 digest of capability plus arguments, Founder binding, expiry and single-use consumption.
+- Task orchestration contracts for enqueue, approval, bounded execution, timeout cancellation, verification evidence and failure recording.
+- Agent manifests for Founder, CEO, Developer and research, operations, content and finance specialists.
+- Delegation policy with parent-child role checks, inherited-scope ceiling, maximum depth and task/token/time budgets.
+- Product capability catalog that distinguishes limited/implemented domains from planned integrations.
+
+These modules are tested independently. The current Express server has not yet been wired to a durable repository-backed worker, approval endpoints, agent runtime, or device execution adapters. The approval ledger and task orchestrator currently use injected interfaces/in-memory test implementations; they are not yet a production persistent control plane.
+
 ## Execution contract
 Every tool invocation carries task ID, Founder ID, device ID if local, capability name, validated arguments, policy decision, approval reference where required, idempotency key, timeout, and correlation ID.
 
