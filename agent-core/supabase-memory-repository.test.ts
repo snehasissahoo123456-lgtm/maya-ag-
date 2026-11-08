@@ -80,3 +80,24 @@ test("Supabase memory repository stores document embeddings and uses vector simi
   assert.equal(searchCall.body.p_founder_id, "founder-a");
   assert.equal(searchCall.body.p_query_embedding.length, 768);
 });
+
+test("Supabase memory feedback uses the Founder-bound RPC and returns updated score", async () => {
+  let url = ""; let body: any;
+  const repository = new SupabaseMemoryRepository("https://maya.supabase.co", "service-secret", [], undefined, async (input, init) => {
+    url = String(input);
+    body = init?.body ? JSON.parse(String(init.body)) : {};
+    if (url.endsWith("maya_import_legacy_memories")) return response([{ imported: true }]);
+    if (url.endsWith("maya_record_memory_feedback")) return response([{
+      id: "m1", founder_id: "founder-a", category: "lesson", title: memory.title, content: memory.content,
+      created_at: memory.createdAt, updated_at: memory.updatedAt, feedback_score: -1, feedback_count: 1,
+    }]);
+    throw new Error("Unexpected request");
+  });
+  const updated = await repository.recordFeedback("founder-a", "m1", "not_helpful");
+  assert.ok(url.endsWith("maya_record_memory_feedback"));
+  assert.equal(body.p_founder_id, "founder-a");
+  assert.equal(body.p_memory_id, "m1");
+  assert.equal(body.p_rating, -1);
+  assert.equal(updated.feedbackScore, -1);
+  assert.equal(updated.feedbackCount, 1);
+});
