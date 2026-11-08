@@ -386,6 +386,7 @@ async function startServer() {
     const founderId = (req as any).authSession?.user?.id;
     if (!founderId) return res.status(401).json({ success: false, error: "Verified Founder session required." });
     if (!process.env.GEMINI_API_KEY && !process.env.API_KEY) return res.status(503).json({ success: false, error: "Gemini is not configured." });
+    const startedAt = Date.now();
     const agentId = typeof req.body?.agentId === "string" ? req.body.agentId : "";
     const task = typeof req.body?.task === "string" ? req.body.task : "";
     if (!agentId || !task.trim()) return res.status(400).json({ success: false, error: "agentId and task are required." });
@@ -399,7 +400,7 @@ async function startServer() {
         status: "success",
         result: { executionMode: result.executionMode, outputChars: result.output.length },
         timestamp: new Date().toISOString(),
-        durationMs: 0,
+        durationMs: Date.now() - startedAt,
       });
       currentAuditLogs = currentAuditLogs.slice(0, 500);
       return res.json({ success: true, result });
