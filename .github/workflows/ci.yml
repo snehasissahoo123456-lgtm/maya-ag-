@@ -10,6 +10,7 @@ on:
       - maya/persistent-conversations
       - maya/goal-planner
       - maya/memory-retrieval
+      - maya/specialist-runtime
   pull_request:
     branches:
       - main
