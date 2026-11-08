@@ -134,3 +134,17 @@ This module is intentionally described as file-backed persistence, not a product
 - [ ] Add cross-agent budgets, concurrency limits, cancellation and resumable queues
 - [ ] Allow approved specialists to use scoped tools through the approval ledger
 
+
+
+## Supabase conversation database adapter — development branch
+
+- [x] Define async conversation repository contract
+- [x] Keep atomic file-backed implementation as the local default
+- [x] Add Supabase PostgREST repository with server-only service-role authentication
+- [x] Add RLS-enabled schema and atomic Founder-scoped append RPC
+- [x] Select storage driver from environment and fail closed when Supabase configuration is incomplete
+- [x] Add adapter, factory and async repository tests
+- [ ] Migrate goal plans, memory notes, approvals, tasks and audit logs to database repositories
+- [ ] Add database backup/restore, retention and encryption verification
+- [ ] Apply the migration to the user's Supabase project and run live integration tests after credentials are configured
+
