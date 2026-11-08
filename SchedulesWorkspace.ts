@@ -27,6 +27,8 @@ export class MayaSchedulesWorkspace extends LitElement {
     input, select { min-width:0; width:100%; background:#0f172a; border:1px solid #334155; border-radius:8px; padding:9px; color:white; font-size:12px; }
   `;
 
+  override createRenderRoot() { return this; }
+
   connectedCallback() { super.connectedCallback(); void this.refresh(); }
 
   private async request(url: string, init: RequestInit = {}) {
@@ -84,6 +86,14 @@ export class MayaSchedulesWorkspace extends LitElement {
 
   render() {
     return html`
+      <style>
+        maya-schedules-workspace { display:block; color:#e2e8f0; }
+        maya-schedules-workspace .panel { background:rgba(2,6,23,.72); border:1px solid rgba(100,116,139,.24); border-radius:16px; padding:16px; }
+        maya-schedules-workspace .muted { color:#94a3b8; font-size:12px; line-height:1.6; }
+        maya-schedules-workspace .btn { border:1px solid rgba(100,116,139,.45); border-radius:9px; padding:8px 11px; font-size:12px; }
+        maya-schedules-workspace .primary { background:#4f46e5; border-color:#6366f1; color:white; }
+        maya-schedules-workspace input, maya-schedules-workspace select { min-width:0; width:100%; background:#0f172a; border:1px solid #334155; border-radius:8px; padding:9px; color:white; font-size:12px; }
+      </style>
       <div class="space-y-4 p-4 md:p-6">
         <header class="flex flex-wrap items-start justify-between gap-3">
           <div><h2 class="text-xl font-semibold text-white">Scheduled jobs</h2><p class="muted mt-1 max-w-2xl">Create one-time or recurring read-only workspace checks. When due, Maya queues a task for its safe task worker.</p></div>
