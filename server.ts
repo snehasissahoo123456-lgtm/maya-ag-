@@ -598,6 +598,10 @@ async function startServer() {
     if (!founderId) return res.status(401).json({ success: false, error: "Verified Founder session required." });
     if (!goalPlanWorkerEnabled) return res.status(503).json({ success: false, error: "Background goal-plan worker is disabled. Set MAYA_PLAN_WORKER_ENABLED=true on a single-instance file-storage server." });
     try {
+      const existing = await goalPlanStore.get(founderId, req.params.id);
+      if (!existing) return res.status(404).json({ success: false, error: "Plan not found." });
+      const revalidated = validateGoalPlan(existing.plan, existing.plan.objective, MAYA_FUNCTION_DECLARATIONS as PlannerToolContract[]);
+      if (JSON.stringify(revalidated) !== JSON.stringify(existing.plan)) throw new Error("Stored plan integrity check failed; create a new plan.");
       const plan = await goalPlanExecutor.start(founderId, req.params.id);
       return res.status(202).json({ success: true, plan, worker: goalPlanWorker.getStatus() });
     } catch (error) {
@@ -608,6 +612,7 @@ async function startServer() {
   app.post("/api/agent/plans/:id/execute", async (req, res): Promise<any> => {
     const founderId = (req as any).authSession?.user?.id;
     if (!founderId) return res.status(401).json({ success: false, error: "Verified Founder session required." });
+    if (goalPlanWorkerEnabled) return res.status(409).json({ success: false, error: "Background plan worker is enabled. Use Start background and approve steps as requested." });
     try {
       const existing = await goalPlanStore.get(founderId, req.params.id);
       if (!existing) return res.status(404).json({ success: false, error: "Plan not found." });
