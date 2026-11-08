@@ -23,7 +23,7 @@ async function unusedPort(): Promise<number> {
 function waitForWsMessage(socket: WebSocket, type: string): Promise<any> {
   return new Promise((resolve, reject) => {
     const timeout = setTimeout(() => { socket.off("message", handler); reject(new Error(`Timed out waiting for WebSocket message: ${type}`)); }, 5_000);
-    const handler = (raw: Buffer) => {
+    const handler = (raw: any) => {
       let message: any;
       try { message = JSON.parse(raw.toString()); } catch { return; }
       if (message.type === "error") { clearTimeout(timeout); socket.off("message", handler); reject(new Error(message.error || "Device bridge error")); return; }
