@@ -83,7 +83,10 @@ export class ActionEngineApp extends LitElement {
   @state() accessor probeOverallHealth = 100;
 
   // Active navigation tab
-  @state() accessor activeTab: 'console' | 'discovery' | 'tasks' | 'ecosystem' | 'tools' | 'memory' | 'artifacts' | 'tests' | 'platforms' = 'console';
+  @state() accessor activeTab: 'dashboard' | 'console' | 'discovery' | 'tasks' | 'ecosystem' | 'tools' | 'memory' | 'artifacts' | 'tests' | 'platforms' = 'dashboard';
+  @state() accessor dashboardApiStatus: 'checking' | 'online' | 'offline' = 'checking';
+  @state() accessor dashboardTasksStatus: 'checking' | 'available' | 'unauthenticated' | 'unavailable' = 'checking';
+  @state() accessor controlPlaneTasks: Array<{ id: string; instruction: string; capability: string; status: string; createdAt?: string; updatedAt?: string; verificationEvidence?: string[] }> = [];
 
   // Test Runner & Diagnostic Suite States
   @state() accessor testSuites: TestSuite[] = [...INITIAL_TEST_SUITES];
@@ -204,6 +207,7 @@ You can use this cockpit to inspect the current development status and configure
   override async firstUpdated(props: PropertyValueMap<unknown>) {
     super.firstUpdated(props);
     await this.restoreSession();
+    await this.fetchDashboardData();
     await this.fetchServerState();
     await this.fetchWatcherStatus();
     await this.fetchPlatformProbes();
@@ -235,6 +239,7 @@ You can use this cockpit to inspect the current development status and configure
           this.isAuthenticated = true;
           this.unmountReactLockScreen();
           this.requestUpdate();
+          void this.fetchDashboardData();
           void this.fetchServerState();
           void this.fetchWatcherStatus();
           void this.fetchPlatformProbes();
@@ -652,6 +657,35 @@ You can use this cockpit to inspect the current development status and configure
 
   private clearBuildConsole() {
     this.buildConsoleLogs = [];
+  }
+
+  private async fetchDashboardData() {
+    this.dashboardApiStatus = 'checking';
+    this.dashboardTasksStatus = 'checking';
+    try {
+      const healthResponse = await fetch('/api/health', { credentials: 'same-origin' });
+      this.dashboardApiStatus = healthResponse.ok ? 'online' : 'offline';
+    } catch {
+      this.dashboardApiStatus = 'offline';
+    }
+
+    try {
+      const response = await fetch('/api/control-plane/tasks', { credentials: 'same-origin' });
+      if (response.status === 401) {
+        this.dashboardTasksStatus = 'unauthenticated';
+        this.controlPlaneTasks = [];
+        return;
+      }
+      if (!response.ok) {
+        this.dashboardTasksStatus = 'unavailable';
+        return;
+      }
+      const data = await response.json();
+      this.controlPlaneTasks = Array.isArray(data.tasks) ? data.tasks : [];
+      this.dashboardTasksStatus = 'available';
+    } catch {
+      this.dashboardTasksStatus = 'unavailable';
+    }
   }
 
   private async fetchServerState() {
@@ -1453,6 +1487,13 @@ Status: Ready to build upon Founder "go ahead".`;
             <div class="space-y-1">
               <span class="px-2 text-[10px] uppercase font-bold tracking-wider text-slate-500 block">Workspace</span>
               <button
+                class="w-full text-left px-2.5 py-2 rounded-xl text-xs flex items-center gap-2.5 transition-colors ${this.activeTab === 'dashboard' ? 'bg-indigo-600/20 text-indigo-200 border border-indigo-500/30 font-semibold' : 'text-slate-300 hover:bg-slate-800/60 hover:text-white'}"
+                @click="${() => { this.activeTab = 'dashboard'; void this.fetchDashboardData(); }}"
+              >
+                <span class="material-symbols-outlined text-base ${this.activeTab === 'dashboard' ? 'text-cyan-400' : 'text-slate-400'}">dashboard</span>
+                <span class="flex-1">Dashboard</span>
+              </button>
+              <button
                 class="w-full text-left px-2.5 py-2 rounded-xl text-xs flex items-center gap-2.5 transition-colors ${
                   this.activeTab === 'console'
                     ? 'bg-indigo-600/20 text-indigo-200 border border-indigo-500/30 font-semibold'
@@ -1631,9 +1672,7 @@ Status: Ready to build upon Founder "go ahead".`;
                     Maya
                     <span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
                     <span class="text-[11px] text-slate-400 font-normal">
-                      ${this.activeTab === 'console'
-                        ? 'Fast Multilingual Partner · Hindi · Odia · English'
-                        : `Workspace: ${this.activeTab.toUpperCase()}`}
+                      ${this.activeTab === 'dashboard' ? 'Founder overview · live server and task data' : this.activeTab === 'console' ? 'Text & voice workspace · Hindi · Odia · English' : `Workspace: ${this.activeTab.toUpperCase()}`}
                     </span>
                   </h2>
                 </div>
@@ -1718,6 +1757,8 @@ Status: Ready to build upon Founder "go ahead".`;
 
   private renderActiveTab(selectedVenture: SYBVenture, activeModeInfo: any) {
     switch (this.activeTab) {
+      case 'dashboard':
+        return this.renderDashboardTab();
       case 'console':
         return this.renderChatGPTConversation(selectedVenture, activeModeInfo);
       case 'discovery':
@@ -1737,6 +1778,129 @@ Status: Ready to build upon Founder "go ahead".`;
       case 'platforms':
         return (this as any).renderPlatformsTab();
     }
+  }
+
+  private renderDashboardTab() {
+    const taskCounts = this.controlPlaneTasks.reduce<Record<string, number>>((counts, task) => {
+      counts[task.status] = (counts[task.status] || 0) + 1;
+      return counts;
+    }, {});
+    const serverLabel = this.dashboardApiStatus === 'online' ? 'Reachable' : this.dashboardApiStatus === 'offline' ? 'Unavailable' : 'Checking';
+    const taskLabel = this.dashboardTasksStatus === 'available'
+      ? 'Founder task data loaded'
+      : this.dashboardTasksStatus === 'unauthenticated'
+        ? 'Founder session required'
+        : this.dashboardTasksStatus === 'unavailable' ? 'Task service unavailable' : 'Loading task data';
+    const quickLinks = [
+      { id: 'console', label: 'Text & Voice', detail: 'Open the conversation workspace', icon: 'forum' },
+      { id: 'tasks', label: 'Task Queue', detail: 'Inspect existing task workspace', icon: 'checklist' },
+      { id: 'memory', label: 'Memory', detail: 'Review stored memory entries', icon: 'psychology' },
+      { id: 'platforms', label: 'Integrations', detail: 'Inspect platform registry and probes', icon: 'hub' },
+      { id: 'tests', label: 'Diagnostics', detail: 'Open the current test workspace', icon: 'verified' },
+      { id: 'tools', label: 'Capabilities', detail: 'Review available tool definitions', icon: 'construction' },
+    ] as const;
+
+    return html`
+      <section class="mx-auto w-full max-w-7xl space-y-6">
+        <div class="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <p class="text-[10px] uppercase tracking-[0.24em] text-cyan-300 font-semibold">Founder workspace</p>
+            <h2 class="mt-2 text-2xl sm:text-3xl font-bold tracking-tight text-white">Maya Dashboard</h2>
+            <p class="mt-2 max-w-2xl text-sm text-slate-400">A live overview of the services and task records currently exposed by this Maya build.</p>
+          </div>
+          <button class="inline-flex items-center gap-2 rounded-xl border border-slate-700 bg-slate-900 px-3 py-2 text-xs font-semibold text-slate-200 hover:border-cyan-500/50 hover:text-white" @click="${() => this.fetchDashboardData()}">
+            <span class="material-symbols-outlined text-sm">refresh</span> Refresh status
+          </button>
+        </div>
+
+        <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
+          <article class="rounded-2xl border border-slate-800 bg-slate-900/80 p-4">
+            <div class="flex items-center justify-between text-xs text-slate-400"><span>Backend API</span><span class="material-symbols-outlined text-cyan-300">dns</span></div>
+            <div class="mt-3 text-xl font-semibold text-white">${serverLabel}</div>
+            <p class="mt-1 text-[11px] text-slate-500">Measured from /api/health</p>
+          </article>
+          <article class="rounded-2xl border border-slate-800 bg-slate-900/80 p-4">
+            <div class="flex items-center justify-between text-xs text-slate-400"><span>Task service</span><span class="material-symbols-outlined text-violet-300">database</span></div>
+            <div class="mt-3 text-sm font-semibold text-white">${taskLabel}</div>
+            <p class="mt-1 text-[11px] text-slate-500">Founder-authenticated task API</p>
+          </article>
+          <article class="rounded-2xl border border-slate-800 bg-slate-900/80 p-4">
+            <div class="flex items-center justify-between text-xs text-slate-400"><span>Tracked tasks</span><span class="material-symbols-outlined text-amber-300">assignment</span></div>
+            <div class="mt-3 text-2xl font-semibold tabular-nums text-white">${this.dashboardTasksStatus === 'available' ? this.controlPlaneTasks.length : '—'}</div>
+            <p class="mt-1 text-[11px] text-slate-500">Count from the persistent control-plane API</p>
+          </article>
+          <article class="rounded-2xl border border-slate-800 bg-slate-900/80 p-4">
+            <div class="flex items-center justify-between text-xs text-slate-400"><span>Voice availability</span><span class="material-symbols-outlined text-emerald-300">graphic_eq</span></div>
+            <div class="mt-3 text-sm font-semibold text-white">Session-based</div>
+            <p class="mt-1 text-[11px] text-slate-500">Requires an active browser session, microphone permission and configured Gemini service; not 24/7 background voice.</p>
+          </article>
+        </div>
+
+        <div class="grid grid-cols-1 xl:grid-cols-[1.2fr_0.8fr] gap-4">
+          <section class="rounded-2xl border border-slate-800 bg-slate-900/70 p-5">
+            <div class="flex items-center justify-between gap-3">
+              <div>
+                <h3 class="text-sm font-bold text-white">Control-plane task activity</h3>
+                <p class="mt-1 text-xs text-slate-500">Counts are derived from the live task endpoint, not sample dashboard data.</p>
+              </div>
+              <button class="text-xs text-cyan-300 hover:text-cyan-200" @click="${() => { this.activeTab = 'tasks'; }}">Open tasks</button>
+            </div>
+            ${this.dashboardTasksStatus === 'available' ? html`
+              <div class="mt-5 grid grid-cols-2 sm:grid-cols-4 gap-2">
+                ${['queued','running','completed','failed'].map((status) => html`
+                  <div class="rounded-xl border border-slate-800 bg-slate-950/70 p-3">
+                    <div class="text-[10px] uppercase tracking-wider text-slate-500">${status}</div>
+                    <div class="mt-1 text-2xl font-semibold tabular-nums text-white">${taskCounts[status] || 0}</div>
+                  </div>
+                `)}
+              </div>
+              <div class="mt-4 space-y-2">
+                ${this.controlPlaneTasks.length ? this.controlPlaneTasks.slice(0, 5).map((task) => html`
+                  <div class="flex items-start justify-between gap-3 rounded-xl border border-slate-800/80 bg-slate-950/50 p-3">
+                    <div class="min-w-0">
+                      <div class="truncate text-xs font-semibold text-slate-200">${task.instruction}</div>
+                      <div class="mt-1 text-[10px] font-mono text-slate-500">${task.capability} · ${task.id}</div>
+                    </div>
+                    <span class="shrink-0 rounded-lg border border-slate-700 px-2 py-1 text-[10px] uppercase text-slate-300">${task.status}</span>
+                  </div>
+                `) : html`<p class="rounded-xl border border-dashed border-slate-800 p-4 text-xs text-slate-500">No control-plane tasks are recorded yet.</p>`}
+              </div>
+            ` : html`
+              <div class="mt-5 rounded-xl border border-amber-500/20 bg-amber-500/5 p-4 text-xs leading-6 text-amber-100/80">
+                ${taskLabel}. Task metrics are hidden until the authenticated task endpoint responds successfully.
+              </div>
+            `}
+          </section>
+
+          <section class="rounded-2xl border border-slate-800 bg-slate-900/70 p-5">
+            <h3 class="text-sm font-bold text-white">Open a workspace</h3>
+            <p class="mt-1 text-xs text-slate-500">Navigate to the current product areas.</p>
+            <div class="mt-4 space-y-2">
+              ${quickLinks.map((item) => html`
+                <button class="flex w-full items-center gap-3 rounded-xl border border-slate-800 bg-slate-950/50 p-3 text-left transition hover:border-indigo-500/40 hover:bg-slate-900" @click="${() => { this.activeTab = item.id; }}">
+                  <span class="material-symbols-outlined text-lg text-indigo-300">${item.icon}</span>
+                  <span class="min-w-0 flex-1">
+                    <span class="block text-xs font-semibold text-slate-200">${item.label}</span>
+                    <span class="mt-0.5 block text-[10px] text-slate-500">${item.detail}</span>
+                  </span>
+                  <span class="material-symbols-outlined text-sm text-slate-600">arrow_forward</span>
+                </button>
+              `)}
+            </div>
+          </section>
+        </div>
+
+        <div class="rounded-2xl border border-cyan-900/40 bg-cyan-950/10 p-4">
+          <div class="flex items-start gap-3">
+            <span class="material-symbols-outlined text-cyan-300">info</span>
+            <div>
+              <h3 class="text-xs font-semibold text-cyan-100">Current build boundary</h3>
+              <p class="mt-1 text-xs leading-5 text-slate-400">This dashboard reports only backend reachability and task records it can verify. It does not claim that Gemini, external integrations, a background worker, a local PC connector, Android, or 24/7 automation are active.</p>
+            </div>
+          </div>
+        </div>
+      </section>
+    `;
   }
 
   // ==========================================
