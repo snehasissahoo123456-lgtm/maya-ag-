@@ -83,3 +83,16 @@ This module is intentionally described as file-backed persistence, not a product
 - [ ] Connect approved plans to a dependency-aware executor with idempotency and evidence
 - [ ] Add multi-step recovery, retry budgets, and end-to-end execution verification
 
+
+
+## Persisted plan execution module — development branch
+
+- [x] Persist validated Founder-scoped plans and step states
+- [x] Execute plan steps sequentially through the server tool allowlist
+- [x] Pause before memory writes, task queue writes, and test-command execution until explicit Founder approval
+- [x] Bind approval to a SHA-256 digest of exact tool arguments
+- [x] Record result digests, resume completed steps, and fail closed without automatic retries
+- [ ] Add transactional database persistence and cross-process execution locks
+- [ ] Add a dedicated plan review/approval/execution UI
+- [ ] Add capability-level verification contracts and recovery workflows for failed steps
+
