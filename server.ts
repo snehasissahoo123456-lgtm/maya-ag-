@@ -126,7 +126,7 @@ import { FileTaskRepository } from "./agent-core/file-task-repository.ts";
 import { TaskWorker } from "./agent-core/task-worker.ts";
 import { createConversationRepository } from "./agent-core/create-conversation-repository.ts";
 import { validateGoalPlan, type PlannerToolContract } from "./agent-core/goal-planner.ts";
-import { GoalPlanStore } from "./agent-core/goal-plan-store.ts";
+import { createGoalPlanRepository } from "./agent-core/create-goal-plan-repository.ts";
 import { GoalPlanExecutor } from "./agent-core/goal-plan-executor.ts";
 import { retrieveRelevantMemories, formatMemoryContext } from "./agent-core/memory-retrieval.ts";
 import { createChatToolExecutor } from "./agent-core/chat-tool-policy.ts";
@@ -266,7 +266,7 @@ async function executeAgentTool(name: string, args: Record<string, unknown>): Pr
   throw new Error("Tool execution is not available.");
 }
 
-const goalPlanStore = new GoalPlanStore();
+const goalPlanStore = createGoalPlanRepository();
 const goalPlanExecutor = new GoalPlanExecutor(goalPlanStore, executeAgentTool);
 const executeChatTool = createChatToolExecutor(executeAgentTool);
 const specialistRuntime = new SpecialistRuntime({
@@ -483,29 +483,29 @@ async function startServer() {
     }
   });
 
-  app.get("/api/agent/plans", (req, res) => {
+  app.get("/api/agent/plans", async (req, res) => {
     const founderId = (req as any).authSession?.user?.id;
     if (!founderId) return res.status(401).json({ success: false, error: "Verified Founder session required." });
-    return res.json({ success: true, plans: goalPlanStore.list(founderId) });
+    return res.json({ success: true, plans: await goalPlanStore.list(founderId) });
   });
 
-  app.get("/api/agent/plans/:id", (req, res) => {
+  app.get("/api/agent/plans/:id", async (req, res) => {
     const founderId = (req as any).authSession?.user?.id;
     if (!founderId) return res.status(401).json({ success: false, error: "Verified Founder session required." });
-    const plan = goalPlanStore.get(founderId, req.params.id);
+    const plan = await goalPlanStore.get(founderId, req.params.id);
     return plan ? res.json({ success: true, plan }) : res.status(404).json({ success: false, error: "Plan not found." });
   });
 
-  app.post("/api/agent/plans/:id/approve", (req, res) => {
+  app.post("/api/agent/plans/:id/approve", async (req, res) => {
     const founderId = (req as any).authSession?.user?.id;
     if (!founderId) return res.status(401).json({ success: false, error: "Verified Founder session required." });
     if (typeof req.body?.stepId !== "string") return res.status(400).json({ success: false, error: "stepId is required." });
     try {
-      const existing = goalPlanStore.get(founderId, req.params.id);
+      const existing = await goalPlanStore.get(founderId, req.params.id);
       if (!existing) return res.status(404).json({ success: false, error: "Plan not found." });
       const revalidated = validateGoalPlan(existing.plan, existing.plan.objective, MAYA_FUNCTION_DECLARATIONS as PlannerToolContract[]);
       if (JSON.stringify(revalidated) !== JSON.stringify(existing.plan)) throw new Error("Stored plan integrity check failed; create a new plan.");
-      const plan = goalPlanExecutor.approveStep(founderId, req.params.id, req.body.stepId);
+      const plan = await goalPlanExecutor.approveStep(founderId, req.params.id, req.body.stepId);
       return res.json({ success: true, plan });
     } catch (error) {
       return res.status(400).json({ success: false, error: error instanceof Error ? error.message : String(error) });
@@ -516,7 +516,7 @@ async function startServer() {
     const founderId = (req as any).authSession?.user?.id;
     if (!founderId) return res.status(401).json({ success: false, error: "Verified Founder session required." });
     try {
-      const existing = goalPlanStore.get(founderId, req.params.id);
+      const existing = await goalPlanStore.get(founderId, req.params.id);
       if (!existing) return res.status(404).json({ success: false, error: "Plan not found." });
       const revalidated = validateGoalPlan(existing.plan, existing.plan.objective, MAYA_FUNCTION_DECLARATIONS as PlannerToolContract[]);
       if (JSON.stringify(revalidated) !== JSON.stringify(existing.plan)) throw new Error("Stored plan integrity check failed; create a new plan.");
@@ -564,7 +564,7 @@ async function startServer() {
       try { draft = JSON.parse(raw); }
       catch { return res.status(502).json({ success: false, error: "Gemini returned invalid JSON; no plan was accepted." }); }
       const plan = validateGoalPlan(draft, objective, toolContracts);
-      const storedPlan = goalPlanStore.create(founderId, plan);
+      const storedPlan = await goalPlanStore.create(founderId, plan);
       return res.json({ success: true, plan: storedPlan, executionStatus: "not_executed", note: "This is a validated and persisted plan proposal. No tools were executed and no tasks were queued." });
     } catch (error) {
       return res.status(422).json({ success: false, error: error instanceof Error ? error.message : String(error) });
