@@ -4,61 +4,20 @@ on:
   push:
     branches:
       - main
-      - maya/foundation-architecture
-      - maya/dashboard-foundation
-      - maya/task-worker-foundation
-      - maya/persistent-conversations
-      - maya/goal-planner
-      - maya/memory-retrieval
-      - maya/specialist-runtime
-      - maya/ceo-orchestrator
-      - maya/supabase-persistence
-      - maya/ceo-orchestrator
-      - maya/supabase-persistence
-      - maya/supabase-agent-state
-      - maya/supabase-task-queue
-      - maya/durable-audit-trail
-      - maya/supabase-approval-ledger
-      - maya/distributed-task-leases
-      - maya/supabase-memory-store
-      - maya/semantic-memory-retrieval
-      - maya/memory-feedback-loop
-      - maya/secure-device-bridge
-      - maya/approved-plan-worker
-      - maya/persistent-ceo-runs
-      - maya/scheduled-readonly-jobs
-      - maya/distributed-scheduler-leases
-      - maya/supabase-ceo-run-history
+      - "maya/**"
   pull_request:
     branches:
       - main
-      - maya/semantic-memory-retrieval
-      - maya/memory-feedback-loop
-      - maya/supabase-memory-store
-      - maya/distributed-task-leases
-      - maya/durable-audit-trail
-      - maya/supabase-approval-ledger
-      - maya/supabase-task-queue
-      - maya/supabase-agent-state
-      - maya/dashboard-foundation
-      - maya/task-worker-foundation
-      - maya/persistent-conversations
-      - maya/goal-planner
-      - maya/memory-retrieval
-      - maya/specialist-runtime
-      - maya/secure-device-bridge
-      - maya/approved-plan-worker
-      - maya/persistent-ceo-runs
-      - maya/scheduled-readonly-jobs
+      - "maya/**"
 
 permissions:
   contents: read
 
 jobs:
   validate:
-    name: Typecheck, tests and production build
+    name: Typecheck, tests, production build and container
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -70,7 +29,11 @@ jobs:
         run: bun install --frozen-lockfile
       - name: Typecheck
         run: bun run lint
-      - name: Unit tests
+      - name: Unit and integration tests
         run: bun run test
       - name: Production build
         run: bun run build
+      - name: Validate Compose configuration
+        run: docker compose config --quiet
+      - name: Build production container image
+        run: docker build --pull --tag maya-agent:ci .
