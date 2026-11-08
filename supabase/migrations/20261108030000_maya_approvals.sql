@@ -64,7 +64,7 @@ create or replace function public.maya_consume_approval(
   p_founder_id text,
   p_task_id text,
   p_capability text,
-  p_action_digest char(64),
+  p_action_digest text,
   p_now timestamptz
 )
 returns setof public.maya_approvals
@@ -98,6 +98,6 @@ end;
 $$;
 
 revoke all on function public.maya_decide_approval(text, text, boolean, timestamptz) from public, anon, authenticated;
-revoke all on function public.maya_consume_approval(text, text, text, text, char, timestamptz) from public, anon, authenticated;
+revoke all on function public.maya_consume_approval(text, text, text, text, text, timestamptz) from public, anon, authenticated;
 grant execute on function public.maya_decide_approval(text, text, boolean, timestamptz) to service_role;
 grant execute on function public.maya_consume_approval(text, text, text, text, char, timestamptz) to service_role;
