@@ -1,0 +1,49 @@
+services:
+  maya:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: maya-personal-agent:local
+    container_name: maya-personal-agent
+    restart: unless-stopped
+    init: true
+    ports:
+      # Keep the app private; terminate TLS in a reverse proxy on the same host.
+      - "127.0.0.1:3000:3000"
+    environment:
+      NODE_ENV: production
+      PORT: "3000"
+      MAYA_DATA_DIR: /data
+      MAYA_STORAGE_DRIVER: ${MAYA_STORAGE_DRIVER:-file}
+      MAYA_FOUNDER_EMAIL: ${MAYA_FOUNDER_EMAIL:-}
+      MAYA_FOUNDER_PASSWORD: ${MAYA_FOUNDER_PASSWORD:-}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      SUPABASE_URL: ${SUPABASE_URL:-}
+      SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY:-}
+      MAYA_TASK_WORKER_ENABLED: ${MAYA_TASK_WORKER_ENABLED:-false}
+      MAYA_TASK_WORKER_POLL_MS: ${MAYA_TASK_WORKER_POLL_MS:-3000}
+      MAYA_PLAN_WORKER_ENABLED: ${MAYA_PLAN_WORKER_ENABLED:-false}
+      MAYA_PLAN_WORKER_POLL_MS: ${MAYA_PLAN_WORKER_POLL_MS:-3000}
+      MAYA_SCHEDULE_WORKER_ENABLED: ${MAYA_SCHEDULE_WORKER_ENABLED:-false}
+      MAYA_SCHEDULE_WORKER_POLL_MS: ${MAYA_SCHEDULE_WORKER_POLL_MS:-3000}
+    volumes:
+      - maya-data:/data
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 1g
+    cpus: 2.0
+    stop_grace_period: 30s
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+volumes:
+  maya-data:
