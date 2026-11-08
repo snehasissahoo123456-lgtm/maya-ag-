@@ -95,3 +95,8 @@ Maya records append-only Founder-scoped task lifecycle events (enqueue, approval
 ## Supabase approval ledger (development branch)
 
 Approval requests, decisions and single-use consumption now have an asynchronous repository contract. The local file adapter remains the default; optional Supabase mode uses atomic database RPCs to enforce Founder ownership, expiry, exact capability/argument digest matching and one-time consumption. Apply `supabase/migrations/20261108030000_maya_approvals.sql` before using Supabase storage. The service-role key remains server-only. No live Supabase project was modified.
+
+
+## Supabase task leases (development branch)
+
+When using the Supabase task repository, the worker claims only queued `workspace.read_file` tasks that do not require approval. Claims use `FOR UPDATE SKIP LOCKED`, a bounded owner lease and an explicit release RPC. Expired leases on tasks already marked running/verifying are parked as `requires_recovery`; they are never automatically replayed. Apply `supabase/migrations/20261108040000_maya_task_leases.sql` after the task table migration. Configure `MAYA_TASK_WORKER_LEASE_MS` and `MAYA_TASK_WORKER_MAX_TASKS_PER_CYCLE`. The worker remains opt-in and disabled by default; this is not yet a general-purpose distributed executor.
