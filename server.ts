@@ -91,6 +91,14 @@ let currentPersona: RelationshipProfile = persistedState.persona;
 function persistFounderState(): void {
   persistentStore.save({ tasks: currentTasks, memories: currentMemories, persona: currentPersona });
 }
+const memoryRepository = createMemoryRepository(currentMemories, (memories) => {
+  currentMemories = structuredClone(memories);
+  persistFounderState();
+});
+async function getFounderMemories(founderId: string): Promise<MemoryEntry[]> {
+  currentMemories = await memoryRepository.list(founderId);
+  return currentMemories;
+}
 let currentTestSuites: TestSuite[] = JSON.parse(JSON.stringify(INITIAL_TEST_SUITES));
 for (const suite of currentTestSuites) {
   suite.status = "warning";
@@ -124,6 +132,7 @@ import { createApprovalRepository } from "./agent-core/create-approval-repositor
 import { TaskOrchestrator } from "./agent-core/task-orchestrator.ts";
 import { createTaskRepository } from "./agent-core/create-task-repository.ts";
 import { createAuditRepository } from "./agent-core/create-audit-repository.ts";
+import { createMemoryRepository } from "./agent-core/create-memory-repository.ts";
 import { TaskWorker } from "./agent-core/task-worker.ts";
 import { createConversationRepository } from "./agent-core/create-conversation-repository.ts";
 import { validateGoalPlan, type PlannerToolContract } from "./agent-core/goal-planner.ts";
@@ -210,7 +219,7 @@ function isSensitiveWorkspacePath(filePath: string): boolean {
     || base === "id_rsa" || base.endsWith(".pem") || base.endsWith(".key") || base.endsWith(".p12") || base.endsWith(".pfx");
 }
 
-async function executeAgentTool(name: string, args: Record<string, unknown>): Promise<unknown> {
+async function executeAgentTool(name: string, args: Record<string, unknown>, founderId = "founder-primary"): Promise<unknown> {
   if (!IMPLEMENTED_TOOL_NAMES.has(name)) throw new Error(`Tool "${name}" is not implemented or enabled.`);
   if (name === "list_dir") {
     const dir = resolveWorkspacePath(args.path || ".");
@@ -251,13 +260,14 @@ async function executeAgentTool(name: string, args: Record<string, unknown>): Pr
       title: String(args.title || "Founder note").slice(0, 160), content,
       createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
     };
-    currentMemories.unshift(memory); currentMemories = currentMemories.slice(0, 500);
-    persistFounderState(); return { saved: true, memory };
+    await memoryRepository.save(founderId, memory);
+    currentMemories = await memoryRepository.list(founderId);
+    return { saved: true, memory };
   }
   if (name === "memory_search") {
     const query = String(args.query || "").trim().toLowerCase();
     if (!query) throw new Error("A non-empty memory query is required.");
-    const matches = currentMemories.filter((memory) => memory.title.toLowerCase().includes(query) || memory.content.toLowerCase().includes(query) || memory.category.includes(query)).slice(0, 20);
+    const matches = await memoryRepository.search(founderId, query, 20);
     return { count: matches.length, results: matches };
   }
   if (name === "run_tests") {
@@ -273,7 +283,9 @@ async function executeAgentTool(name: string, args: Record<string, unknown>): Pr
 
 const goalPlanStore = createGoalPlanRepository();
 const goalPlanExecutor = new GoalPlanExecutor(goalPlanStore, executeAgentTool);
-const executeChatTool = createChatToolExecutor(executeAgentTool);
+function createFounderChatToolExecutor(founderId: string) {
+  return createChatToolExecutor((name, args) => executeAgentTool(name, args, founderId));
+}
 const specialistRuntime = new SpecialistRuntime({
   generate: async ({ systemInstruction, task, context, maxOutputTokens }) => {
     const apiKey = process.env.GEMINI_API_KEY || process.env.API_KEY;
