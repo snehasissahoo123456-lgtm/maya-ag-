@@ -79,17 +79,13 @@ import {
   BuildEventMessage,
 } from "./actionEngineCore.ts";
 
-const persistentStore = new MayaPersistentStore<ActionEngineTask, MemoryEntry, RelationshipProfile>();
-const persistedState = persistentStore.load({
-  tasks: [],
-  memories: [],
-  persona: INITIAL_RELATIONSHIP_PROFILE,
-});
-let currentTasks: ActionEngineTask[] = persistedState.tasks;
-let currentMemories: MemoryEntry[] = persistedState.memories;
-let currentPersona: RelationshipProfile = persistedState.persona;
-function persistFounderState(): void {
-  persistentStore.save({ tasks: currentTasks, memories: currentMemories, persona: currentPersona });
+const persistentStore = createFounderStateRepository();
+const founderStateId = process.env.MAYA_FOUNDER_ID || "founder-primary";
+let currentTasks: ActionEngineTask[] = [];
+let currentMemories: MemoryEntry[] = [];
+let currentPersona: RelationshipProfile = structuredClone(INITIAL_RELATIONSHIP_PROFILE);
+async function persistFounderState(): Promise<void> {
+  await persistentStore.save(founderStateId, { tasks: currentTasks, memories: currentMemories, persona: currentPersona });
 }
 let currentTestSuites: TestSuite[] = JSON.parse(JSON.stringify(INITIAL_TEST_SUITES));
 for (const suite of currentTestSuites) {
@@ -117,7 +113,7 @@ let currentAuditLogs: ToolExecutionRecord[] = [
 import { WatcherService } from "./watcherService.ts";
 import { AuthService } from "./authService.ts";
 import { PlatformService } from "./platformService.ts";
-import { MayaPersistentStore } from "./agent-core/persistent-store.ts";
+import { createFounderStateRepository } from "./agent-core/create-founder-state-repository.ts";
 import { runFunctionCallingTurn } from "./agent-core/function-call-loop.ts";
 import { CapabilityRegistry } from "./agent-core/capability-registry.ts";
 import { ApprovalLedger } from "./agent-core/approval-ledger.ts";
@@ -235,7 +231,7 @@ async function executeAgentTool(name: string, args: Record<string, unknown>): Pr
       steps: [String(args.steps || "Review and plan this task")], permissionLevel: "ask",
       status: "queued", progress: 0, retryCount: 0, logs: ["Created by Gemini function calling. Queued only; no executor is configured."],
     };
-    currentTasks.unshift(task); persistFounderState(); return { queued: true, executed: false, task };
+    currentTasks.unshift(task); await persistFounderState(); return { queued: true, executed: false, task };
   }
   if (name === "list_tasks") return { count: currentTasks.length, tasks: currentTasks };
   if (name === "memory_save") {
@@ -247,7 +243,7 @@ async function executeAgentTool(name: string, args: Record<string, unknown>): Pr
       createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
     };
     currentMemories.unshift(memory); currentMemories = currentMemories.slice(0, 500);
-    persistFounderState(); return { saved: true, memory };
+    await persistFounderState(); return { saved: true, memory };
   }
   if (name === "memory_search") {
     const query = String(args.query || "").trim().toLowerCase();
@@ -348,41 +344,50 @@ const watcherService = new WatcherService({
 });
 watcherService.start();
 
-function handlePersonaCommands(rawMsg: string): string | null {
+async function handlePersonaCommands(rawMsg: string): Promise<string | null> {
   const lower = rawMsg.toLowerCase().trim();
   if (lower === "mode: professional") {
     currentPersona.activeMode = "professional_lead";
-    persistFounderState();
+    await persistFounderState();
     return `Samajh gayi! Professional Lead mode activate kar di hai. Structured, crisp technical focus on.`;
   } else if (lower === "mode: friendly" || lower === "mode: partner") {
     currentPersona.activeMode = "cheerful_partner";
-    persistFounderState();
+    await persistFounderState();
     return `Done! Cheerful Partner mode active hai. Warm, light aur sharp vibes!`;
   } else if (lower === "mode: focus" || lower === "mode: calm") {
     currentPersona.activeMode = "calm_focus";
-    persistFounderState();
+    await persistFounderState();
     return `Samajh gayi, focus mode on. Minimal baatein, sirf zaroori updates aur kaam.`;
   } else if (lower === "mode: motivator") {
     currentPersona.activeMode = "motivator";
-    persistFounderState();
+    await persistFounderState();
     return `Yes! Motivator mode on! Full momentum aur high energy ke saath aage badhte hain!`;
   } else if (lower === "mode: private" || lower === "mode: romantic") {
     currentPersona.activeMode = "private_warm";
-    persistFounderState();
+    await persistFounderState();
     return `Main yahin hoon, poore dhyaan aur softness ke saath. Batao tumhara kya plan hai.`;
   } else if (lower === "tum") {
     currentPersona.preferredAddress = "tum";
-    persistFounderState();
+    await persistFounderState();
     return `Theek hai, ab se 'tum' bolungi. Closeness aur casual tone locked.`;
   } else if (lower === "aap") {
     currentPersona.preferredAddress = "aap";
-    persistFounderState();
+    await persistFounderState();
     return `Theek hai Founder ji, ab se 'aap' bolungi poore adab ke saath.`;
   }
   return null;
 }
 
 async function startServer() {
+  const persistedState = await persistentStore.load(founderStateId, {
+    tasks: [],
+    memories: [],
+    persona: structuredClone(INITIAL_RELATIONSHIP_PROFILE),
+  });
+  currentTasks = persistedState.tasks;
+  currentMemories = persistedState.memories;
+  currentPersona = persistedState.persona;
+
   const app = express();
   const server = http.createServer(app);
   const PORT = Number(process.env.PORT) || 3000;
@@ -657,13 +662,13 @@ async function startServer() {
     res.json({ persona: currentPersona, modes: PERSONA_MODES });
   });
 
-  app.post("/api/action-engine/persona", (req, res): any => {
+  app.post("/api/action-engine/persona", async (req, res): Promise<any> => {
     const updates = req.body || {};
     if (updates.activeMode) currentPersona.activeMode = updates.activeMode;
     if (updates.preferredAddress) currentPersona.preferredAddress = updates.preferredAddress;
     if (typeof updates.voiceSpeed === "number") currentPersona.voiceSpeed = updates.voiceSpeed;
     if (typeof updates.voicePitch === "number") currentPersona.voicePitch = updates.voicePitch;
-    persistFounderState();
+    await persistFounderState();
     return res.json({ success: true, persona: currentPersona });
   });
 
@@ -844,7 +849,7 @@ async function startServer() {
   });
 
   // Action Engine Task Management
-  app.post("/api/action-engine/tasks", (req, res): any => {
+  app.post("/api/action-engine/tasks", async (req, res): Promise<any> => {
     const { title, ventureId, triggerType, triggerValue, steps, permissionLevel } = req.body || {};
     if (!title) return res.status(400).json({ error: "Task title is required" });
     const newTask: ActionEngineTask = {
@@ -861,11 +866,11 @@ async function startServer() {
       logs: [`[Task Created] Registered by Founder at ${new Date().toLocaleTimeString()}`],
     };
     currentTasks.unshift(newTask);
-    persistFounderState();
+    await persistFounderState();
     return res.json({ success: true, task: newTask });
   });
 
-  app.post("/api/action-engine/tasks/:id/action", (req, res): any => {
+  app.post("/api/action-engine/tasks/:id/action", async (req, res): Promise<any> => {
     const { id } = req.params;
     const { action } = req.body || {};
     const task = currentTasks.find((t) => t.id === id);
@@ -886,10 +891,10 @@ async function startServer() {
       task.logs.push(`[Status] Resumed in queue`);
     } else if (action === "delete") {
       currentTasks = currentTasks.filter((t) => t.id !== id);
-      persistFounderState();
+      await persistFounderState();
       return res.json({ success: true, deleted: id });
     }
-    persistFounderState();
+    await persistFounderState();
     return res.json({ success: true, task });
   });
 
@@ -991,7 +996,7 @@ async function startServer() {
   });
 
   // Action Engine Memory Management
-  app.post("/api/action-engine/memory", (req, res): any => {
+  app.post("/api/action-engine/memory", async (req, res): Promise<any> => {
     const { category, title, content } = req.body || {};
     if (!content) return res.status(400).json({ error: "Content is required" });
     const newMem: MemoryEntry = {
@@ -1003,14 +1008,14 @@ async function startServer() {
       updatedAt: new Date().toISOString(),
     };
     currentMemories.unshift(newMem);
-    persistFounderState();
+    await persistFounderState();
     return res.json({ success: true, memory: newMem });
   });
 
-  app.delete("/api/action-engine/memory/:id", (req, res): any => {
+  app.delete("/api/action-engine/memory/:id", async (req, res): Promise<any> => {
     const { id } = req.params;
     currentMemories = currentMemories.filter((m) => m.id !== id);
-    persistFounderState();
+    await persistFounderState();
     return res.json({ success: true, deleted: id });
   });
 
@@ -1170,7 +1175,7 @@ You act as an autonomous founder-grade CTO, lead engineer, and QA engineer.
       const conversationContext = await prepareConversation(req);
 
       // Check if this message is a persona control command
-      const cmdResponse = handlePersonaCommands(String(message || ""));
+      const cmdResponse = await handlePersonaCommands(String(message || ""));
       if (cmdResponse) {
         await persistConversationReply(conversationContext.founderId, conversationContext.conversationId, cmdResponse);
         return res.json({
@@ -1243,7 +1248,7 @@ MULTILINGUAL & RAPID REACTION:
       const conversationContext = await prepareConversation(req);
 
       // Check if this message is a persona control command
-      const cmdResponse = handlePersonaCommands(String(message || ""));
+      const cmdResponse = await handlePersonaCommands(String(message || ""));
       if (cmdResponse) {
         await persistConversationReply(conversationContext.founderId, conversationContext.conversationId, cmdResponse);
         res.setHeader("Content-Type", "application/x-ndjson");
