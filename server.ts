@@ -157,7 +157,7 @@ import { retrieveRelevantMemories, formatMemoryContext } from "./agent-core/memo
 import { createChatToolExecutor } from "./agent-core/chat-tool-policy.ts";
 import { SpecialistRuntime, listRunnableSpecialists } from "./agent-core/specialist-runtime.ts";
 import { CEOOrchestrator } from "./agent-core/ceo-orchestrator.ts";
-import { FileCEORunRepository } from "./agent-core/file-ceo-run-repository.ts";
+import { createCEORunRepository } from "./agent-core/create-ceo-run-repository.ts";
 import { createScheduledJobRepository } from "./agent-core/create-scheduled-job-repository.ts";
 import { ScheduleWorker } from "./agent-core/schedule-worker.ts";
 
@@ -336,7 +336,7 @@ const specialistRuntime = new SpecialistRuntime({
     return String(response.text || "");
   },
 });
-const ceoRunRepository = new FileCEORunRepository();
+const ceoRunRepository = createCEORunRepository();
 const ceoOrchestrator = new CEOOrchestrator({
   plan: async ({ objective, availableSpecialists, context }) => {
     const apiKey = process.env.GEMINI_API_KEY || process.env.API_KEY;
