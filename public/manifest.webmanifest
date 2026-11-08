@@ -1,0 +1,15 @@
+{
+  "id": "/",
+  "name": "Maya Personal AI Agent",
+  "short_name": "Maya",
+  "description": "Founder-controlled personal AI workspace",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#020617",
+  "theme_color": "#020617",
+  "icons": [
+    { "src": "/icons/maya.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}
