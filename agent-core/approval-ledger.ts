@@ -38,6 +38,7 @@ export class ApprovalLedger {
   }
 
   request(input: { taskId: string; founderId: string; capability: string; args: Record<string, unknown>; ttlMs?: number; now?: number }): ApprovalRequest {
+    if (this.records.size >= 10_000) throw new Error("Approval ledger capacity reached; archive old records before creating more.");
     const now = input.now ?? Date.now();
     const ttl = Math.min(Math.max(input.ttlMs ?? 10 * 60_000, 30_000), 60 * 60_000);
     const record: ApprovalRequest = {
@@ -46,7 +47,7 @@ export class ApprovalLedger {
       requestedAt: new Date(now).toISOString(), expiresAt: new Date(now + ttl).toISOString(), status: "pending",
     };
     this.records.set(record.id, record);
-    this.persist();
+    try { this.persist(); } catch (error) { this.records.delete(record.id); throw error; }
     return { ...record };
   }
 
@@ -57,12 +58,13 @@ export class ApprovalLedger {
     const now = input.now ?? Date.now();
     if (Date.parse(record.expiresAt) <= now) {
       record.status = "expired";
-      this.persist();
+      try { this.persist(); } catch (error) { record.status = "pending"; throw error; }
       throw new Error("Approval request expired.");
     }
+    const previousDecidedAt = record.decidedAt;
     record.status = input.approved ? "approved" : "rejected";
     record.decidedAt = new Date(now).toISOString();
-    this.persist();
+    try { this.persist(); } catch (error) { record.status = "pending"; record.decidedAt = previousDecidedAt; throw error; }
     return { ...record };
   }
 
@@ -74,11 +76,11 @@ export class ApprovalLedger {
     }
     if (Date.parse(record.expiresAt) <= (input.now ?? Date.now())) {
       record.status = "expired";
-      this.persist();
+      try { this.persist(); } catch (error) { record.status = "approved"; throw error; }
       throw new Error("Approval request expired.");
     }
     record.status = "consumed";
-    this.persist();
+    try { this.persist(); } catch (error) { record.status = "approved"; throw error; }
     return { ...record };
   }
 
