@@ -26,6 +26,7 @@ on:
   pull_request:
     branches:
       - main
+      - maya/semantic-memory-retrieval
       - maya/supabase-memory-store
       - maya/distributed-task-leases
       - maya/durable-audit-trail
