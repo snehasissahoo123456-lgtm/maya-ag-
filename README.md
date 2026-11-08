@@ -52,3 +52,7 @@ The worker uses the same persisted task repository and orchestrator as the authe
 ## Persistent conversation history (current development branch)
 
 Maya now has a Founder-scoped conversation repository on the `maya/persistent-conversations` development branch. Authenticated users can list, read, and delete their own conversations through `/api/conversations`; chat turns are persisted and restored after a page reload. Data is stored in an atomic, permission-restricted JSON file under `MAYA_DATA_DIR` (default: `../maya-data`). This is single-instance file persistence, not SQLite/PostgreSQL, not encrypted at rest, and not suitable for horizontal scaling until a managed database adapter and deployment-specific key management are added. Conversation data must remain outside the source repository and must be backed up securely.
+
+## Goal planning endpoint (current development branch)
+
+Authenticated `POST /api/agent/plan` uses the configured Gemini provider to propose a plan. The server validates every proposed tool name and argument against the registered tool declaration allowlist, bounds plans to 12 steps, and requires dependencies to reference earlier steps. The endpoint is **plan-only**: it does not execute tools, create queued tasks, or claim completion. It returns a clear provider-unavailable response when Gemini is not configured.
