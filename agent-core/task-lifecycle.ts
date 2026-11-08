@@ -141,7 +141,7 @@ export function transitionTask(
     progress,
     approvalGrantedAt: options.approval ? options.approval.approvedAt : (nextStatus === "queued" ? undefined : task.approvalGrantedAt),
     verificationEvidence: evidence,
-    lastError: nextStatus === "failed" ? (options.error ?? "Task failed without a recorded reason.") : undefined,
+    lastError: nextStatus === "queued" ? undefined : nextStatus === "failed" ? (options.error ?? "Task failed without a recorded reason.") : (options.error ?? task.lastError),
     updatedAt: now,
   };
 }
