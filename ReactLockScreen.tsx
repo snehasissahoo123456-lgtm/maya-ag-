@@ -193,14 +193,7 @@ export const ReactLockScreen: React.FC<ReactLockScreenProps> = ({
               <Code2 className="w-3.5 h-3.5 text-cyan-300" />
               <span>⚛️ React View</span>
             </button>
-            <button
-              onClick={onSwitchToLit}
-              className="px-3 py-1.5 rounded-xl text-xs font-medium text-slate-400 hover:text-white hover:bg-slate-800/60 transition-all flex items-center gap-1.5"
-              title="Switch to Lit 3.2 View"
-            >
-              <Zap className="w-3.5 h-3.5 text-amber-400" />
-              <span>⚡ Lit View</span>
-            </button>
+
           </div>
 
           {/* Local Bridge Active Badge */}
