@@ -1,3 +1,4 @@
+import type { GoalPlanRepository } from "./goal-plan-repository.ts";
 import fs from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
@@ -24,14 +25,14 @@ export interface StoredGoalPlan {
 interface PlanFile { version: 1; plans: StoredGoalPlan[]; }
 
 /** Single-instance durable plan store. Keep its directory outside the source repository. */
-export class GoalPlanStore {
+export class GoalPlanStore implements GoalPlanRepository {
   private readonly directory: string;
   private readonly filePath: string;
   constructor(directory = process.env.MAYA_DATA_DIR || path.resolve(process.cwd(), "..", "maya-data")) {
     this.directory = path.resolve(directory);
     this.filePath = path.join(this.directory, "goal-plans.json");
   }
-  create(founderId: string, plan: GoalPlan): StoredGoalPlan {
+  async create(founderId: string, plan: GoalPlan): Promise<StoredGoalPlan> {
     if (!founderId) throw new Error("Founder identity is required.");
     const state = this.read();
     const now = new Date().toISOString();
@@ -43,14 +44,14 @@ export class GoalPlanStore {
     this.write(state);
     return structuredClone(stored);
   }
-  list(founderId: string): StoredGoalPlan[] {
+  async list(founderId: string): Promise<StoredGoalPlan[]> {
     return this.read().plans.filter((item) => item.founderId === founderId).sort((a,b) => b.updatedAt.localeCompare(a.updatedAt)).map(item => structuredClone(item));
   }
-  get(founderId: string, id: string): StoredGoalPlan | undefined {
+  async get(founderId: string, id: string): Promise<StoredGoalPlan | undefined> {
     const item = this.read().plans.find(plan => plan.id === id && plan.founderId === founderId);
     return item ? structuredClone(item) : undefined;
   }
-  save(founderId: string, plan: StoredGoalPlan): void {
+  async save(founderId: string, plan: StoredGoalPlan): Promise<void> {
     const state = this.read();
     const index = state.plans.findIndex(item => item.id === plan.id && item.founderId === founderId);
     if (index < 0) throw new Error("Plan not found for this Founder.");
