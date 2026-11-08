@@ -12,6 +12,10 @@ export class DeviceBridgeManager {
   private readonly pending = new Map<string, PendingCommand>();
   constructor(private readonly registry: DeviceRegistry, private readonly commandTimeoutMs = 15_000) {}
 
+  createPairing(founderId: string): Promise<{ code: string; expiresAt: string }> {
+    return this.registry.createPairing(founderId);
+  }
+
   accept(socket: SocketLike): void {
     let device: RegisteredDevice | undefined;
     let authTimer: ReturnType<typeof setTimeout> | undefined = setTimeout(() => socket.close(4001, "Authentication timeout"), 5_000);
