@@ -142,7 +142,7 @@ taskCapabilityRegistry.register({
 const taskOrchestrator = new TaskOrchestrator(
   taskRepository,
   taskCapabilityRegistry,
-  new ApprovalLedger(),
+  new ApprovalLedger(path.join(process.env.MAYA_DATA_DIR || path.resolve(process.cwd(), "..", "maya-data"), "approvals.json")),
   {
     run: async ({ capability, args, signal }) => {
       if (capability !== "workspace.read_file") throw new Error("Capability runner is not enabled for this action.");
@@ -692,6 +692,34 @@ async function startServer() {
       });
       currentAuditLogs = currentAuditLogs.slice(0, 500);
       return res.status(conflict ? 409 : 400).json({ success: false, error: message });
+    }
+  });
+
+
+  app.post("/api/control-plane/tasks/:id/request-approval", async (req, res): Promise<any> => {
+    const session = (req as any).authSession;
+    const founderId = session?.user?.id;
+    if (!founderId) return res.status(401).json({ success: false, error: "Verified Founder session required." });
+    try {
+      const actor = { id: founderId, founderId, role: "founder" as const, scopes: ["workspace:read"] };
+      const approval = await taskOrchestrator.requestApproval(req.params.id, actor);
+      return res.json({ success: true, ...approval });
+    } catch (error) {
+      return res.status(400).json({ success: false, error: error instanceof Error ? error.message : String(error) });
+    }
+  });
+
+  app.post("/api/control-plane/approvals/:approvalId/decision", async (req, res): Promise<any> => {
+    const session = (req as any).authSession;
+    const founderId = session?.user?.id;
+    if (!founderId) return res.status(401).json({ success: false, error: "Verified Founder session required." });
+    if (typeof req.body?.approved !== "boolean") return res.status(400).json({ success: false, error: "A boolean approved decision is required." });
+    try {
+      const actor = { id: founderId, founderId, role: "founder" as const, scopes: ["workspace:read"] };
+      await taskOrchestrator.decideApproval({ approvalId: req.params.approvalId, approved: req.body.approved, actor });
+      return res.json({ success: true, approvalId: req.params.approvalId, status: req.body.approved ? "approved" : "rejected" });
+    } catch (error) {
+      return res.status(400).json({ success: false, error: error instanceof Error ? error.message : String(error) });
     }
   });
 
