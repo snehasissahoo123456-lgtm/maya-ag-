@@ -24,6 +24,7 @@ on:
       - maya/semantic-memory-retrieval
       - maya/memory-feedback-loop
       - maya/secure-device-bridge
+      - maya/approved-plan-worker
   pull_request:
     branches:
       - main
@@ -42,6 +43,7 @@ on:
       - maya/memory-retrieval
       - maya/specialist-runtime
       - maya/secure-device-bridge
+      - maya/approved-plan-worker
 
 permissions:
   contents: read
