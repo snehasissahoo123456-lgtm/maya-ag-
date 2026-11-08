@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type { CapabilityRegistry, AgentIdentity } from "./capability-registry.ts";
 import type { TaskOrchestrator, TaskRepository } from "./task-orchestrator.ts";
 
@@ -14,6 +15,9 @@ export interface TaskWorkerStatus {
 export interface TaskWorkerOptions {
   founderId: string;
   pollIntervalMs?: number;
+  workerId?: string;
+  leaseMs?: number;
+  maxTasksPerCycle?: number;
 }
 
 /**
@@ -23,6 +27,9 @@ export interface TaskWorkerOptions {
 export class TaskWorker {
   private readonly founderId: string;
   private readonly pollIntervalMs: number;
+  private readonly workerId: string;
+  private readonly leaseMs: number;
+  private readonly maxTasksPerCycle: number;
   private timer?: ReturnType<typeof setTimeout>;
   private cyclePromise?: Promise<{ scanned: number; executed: number; skipped: number; failed: number; busy?: boolean }>;
   private stopped = true;
@@ -38,6 +45,9 @@ export class TaskWorker {
   ) {
     if (!options.founderId.trim()) throw new Error("Worker Founder scope is required.");
     this.founderId = options.founderId;
+    this.workerId = (options.workerId || randomUUID()).slice(0, 128);
+    this.leaseMs = Math.min(300_000, Math.max(5_000, options.leaseMs ?? 60_000));
+    this.maxTasksPerCycle = Math.min(100, Math.max(1, Math.floor(options.maxTasksPerCycle ?? 20)));
     const requestedInterval = options.pollIntervalMs ?? 3000;
     this.pollIntervalMs = Math.min(60_000, Math.max(1_000, requestedInterval));
   }
@@ -69,34 +79,73 @@ export class TaskWorker {
     const result = { scanned: 0, executed: 0, skipped: 0, failed: 0 };
     this.status = { ...this.status, lastCycleAt: new Date().toISOString(), lastError: undefined };
     try {
-      const envelopes = await this.repository.list(this.founderId);
-      result.scanned = envelopes.length;
-      for (const envelope of envelopes) {
-        if (envelope.task.founderId !== this.founderId || envelope.task.status !== "queued") continue;
-        if (this.blockedTaskIds.has(envelope.task.id)) { result.skipped++; continue; }
-        // Keep this allowlist narrower than the general capability registry.
-        if (envelope.capability !== "workspace.read_file" || envelope.task.requiresApproval) {
-          result.skipped++;
-          continue;
+      if (this.repository.claimNext && this.repository.releaseClaim) {
+        await this.repository.recoverExpiredClaims?.(this.founderId);
+        for (let index = 0; index < this.maxTasksPerCycle; index++) {
+          const envelope = await this.repository.claimNext(this.founderId, this.workerId, this.leaseMs);
+          if (!envelope) break;
+          result.scanned++;
+          try {
+            if (envelope.task.founderId !== this.founderId || envelope.task.status !== "queued" ||
+                this.blockedTaskIds.has(envelope.task.id) || envelope.capability !== "workspace.read_file" ||
+                envelope.task.requiresApproval) {
+              result.skipped++;
+              continue;
+            }
+            const actor: AgentIdentity = {
+              id: "maya-internal-task-worker:" + this.workerId,
+              founderId: this.founderId,
+              role: "worker",
+              scopes: ["workspace:read"],
+            };
+            const { definition } = this.capabilities.validate(envelope.capability, actor, envelope.args);
+            if (definition.risk !== "low" || definition.requiresApproval || !definition.allowedRoles.includes("worker")) {
+              result.skipped++;
+              continue;
+            }
+            await this.orchestrator.execute(envelope.task.id, actor);
+            result.executed++;
+          } catch (error) {
+            this.blockedTaskIds.add(envelope.task.id);
+            result.failed++;
+            this.status = { ...this.status, lastError: error instanceof Error ? error.message : String(error) };
+          } finally {
+            try {
+              await this.repository.releaseClaim(envelope.task.id, this.founderId, this.workerId);
+            } catch (error) {
+              this.status = { ...this.status, lastError: "Task lease release failed: " + (error instanceof Error ? error.message : String(error)) };
+            }
+          }
         }
-        const actor: AgentIdentity = {
-          id: "maya-internal-task-worker",
-          founderId: this.founderId,
-          role: "worker",
-          scopes: ["workspace:read"],
-        };
-        try {
-          const { definition } = this.capabilities.validate(envelope.capability, actor, envelope.args);
-          if (definition.risk !== "low" || definition.requiresApproval || !definition.allowedRoles.includes("worker")) {
+      } else {
+        const envelopes = await this.repository.list(this.founderId);
+        result.scanned = envelopes.length;
+        for (const envelope of envelopes) {
+          if (envelope.task.founderId !== this.founderId || envelope.task.status !== "queued") continue;
+          if (this.blockedTaskIds.has(envelope.task.id)) { result.skipped++; continue; }
+          if (envelope.capability !== "workspace.read_file" || envelope.task.requiresApproval) {
             result.skipped++;
             continue;
           }
-          await this.orchestrator.execute(envelope.task.id, actor);
-          result.executed++;
-        } catch (error) {
-          this.blockedTaskIds.add(envelope.task.id);
-          result.failed++;
-          this.status = { ...this.status, lastError: error instanceof Error ? error.message : String(error) };
+          const actor: AgentIdentity = {
+            id: "maya-internal-task-worker",
+            founderId: this.founderId,
+            role: "worker",
+            scopes: ["workspace:read"],
+          };
+          try {
+            const { definition } = this.capabilities.validate(envelope.capability, actor, envelope.args);
+            if (definition.risk !== "low" || definition.requiresApproval || !definition.allowedRoles.includes("worker")) {
+              result.skipped++;
+              continue;
+            }
+            await this.orchestrator.execute(envelope.task.id, actor);
+            result.executed++;
+          } catch (error) {
+            this.blockedTaskIds.add(envelope.task.id);
+            result.failed++;
+            this.status = { ...this.status, lastError: error instanceof Error ? error.message : String(error) };
+          }
         }
       }
       this.status = {
