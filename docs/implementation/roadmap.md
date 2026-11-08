@@ -172,3 +172,14 @@ This module is intentionally described as file-backed persistence, not a product
 - [ ] Durable approvals and audit event storage
 - [ ] Distributed task leases, worker heartbeats and multi-instance idempotency
 - [ ] Live Supabase migration/application and end-to-end verification in the user's project
+
+
+## Durable task audit trail — development branch
+
+- [x] Append-only audit repository interface and local atomic file adapter
+- [x] Optional Supabase audit adapter with server-only credentials
+- [x] Append-only schema and Founder/time index; no update/delete grants
+- [x] Record task enqueue, approval, start, verification and failure lifecycle events
+- [x] Authenticated Founder-only audit history endpoint
+- [ ] Move approval grants themselves to a transactional database repository
+- [ ] Add immutable audit-chain verification / external backup and retention policy
