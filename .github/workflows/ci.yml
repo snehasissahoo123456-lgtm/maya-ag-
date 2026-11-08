@@ -17,9 +17,11 @@ on:
       - maya/supabase-persistence
       - maya/supabase-agent-state
       - maya/supabase-task-queue
+      - maya/durable-audit-trail
   pull_request:
     branches:
       - main
+      - maya/supabase-task-queue
       - maya/supabase-agent-state
       - maya/dashboard-foundation
       - maya/task-worker-foundation
