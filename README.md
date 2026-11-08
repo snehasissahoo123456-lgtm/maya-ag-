@@ -85,3 +85,8 @@ The same Supabase mode also persists validated goal plans and step execution sta
 ## Supabase task queue adapter (development branch)
 
 The `maya/supabase-task-queue` branch adds an optional Supabase PostgREST task repository. It uses a server-only service-role key, Founder-scoped reads, and the `maya_save_task` database RPC to atomically create/update a task only when its immutable Founder owner matches. Apply `supabase/migrations/20261108010000_maya_tasks.sql` in addition to the prior conversation and goal-plan migrations before enabling `MAYA_STORAGE_DRIVER=supabase`. The local JSON task repository remains the default. This adapter does not itself make the worker distributed or multi-instance safe; claim/lease semantics and concurrent worker coordination remain separate release requirements.
+
+
+## Durable audit trail (development branch)
+
+Maya records append-only Founder-scoped task lifecycle events (enqueue, approval request/decision, execution start, verification, and failure) through an injected audit repository. Local development uses an atomic JSON file. Optional Supabase storage uses the server-only service-role key and an append-only table with no update/delete grants. Apply `supabase/migrations/20261108020000_maya_audit_events.sql` before enabling the Supabase storage driver. Audit metadata intentionally stores action digests and bounded evidence metadata rather than raw task arguments or file contents.
