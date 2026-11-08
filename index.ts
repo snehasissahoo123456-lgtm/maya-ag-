@@ -145,6 +145,7 @@ You can use this cockpit to inspect the current development status and configure
   ];
   @state() accessor currentInput = '';
   @state() accessor isStreaming = false;
+  @state() accessor activeConversationId: string | null = null;
 
   // Selected Venture for context
   @state() accessor selectedVentureId = 'orbit-aios';
@@ -208,6 +209,7 @@ You can use this cockpit to inspect the current development status and configure
   override async firstUpdated(props: PropertyValueMap<unknown>) {
     super.firstUpdated(props);
     await this.restoreSession();
+    await this.restoreConversationHistory();
     await this.fetchDashboardData();
     await this.fetchServerState();
     await this.fetchWatcherStatus();
@@ -1160,10 +1162,35 @@ You can use this cockpit to inspect the current development status and configure
     }
   }
 
+  private async restoreConversationHistory() {
+    try {
+      const listResponse = await fetch('/api/conversations', { credentials: 'same-origin' });
+      if (!listResponse.ok) return;
+      const listData = await listResponse.json();
+      const latest = Array.isArray(listData.conversations) ? listData.conversations[0] : null;
+      if (!latest?.id) return;
+      const detailResponse = await fetch(`/api/conversations/${encodeURIComponent(latest.id)}`, { credentials: 'same-origin' });
+      if (!detailResponse.ok) return;
+      const detail = await detailResponse.json();
+      const conversation = detail.conversation;
+      if (!conversation || !Array.isArray(conversation.messages)) return;
+      this.activeConversationId = conversation.id;
+      this.messages = conversation.messages.map((message: any) => ({
+        id: message.id,
+        role: message.role === 'user' ? 'founder' : 'action_engine',
+        text: message.text,
+        timestamp: new Date(message.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      }));
+    } catch (error) {
+      console.warn('Conversation restore unavailable:', error);
+    }
+  }
+
   private async sendMessage(customText?: string) {
     const textToSend = (customText || this.currentInput).trim();
     if (!textToSend || this.isStreaming) return;
 
+    this.activeConversationId ||= (globalThis.crypto?.randomUUID?.() || `maya-${Date.now()}-${Math.random().toString(36).slice(2)}`);
     this.currentInput = '';
     const founderMsg: ChatMessage = {
       id: 'msg-' + Date.now(),
@@ -1188,7 +1215,9 @@ You can use this cockpit to inspect the current development status and configure
       const res = await fetch('/api/chat-stream', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
         body: JSON.stringify({
+          conversationId: this.activeConversationId,
           message: textToSend,
           config: {
             ventureContext: selectedVenture?.name || 'SYB Ecosystem',
