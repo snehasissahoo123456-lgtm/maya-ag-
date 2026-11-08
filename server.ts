@@ -329,10 +329,24 @@ async function startServer() {
   // ==========================================
   // Authentication & Security Gate Endpoints
   // ==========================================
+  const founderLoginAttempts = new Map<string, { count: number; windowStartedAt: number; blockedUntil: number }>();
+
   app.post("/api/auth/founder-login", (req, res): any => {
+    const clientKey = req.socket.remoteAddress || "unknown";
+    const now = Date.now();
+    const attempt = founderLoginAttempts.get(clientKey) || { count: 0, windowStartedAt: now, blockedUntil: 0 };
+    if (attempt.blockedUntil > now) {
+      return res.status(429).json({ success: false, error: "Too many failed sign-in attempts. Try again in 15 minutes." });
+    }
+    if (now - attempt.windowStartedAt > 15 * 60 * 1000) {
+      attempt.count = 0;
+      attempt.windowStartedAt = now;
+      attempt.blockedUntil = 0;
+    }
     try {
       const { email, password } = req.body || {};
       const session = authService.loginWithFounderPassword(email, password);
+      founderLoginAttempts.delete(clientKey);
       const secure = req.secure || req.headers["x-forwarded-proto"] === "https";
       res.cookie("maya_session", session.token, { httpOnly: true, secure, sameSite: "strict", path: "/", maxAge: 12 * 60 * 60 * 1000 });
       currentAuditLogs.unshift({
@@ -343,6 +357,9 @@ async function startServer() {
       });
       return res.json({ success: true, session: { user: session.user, expiresAt: session.expiresAt } });
     } catch (err: any) {
+      attempt.count += 1;
+      if (attempt.count >= 5) attempt.blockedUntil = now + 15 * 60 * 1000;
+      founderLoginAttempts.set(clientKey, attempt);
       return res.status(401).json({ success: false, error: err.message || "Founder sign-in failed" });
     }
   });
