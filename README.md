@@ -64,3 +64,5 @@ Validated plans are stored in `goal-plans.json` under `MAYA_DATA_DIR`. Founder-s
 ## Saved-memory retrieval and chat mutation policy (current development branch)
 
 Maya retrieves up to five relevant explicitly saved Founder notes for each Gemini chat turn using bounded keyword scoring over note titles, categories and content. Retrieved notes are passed as JSON reference data and explicitly marked as untrusted context, not instructions. Chat-driven tool calls are read-only: memory writes, task queue writes and repository test commands are blocked in the direct chat tool loop and must go through a persisted goal plan with explicit Founder approval. This is keyword retrieval, not embeddings/vector search or autonomous self-modification.
+
+The development UI includes a Goal Plans workspace for generating, reviewing, approving and running persisted plans. It surfaces step state and result digests; it does not expose general shell, browser, device or external-account control.
