@@ -39,7 +39,7 @@ function resolveAllowedPath(root: string, relativePath: unknown): string {
     if (isSensitive(realTarget)) throw new Error("Access to sensitive workspace paths is blocked.");
     return realTarget;
   } catch (error) {
-    if (error instanceof Error && error.message.includes("Symbolic links")) throw error;
+    if (error instanceof Error && ["Symbolic links", "escapes", "sensitive"].some(marker => error.message.includes(marker))) throw error;
     throw new Error("Workspace path does not exist or cannot be resolved.");
   }
 }
