@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import type { AgentIdentity } from "./capability-registry.ts";
-import type { TaskRepository, TaskOrchestrator } from "./task-orchestrator.ts";
+import type { TaskRepository, TaskEnvelope } from "./task-orchestrator.ts";
 import type { ScheduledJobRepository } from "./scheduled-job-repository.ts";
 
 export interface ScheduleWorkerStatus {
@@ -8,6 +8,9 @@ export interface ScheduleWorkerStatus {
   enqueued: number; duplicateSkips: number; failed: number;
 }
 export interface ScheduleWorkerOptions { founderId: string; pollIntervalMs?: number; maxJobsPerCycle?: number; workerId?: string; }
+export interface ScheduledTaskEnqueuer {
+  enqueue(input: { id: string; founderId: string; instruction: string; capability: string; args: Record<string, unknown>; actor: AgentIdentity }): Promise<TaskEnvelope>;
+}
 function taskIdFor(scheduleId: string, scheduledAt: string): string {
   return "scheduled-" + createHash("sha256").update(scheduleId + ":" + scheduledAt).digest("hex").slice(0, 24);
 }
@@ -30,7 +33,7 @@ export class ScheduleWorker {
   constructor(
     private readonly schedules: ScheduledJobRepository,
     private readonly tasks: TaskRepository,
-    private readonly orchestrator: TaskOrchestrator,
+    private readonly orchestrator: ScheduledTaskEnqueuer,
     options: ScheduleWorkerOptions,
   ) {
     if (!options.founderId.trim()) throw new Error("Schedule worker Founder scope is required.");
