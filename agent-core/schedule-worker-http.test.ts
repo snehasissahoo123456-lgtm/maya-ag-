@@ -58,8 +58,8 @@ test("live schedule worker enqueues and TaskWorker completes a read-only file ta
       method: "POST", headers: { "content-type": "application/json", cookie },
       body: JSON.stringify({ title: "Automated README check", path: "README.md", runAt: new Date(Date.now() - 1000).toISOString(), intervalMs: null }),
     });
-    assert.equal(created.status, 201, await created.text());
     const createdBody = await created.json() as any;
+    assert.equal(created.status, 201, JSON.stringify(createdBody));
     const scheduleId = createdBody.schedule.id;
 
     const deadline = Date.now() + 15_000;
@@ -83,8 +83,10 @@ test("live schedule worker enqueues and TaskWorker completes a read-only file ta
     assert.equal(task?.task?.status, "completed", logs);
     assert.ok((task?.task?.verificationEvidence || []).length > 0, "completed scheduled task must include verification evidence");
   } finally {
-    child.kill("SIGTERM");
-    await new Promise(resolve => child.once("exit", resolve));
+    if (child.exitCode === null) {
+      child.kill("SIGTERM");
+      await new Promise(resolve => child.once("exit", resolve));
+    }
     fs.rmSync(dataDir, { recursive: true, force: true });
   }
 });
