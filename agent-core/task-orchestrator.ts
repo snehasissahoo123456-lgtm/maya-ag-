@@ -43,9 +43,14 @@ export class TaskOrchestrator {
     if (input.actor.role !== "founder") throw new Error("Only the Founder can approve actions.");
     const approval = (await this.approvals.listForFounder(input.actor.founderId)).find(item => item.id === input.approvalId);
     if (!approval) throw new Error("Approval not found for this Founder.");
+    const envelope = await this.requireTask(approval.taskId, input.actor.founderId);
+    if (envelope.task.status !== "awaiting_approval") throw new Error("Task is no longer waiting for this approval.");
     const decision = await this.approvals.decide({ approvalId: input.approvalId, founderId: input.actor.founderId, approved: input.approved });
     if (decision.status === "expired") throw new Error("Approval request expired.");
-    const envelope = await this.requireTask(approval.taskId, input.actor.founderId);
+    envelope.task = input.approved
+      ? transitionTask(envelope.task, "queued")
+      : transitionTask(envelope.task, "cancelled");
+    await this.repository.put(envelope);
     await this.recordAudit(input.actor, "task.approval_decided", envelope, { approvalId: approval.id, approved: input.approved });
   }
   async execute(taskId: string, actor: AgentIdentity, approvalId?: string): Promise<{ task: MayaTask; result: unknown }> {
