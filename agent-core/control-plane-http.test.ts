@@ -78,6 +78,13 @@ test("real HTTP control-plane routes enforce Founder auth and execute only the r
     const unavailablePlan = await fetch(baseUrl + "/api/agent/plan", { method: "POST", headers: { "content-type": "application/json", cookie }, body: JSON.stringify({ objective: "Inspect the repository" }) });
     assert.equal(unavailablePlan.status, 503, "Planner must report missing Gemini configuration instead of fabricating a plan");
 
+    const emptyPlans = await fetch(baseUrl + "/api/agent/plans", { headers: { cookie } });
+    assert.equal(emptyPlans.status, 200);
+    const emptyPlansBody = await emptyPlans.json() as any;
+    assert.deepEqual(emptyPlansBody.plans, []);
+    const unknownPlanExecution = await fetch(baseUrl + "/api/agent/plans/not-a-real-plan/execute", { method: "POST", headers: { cookie } });
+    assert.equal(unknownPlanExecution.status, 404);
+
     const conversationId = "http-conversation-test";
     const chat = await fetch(baseUrl + "/api/chat-stream", {
       method: "POST",
