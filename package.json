@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "tsx server.ts",
     "build": "tsc --noEmit && vite build && esbuild server.ts --bundle --platform=node --format=cjs --packages=external --sourcemap --outfile=dist/server.cjs",
-    "start": "node dist/server.cjs",
+    "start": "node --env-file-if-exists=.env dist/server.cjs",
     "preview": "vite preview",
     "lint": "tsc --noEmit",
     "test": "tsx --test agent-core/task-lifecycle.test.ts agent-core/persistent-store.test.ts agent-core/function-call-loop.test.ts authService.test.ts"
