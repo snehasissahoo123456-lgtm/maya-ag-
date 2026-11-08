@@ -105,3 +105,8 @@ When using the Supabase task repository, the worker claims only queued `workspac
 ## Founder memory repository (development branch)
 
 Maya's saved memory notes now use a Founder-scoped repository contract. File mode continues to store notes inside the existing protected `state.json` store. Supabase mode stores notes in `maya_memories`, with a one-time import of the existing local memory notes tracked by `maya_memory_imports`. Search and retrieval remain bounded keyword retrieval; this is persistent memory, not automatic self-training or model fine-tuning. Apply `supabase/migrations/20261108050000_maya_memories.sql` before enabling Supabase storage. No live database was modified.
+
+
+## Semantic memory retrieval (development branch)
+
+When Gemini embeddings are available, new Supabase memory notes are embedded with `gemini-embedding-001` at 768 dimensions and retrieved through a Founder-filtered pgvector cosine-similarity RPC. Search combines semantic matches with bounded keyword matches so legacy notes without embeddings remain discoverable. If the embedding API is unavailable, the repository falls back to keyword retrieval. Apply `supabase/migrations/20261108060000_maya_semantic_memory.sql` after the base memory migration. This is retrieval augmentation, not model self-training.
