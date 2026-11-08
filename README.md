@@ -39,3 +39,7 @@ bun run build
 
 ## Release policy
 A task is not complete because a model says it is complete. Maya must provide independently verifiable execution evidence. High-risk actions require explicit Founder approval. Cloud availability does not imply that Android can run arbitrary code continuously in the background.
+
+
+### Dashboard milestone (maya/dashboard-foundation)
+The new Founder dashboard is the default authenticated landing page. It fetches `/api/health` for backend reachability and `/api/control-plane/tasks` for Founder-scoped task records. Task counts and recent task rows are derived from the returned persisted task envelopes; task data is hidden when the authenticated endpoint returns 401 or another error. The dashboard provides navigation to the existing chat/voice workspace, task workspace, memory, platform registry, diagnostics and tool catalog. Hardcoded platform/test/tool count badges and the unverified `Bridge :3000 / Autonomous` status label were removed. The task workspace no longer claims a live 24/7 scheduler; it explicitly states that the background worker is not enabled. The dashboard does not claim that Gemini, integrations, PC/Android connectors, or always-on voice are active.
