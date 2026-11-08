@@ -117,6 +117,93 @@ import { WatcherService } from "./watcherService.ts";
 import { AuthService } from "./authService.ts";
 import { PlatformService } from "./platformService.ts";
 import { MayaPersistentStore } from "./agent-core/persistent-store.ts";
+import { runFunctionCallingTurn } from "./agent-core/function-call-loop.ts";
+
+const MAYA_FUNCTION_DECLARATIONS = [
+  { name: "list_dir", description: "List non-secret files and folders inside Maya's enrolled server workspace.", parametersJsonSchema: { type: "object", properties: { path: { type: "string" } } } },
+  { name: "read_file", description: "Read a non-secret text file inside Maya's enrolled workspace. Credentials and environment files are blocked.", parametersJsonSchema: { type: "object", properties: { path: { type: "string" } }, required: ["path"] } },
+  { name: "system_info", description: "Return runtime and process information for this Maya server.", parametersJsonSchema: { type: "object", properties: {} } },
+  { name: "schedule_task", description: "Create a persistent queued task. This records work only; it does not execute it.", parametersJsonSchema: { type: "object", properties: { title: { type: "string" }, steps: { type: "string" }, trigger_type: { type: "string" }, trigger_value: { type: "string" } }, required: ["title"] } },
+  { name: "list_tasks", description: "List persistent tasks and their current queue state.", parametersJsonSchema: { type: "object", properties: {} } },
+  { name: "memory_save", description: "Save a Founder-approved note or lesson to Maya's persistent memory.", parametersJsonSchema: { type: "object", properties: { category: { type: "string" }, title: { type: "string" }, content: { type: "string" } }, required: ["content"] } },
+  { name: "memory_search", description: "Search Maya's saved memory notes.", parametersJsonSchema: { type: "object", properties: { query: { type: "string" } }, required: ["query"] } },
+  { name: "run_tests", description: "Run the repository lint, test, and production build commands and return their real output.", parametersJsonSchema: { type: "object", properties: {} } },
+];
+const IMPLEMENTED_TOOL_NAMES = new Set(MAYA_FUNCTION_DECLARATIONS.map((tool) => tool.name));
+
+function isSensitiveWorkspacePath(filePath: string): boolean {
+  const relative = path.relative(fs.realpathSync(process.cwd()), filePath);
+  const segments = relative.split(path.sep).map((part) => part.toLowerCase());
+  const base = path.basename(filePath).toLowerCase();
+  return segments.some((part) => part === ".git" || part === "node_modules" || part === ".maya-data" || part === "secrets" || part === "credentials")
+    || base === ".env" || base.startsWith(".env.") || base === ".npmrc" || base === ".netrc"
+    || base === "id_rsa" || base.endsWith(".pem") || base.endsWith(".key") || base.endsWith(".p12") || base.endsWith(".pfx");
+}
+
+async function executeAgentTool(name: string, args: Record<string, unknown>): Promise<unknown> {
+  if (!IMPLEMENTED_TOOL_NAMES.has(name)) throw new Error(`Tool "${name}" is not implemented or enabled.`);
+  if (name === "list_dir") {
+    const dir = resolveWorkspacePath(args.path || ".");
+    if (isSensitiveWorkspacePath(dir)) throw new Error("Access to sensitive workspace paths is blocked.");
+    return fs.readdirSync(dir, { withFileTypes: true })
+      .filter((entry) => !isSensitiveWorkspacePath(path.join(dir, entry.name)))
+      .slice(0, 100)
+      .map((entry) => ({ name: entry.name, type: entry.isDirectory() ? "directory" : "file" }));
+  }
+  if (name === "read_file") {
+    const file = resolveWorkspacePath(args.path);
+    if (isSensitiveWorkspacePath(file)) throw new Error("Reading secrets and credential files is blocked.");
+    const stat = fs.statSync(file);
+    if (!stat.isFile()) throw new Error("Only regular text files can be read.");
+    if (stat.size > 50000) throw new Error("File exceeds the 50 KB agent read limit.");
+    return { path: path.relative(process.cwd(), file), content: fs.readFileSync(file, "utf8") };
+  }
+  if (name === "system_info") {
+    return { node: process.version, platform: process.platform, architecture: process.arch, uptimeSeconds: Math.floor(process.uptime()), memory: process.memoryUsage() };
+  }
+  if (name === "schedule_task") {
+    const title = String(args.title || "").trim();
+    if (!title || title.length > 200) throw new Error("Task title must contain 1–200 characters.");
+    const task: ActionEngineTask = {
+      id: "task-" + randomTaskId(), title, ventureId: "orbit-aios", triggerType: "manual",
+      triggerValue: String(args.trigger_value || "On Demand"),
+      steps: [String(args.steps || "Review and plan this task")], permissionLevel: "ask",
+      status: "queued", progress: 0, retryCount: 0, logs: ["Created by Gemini function calling. Queued only; no executor is configured."],
+    };
+    currentTasks.unshift(task); persistFounderState(); return { queued: true, executed: false, task };
+  }
+  if (name === "list_tasks") return { count: currentTasks.length, tasks: currentTasks };
+  if (name === "memory_save") {
+    const content = String(args.content || "").trim();
+    if (!content || content.length > 20000) throw new Error("Memory content must contain 1–20,000 characters.");
+    const memory: MemoryEntry = {
+      id: "mem-" + randomTaskId(), category: String(args.category || "lesson") as MemoryEntry["category"],
+      title: String(args.title || "Founder note").slice(0, 160), content,
+      createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+    };
+    currentMemories.unshift(memory); currentMemories = currentMemories.slice(0, 500);
+    persistFounderState(); return { saved: true, memory };
+  }
+  if (name === "memory_search") {
+    const query = String(args.query || "").trim().toLowerCase();
+    if (!query) throw new Error("A non-empty memory query is required.");
+    const matches = currentMemories.filter((memory) => memory.title.toLowerCase().includes(query) || memory.content.toLowerCase().includes(query) || memory.category.includes(query)).slice(0, 20);
+    return { count: matches.length, results: matches };
+  }
+  if (name === "run_tests") {
+    try {
+      const output = execSync("bun run lint && bun run test && bun run build", { cwd: process.cwd(), encoding: "utf8", stdio: "pipe", timeout: 180000 });
+      return { verified: true, command: "bun run lint && bun run test && bun run build", output: output.slice(-20000) };
+    } catch (error: any) {
+      throw new Error(`Validation failed (exit ${error.status ?? "unknown"}): ${String(error.stdout || "")}\n${String(error.stderr || error.message || "")}`.slice(-12000));
+    }
+  }
+  throw new Error("Tool execution is not available.");
+}
+
+function randomTaskId(): string {
+  return require("node:crypto").randomBytes(8).toString("hex");
+}
 
 const authService = new AuthService();
 const platformService = new PlatformService();
@@ -224,7 +311,7 @@ async function startServer() {
       ventures: SYB_VENTURES,
       tasks: currentTasks,
       memories: currentMemories,
-      tools: MASTER_TOOLS,
+      tools: MASTER_TOOLS.filter((tool) => IMPLEMENTED_TOOL_NAMES.has(tool.name)),
       tests: currentTestSuites,
       auditLogs: currentAuditLogs.slice(-20).reverse(),
       connectedServices: {
@@ -763,6 +850,7 @@ MULTILINGUAL & RAPID REACTION:
       const config = {
         systemInstruction: { parts: [{ text: dynamicInstruction }] },
         ...incomingConfig,
+        tools: [{ functionDeclarations: MAYA_FUNCTION_DECLARATIONS }],
       };
 
       const apiKey = process.env.GEMINI_API_KEY || process.env.API_KEY;
@@ -792,7 +880,7 @@ MULTILINGUAL & RAPID REACTION:
         });
         if (sessionId) chats.set(sessionId, chat);
       }
-      const response = await chat.sendMessage({ message, config: msgConfig });
+      const response = await runFunctionCallingTurn(chat, message, executeAgentTool);
       return res.json(serializeGenerateContentResponse(response));
     } catch (error: any) {
       console.error("[Backend] /api/chat-message error:", error);
@@ -864,13 +952,11 @@ MULTILINGUAL & RAPID REACTION:
         });
         if (sessionId) chats.set(sessionId, chat);
       }
-      const stream = await chat.sendMessageStream({ message, config: msgConfig });
+      const response = await runFunctionCallingTurn(chat, message, executeAgentTool);
       res.setHeader("Content-Type", "application/x-ndjson");
       res.setHeader("Cache-Control", "no-cache");
       res.setHeader("Connection", "keep-alive");
-      for await (const chunk of stream) {
-        res.write(JSON.stringify(serializeGenerateContentResponse(chunk)) + "\n");
-      }
+      res.write(JSON.stringify(serializeGenerateContentResponse(response)) + "\n");
       res.end();
     } catch (error: any) {
       console.error("[Backend] /api/chat-stream error:", error);
