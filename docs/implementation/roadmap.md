@@ -218,3 +218,15 @@ This module is intentionally described as file-backed persistence, not a product
 - [ ] Vector/semantic retrieval and relevance evaluation
 - [ ] Explicit memory extraction proposals, Founder confirmation and feedback-based quality loop
 - [ ] Live Supabase migration/import verification and backup/restore tests
+
+
+## Semantic memory retrieval — development branch
+
+- [x] Gemini document/query embedding provider at 768 dimensions
+- [x] pgvector memory column and cosine-similarity HNSW index
+- [x] Founder-filtered semantic search RPC
+- [x] Hybrid semantic + keyword fallback for legacy/unembedded notes
+- [x] HTTP tests for authenticated memory save/list/delete and unauthenticated denial
+- [ ] Live vector extension/migration verification in Supabase
+- [ ] Relevance benchmark set, precision/recall evaluation and memory feedback scoring
+- [ ] Explicit approval workflow for automatically extracted memory candidates
