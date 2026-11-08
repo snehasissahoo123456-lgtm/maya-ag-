@@ -60,3 +60,7 @@ Authenticated `POST /api/agent/plan` uses the configured Gemini provider to prop
 ## Persisted plan execution (current development branch)
 
 Validated plans are stored in `goal-plans.json` under `MAYA_DATA_DIR`. Founder-scoped APIs list and inspect plans, approve individual state-mutating steps, and execute plans sequentially. The executor pauses at approval-required steps, binds approvals to a SHA-256 digest of the exact tool and arguments, records result digests as evidence, resumes completed plans without repeating completed steps, and stops on failure without automatic retry. Sensitive tool approval is enforced again inside the executor, independent of model-provided flags. This is still single-process file-backed execution; it is not a durable distributed queue or a production 24/7 worker.
+
+## Saved-memory retrieval and chat mutation policy (current development branch)
+
+Maya retrieves up to five relevant explicitly saved Founder notes for each Gemini chat turn using bounded keyword scoring over note titles, categories and content. Retrieved notes are passed as JSON reference data and explicitly marked as untrusted context, not instructions. Chat-driven tool calls are read-only: memory writes, task queue writes and repository test commands are blocked in the direct chat tool loop and must go through a persisted goal plan with explicit Founder approval. This is keyword retrieval, not embeddings/vector search or autonomous self-modification.
