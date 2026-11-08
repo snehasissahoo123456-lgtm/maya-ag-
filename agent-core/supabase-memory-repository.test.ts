@@ -65,6 +65,7 @@ test("Supabase memory repository stores document embeddings and uses vector simi
       calls.push({ url, body });
       if (url.endsWith("maya_import_legacy_memories")) return response([{ imported: true }]);
       if (url.endsWith("maya_memories")) return response([{ id: "m1", founder_id: "founder-a" }]);
+      if (url.includes("/maya_memories?")) return response([{ id: "m1", founder_id: "founder-a", category: "lesson", title: memory.title, content: memory.content, created_at: memory.createdAt, updated_at: memory.updatedAt }]);
       if (url.endsWith("maya_search_memories")) return response([{ id: "m1", founder_id: "founder-a", category: "lesson", title: memory.title, content: memory.content, created_at: memory.createdAt, updated_at: memory.updatedAt, similarity: 0.91 }]);
       throw new Error("Unexpected request");
     },
