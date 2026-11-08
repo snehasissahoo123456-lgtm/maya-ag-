@@ -287,3 +287,20 @@ The plan worker is disabled by default. It currently requires the file storage d
 - [ ] Add resumable specialist assignments with bounded retries, cancellation and run-level budgets
 - [ ] Add durable per-specialist queues and cross-process concurrency control
 - [ ] Add report export and evaluation metrics for specialist quality
+
+
+## Scheduled read-only jobs — development branch
+
+- [x] Founder-scoped one-time and recurring schedule repository
+- [x] Authenticated create/list/pause API and dedicated Schedules workspace
+- [x] Due-job worker converts schedules into deterministic, idempotent task IDs
+- [x] Task worker executes only the registered read-only workspace-file capability
+- [x] Repeated enqueue protection if a worker stops between task creation and schedule advancement
+- [x] Bounded recurrence interval, per-cycle limit, failure counter and auto-pause after repeated failures
+- [x] Require both schedule and task workers to be explicitly enabled
+- [ ] Add distributed schedule leases and Supabase repository/migration
+- [ ] Add richer schedule triggers only after each trigger has an audited, verified capability
+- [ ] Add time-zone-aware calendar rules, missed-run policy controls and notification delivery
+- [ ] Add real 24/7 hosting, monitoring and restart/backup acceptance tests
+
+Only read-only workspace file jobs are currently schedulable. This is not a general automation scheduler.
