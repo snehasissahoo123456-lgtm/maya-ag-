@@ -5,6 +5,7 @@ import { createServer } from "node:net";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { WebSocket } from "ws";
 
 async function unusedPort(): Promise<number> {
   const server = createServer();
@@ -17,6 +18,19 @@ async function unusedPort(): Promise<number> {
   const port = address.port;
   await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
   return port;
+}
+
+function waitForWsMessage(socket: WebSocket, type: string): Promise<any> {
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => { socket.off("message", handler); reject(new Error(`Timed out waiting for WebSocket message: ${type}`)); }, 5_000);
+    const handler = (raw: Buffer) => {
+      let message: any;
+      try { message = JSON.parse(raw.toString()); } catch { return; }
+      if (message.type === "error") { clearTimeout(timeout); socket.off("message", handler); reject(new Error(message.error || "Device bridge error")); return; }
+      if (message.type === type) { clearTimeout(timeout); socket.off("message", handler); resolve(message); }
+    };
+    socket.on("message", handler);
+  });
 }
 
 async function waitForServer(baseUrl: string, child: ChildProcess): Promise<void> {
@@ -84,9 +98,39 @@ test("real HTTP control-plane routes enforce Founder auth and execute only the r
     const pairingBody = await pairing.json() as any;
     assert.match(pairingBody.code, /^[A-Z0-9_-]{8,32}$/);
     assert.ok(Date.parse(pairingBody.expiresAt) > Date.now());
+
+    const deviceSocket = new WebSocket(`ws://127.0.0.1:${port}/api/device-bridge`);
+    await new Promise<void>((resolve, reject) => {
+      deviceSocket.once("open", () => resolve());
+      deviceSocket.once("error", reject);
+    });
+    const pairedMessagePromise = waitForWsMessage(deviceSocket, "paired");
+    deviceSocket.send(JSON.stringify({
+      type: "pair", code: pairingBody.code,
+      device: { name: "HTTP Test PC", platform: "linux", architecture: "x64", runtimeVersion: "test" },
+    }));
+    const pairedMessage = await pairedMessagePromise;
+    assert.ok(pairedMessage.token);
     const devices = await fetch(baseUrl + "/api/devices", { headers: { cookie } });
     assert.equal(devices.status, 200);
-    assert.deepEqual((await devices.json() as any).devices, []);
+    const deviceList = await devices.json() as any;
+    assert.equal(deviceList.devices[0].online, true);
+
+    const commandMessagePromise = waitForWsMessage(deviceSocket, "command");
+    const commandResponsePromise = fetch(baseUrl + `/api/devices/${pairedMessage.device.id}/commands`, {
+      method: "POST", headers: { "content-type": "application/json", cookie },
+      body: JSON.stringify({ command: "system.info" }),
+    });
+    const commandMessage = await commandMessagePromise;
+    deviceSocket.send(JSON.stringify({ type: "command_result", requestId: commandMessage.requestId, success: true, result: { platform: "linux", verified: true } }));
+    const commandResponse = await commandResponsePromise;
+    assert.equal(commandResponse.status, 200);
+    assert.deepEqual((await commandResponse.json() as any).result, { platform: "linux", verified: true });
+
+    const revokedDevice = await fetch(baseUrl + `/api/devices/${pairedMessage.device.id}`, { method: "DELETE", headers: { cookie } });
+    assert.equal(revokedDevice.status, 200);
+    deviceSocket.close();
+
 
 
     const savedMemory = await fetch(baseUrl + "/api/action-engine/memory", {
