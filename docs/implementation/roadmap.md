@@ -121,3 +121,16 @@ This module is intentionally described as file-backed persistence, not a product
 - [ ] Add per-agent durable work queues, budgets, concurrency controls and result verification
 - [ ] Connect scoped tools through approval-aware adapters
 
+
+
+## CEO specialist orchestration — development branch
+
+- [x] CEO selects 1–4 registered specialists with validated dispatch JSON
+- [x] Sequential specialist execution with bounded task sizes
+- [x] CEO synthesis of specialist findings
+- [x] Founder-authenticated orchestration API and dedicated UI
+- [x] Prevent recursive CEO/Founder delegation and specialist tool execution
+- [ ] Persist orchestration runs, assignments, findings and project status
+- [ ] Add cross-agent budgets, concurrency limits, cancellation and resumable queues
+- [ ] Allow approved specialists to use scoped tools through the approval ledger
+
