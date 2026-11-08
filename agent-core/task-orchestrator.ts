@@ -35,6 +35,15 @@ export class TaskOrchestrator {
     this.approvals.decide({ approvalId: input.approvalId, founderId: input.actor.founderId, approved: input.approved });
   }
   async execute(taskId: string, actor: AgentIdentity, approvalId?: string): Promise<{ task: MayaTask; result: unknown }> {
+    if (this.executing.has(taskId)) throw new Error("Task execution is already in progress.");
+    this.executing.add(taskId);
+    try {
+      return await this.executeOnce(taskId, actor, approvalId);
+    } finally {
+      this.executing.delete(taskId);
+    }
+  }
+  private async executeOnce(taskId: string, actor: AgentIdentity, approvalId?: string): Promise<{ task: MayaTask; result: unknown }> {
     const envelope = await this.requireTask(taskId);
     if (actor.founderId !== envelope.task.founderId) throw new Error("Task belongs to another Founder.");
     const { definition } = this.capabilities.validate(envelope.capability, actor, envelope.args);
