@@ -12,8 +12,10 @@ on:
       - maya/memory-retrieval
       - maya/specialist-runtime
       - maya/ceo-orchestrator
+      - maya/supabase-persistence
       - maya/ceo-orchestrator
       - maya/supabase-persistence
+      - maya/supabase-agent-state
   pull_request:
     branches:
       - main
