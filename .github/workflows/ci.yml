@@ -27,6 +27,7 @@ on:
       - maya/approved-plan-worker
       - maya/persistent-ceo-runs
       - maya/scheduled-readonly-jobs
+      - maya/distributed-scheduler-leases
   pull_request:
     branches:
       - main
