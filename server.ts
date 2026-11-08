@@ -157,6 +157,7 @@ import { retrieveRelevantMemories, formatMemoryContext } from "./agent-core/memo
 import { createChatToolExecutor } from "./agent-core/chat-tool-policy.ts";
 import { SpecialistRuntime, listRunnableSpecialists } from "./agent-core/specialist-runtime.ts";
 import { CEOOrchestrator } from "./agent-core/ceo-orchestrator.ts";
+import { FileCEORunRepository } from "./agent-core/file-ceo-run-repository.ts";
 
 const conversationStore = createConversationRepository();
 const taskRepository = createTaskRepository();
@@ -323,6 +324,7 @@ const specialistRuntime = new SpecialistRuntime({
     return String(response.text || "");
   },
 });
+const ceoRunRepository = new FileCEORunRepository();
 const ceoOrchestrator = new CEOOrchestrator({
   plan: async ({ objective, availableSpecialists, context }) => {
     const apiKey = process.env.GEMINI_API_KEY || process.env.API_KEY;
@@ -424,6 +426,7 @@ function handlePersonaCommands(rawMsg: string): string | null {
 }
 
 async function startServer() {
+  await ceoRunRepository.recoverInterrupted();
   const app = express();
   const server = http.createServer(app);
   const PORT = Number(process.env.PORT) || 3000;
@@ -503,6 +506,21 @@ async function startServer() {
     return revoked ? res.json({ success: true, revoked: req.params.id }) : res.status(404).json({ success: false, error: "Device not found." });
   });
 
+  app.get("/api/agent/ceo/runs", async (req, res) => {
+    const founderId = (req as any).authSession?.user?.id;
+    if (!founderId) return res.status(401).json({ success: false, error: "Verified Founder session required." });
+    const rawLimit = Number(req.query.limit) || 50;
+    const runs = await ceoRunRepository.list(founderId, rawLimit);
+    return res.json({ success: true, runs });
+  });
+
+  app.get("/api/agent/ceo/runs/:id", async (req, res) => {
+    const founderId = (req as any).authSession?.user?.id;
+    if (!founderId) return res.status(401).json({ success: false, error: "Verified Founder session required." });
+    const run = await ceoRunRepository.get(founderId, req.params.id);
+    return run ? res.json({ success: true, run }) : res.status(404).json({ success: false, error: "CEO run not found." });
+  });
+
   app.post("/api/agent/ceo/orchestrate", async (req, res): Promise<any> => {
     const founderId = (req as any).authSession?.user?.id;
     if (!founderId) return res.status(401).json({ success: false, error: "Verified Founder session required." });
@@ -510,23 +528,48 @@ async function startServer() {
     const objective = typeof req.body?.objective === "string" ? req.body.objective.trim() : "";
     if (!objective || objective.length > 2000) return res.status(400).json({ success: false, error: "Objective must contain 1–2,000 characters." });
     const startedAt = Date.now();
+    const runRecord = {
+      id: "ceo-run-" + randomTaskId(), founderId, objective, status: "running" as const,
+      assignments: [] as Array<{ agentId: string; task: string }>,
+      findings: [] as Array<{ agentId: string; displayName: string; role: string; output: string }>,
+      createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+    };
+    let persisted = false;
     try {
+      await ceoRunRepository.create(runRecord);
+      persisted = true;
       const memories = await getFounderMemories(founderId);
       const context = formatMemoryContext(retrieveRelevantMemories(objective, memories, { limit: 5 }));
       const result = await ceoOrchestrator.run({ objective, context });
+      const completedAt = new Date().toISOString();
+      const completedRun = {
+        ...runRecord, status: "completed" as const, assignments: result.assignments,
+        findings: result.findings.map(item => ({ agentId: item.agentId, displayName: item.displayName, role: item.role, output: item.output })),
+        summary: result.summary, completedAt, updatedAt: completedAt, durationMs: Date.now() - startedAt,
+      };
+      await ceoRunRepository.update(founderId, completedRun);
       currentAuditLogs.unshift({
         id: "ceo-" + randomTaskId(),
         toolName: "ceo.orchestrate",
-        params: { assignmentCount: result.assignments.length, agentIds: result.assignments.map(item => item.agentId) },
+        params: { assignmentCount: result.assignments.length, agentIds: result.assignments.map(item => item.agentId), runId: runRecord.id },
         status: "success",
         result: { executionMode: result.executionMode, findingCount: result.findings.length },
-        timestamp: new Date().toISOString(),
+        timestamp: completedAt,
         durationMs: Date.now() - startedAt,
       });
       currentAuditLogs = currentAuditLogs.slice(0, 500);
-      return res.json({ success: true, result });
+      return res.json({ success: true, runId: runRecord.id, result });
     } catch (error) {
-      return res.status(422).json({ success: false, error: error instanceof Error ? error.message : String(error) });
+      const message = error instanceof Error ? error.message : String(error);
+      if (persisted) {
+        try {
+          await ceoRunRepository.update(founderId, {
+            ...runRecord, status: "failed", error: message.slice(0, 2000),
+            updatedAt: new Date().toISOString(), durationMs: Date.now() - startedAt,
+          });
+        } catch (persistError) { console.error("[CEO] Failed to persist orchestration failure:", persistError); }
+      }
+      return res.status(422).json({ success: false, runId: runRecord.id, error: message });
     }
   });
 
