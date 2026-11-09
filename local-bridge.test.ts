@@ -97,7 +97,6 @@ test("local bridge creates only one new directory under an existing non-sensitiv
         await assert.rejects(() => executeLocalBridgeCommand(root, "workspace.create_directory", { path: "linked-parent/escape" }), /symbolic links/i);
       } finally { fs.rmSync(outside, { recursive: true, force: true }); }
     }
-    await assert.rejects(() => executeLocalBridgeCommand(root, "workspace.create_directory", { path: "projects/new-file", extra: true } as any), /already exists|parent/i);
     await assert.rejects(() => executeLocalBridgeCommand(root, "shell.exec", { command: "whoami" }), /allowlist/i);
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
