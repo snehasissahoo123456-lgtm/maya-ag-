@@ -295,7 +295,7 @@ test("real HTTP worker writes to an enrolled local PC only after exact Founder a
     socket.on("message", async raw => {
       let message: any;
       try { message = JSON.parse(raw.toString()); } catch { return; }
-      if (message.type !== "command" || !["workspace.write_file", "workspace.create_file"].includes(message.command)) return;
+      if (message.type !== "command" || !["workspace.write_file", "workspace.create_file", "workspace.create_directory"].includes(message.command)) return;
       try {
         const result = await executeLocalBridgeCommand(deviceWorkspace, message.command, message.args || {});
         socket?.send(JSON.stringify({ type: "command_result", requestId: message.requestId, success: true, result }));
@@ -346,6 +346,47 @@ test("real HTTP worker writes to an enrolled local PC only after exact Founder a
     assert.match(finished.task.verificationEvidence[0].reference, /^sha256:[a-f0-9]{64}$/);
     const approvals = await (await fetch(baseUrl + "/api/control-plane/approvals", { headers: { cookie } })).json() as any;
     assert.equal(approvals.approvals.find((item: any) => item.id === approvalData.approvalId)?.status, "consumed");
+
+    const directoryTaskResponse = await fetch(baseUrl + "/api/control-plane/tasks", {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie },
+      body: JSON.stringify({
+        instruction: "Create a new project directory on my paired PC",
+        capability: "device.workspace.create_directory",
+        deviceId: paired.device.id,
+        path: "projects/new-project",
+      }),
+    });
+    assert.equal(directoryTaskResponse.status, 201, `Directory task creation failed. Server output:\n${logs}`);
+    const directoryTaskId = (await directoryTaskResponse.json() as any).task.id;
+    assert.equal(fs.existsSync(path.join(deviceWorkspace, "projects", "new-project")), false);
+    const directoryApprovalRequest = await fetch(baseUrl + `/api/control-plane/tasks/${encodeURIComponent(directoryTaskId)}/request-approval`, {
+      method: "POST", headers: { cookie },
+    });
+    assert.equal(directoryApprovalRequest.status, 200);
+    const directoryApproval = await directoryApprovalRequest.json() as any;
+    const directoryDecision = await fetch(baseUrl + `/api/control-plane/approvals/${encodeURIComponent(directoryApproval.approvalId)}/decision`, {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie },
+      body: JSON.stringify({ approved: true }),
+    });
+    assert.equal(directoryDecision.status, 200);
+    const directoryDeadline = Date.now() + 12_000;
+    let directoryTask: any = null;
+    while (Date.now() < directoryDeadline) {
+      const response = await fetch(baseUrl + "/api/control-plane/tasks", { headers: { cookie } });
+      const data = await response.json() as any;
+      directoryTask = data.tasks.find((item: any) => item.task.id === directoryTaskId);
+      if (directoryTask?.task.status === "completed" || directoryTask?.task.status === "failed") break;
+      await new Promise(resolve => setTimeout(resolve, 150));
+    }
+    assert.equal(directoryTask?.task.status, "completed", `Approved directory creation did not complete. Server output:\n${logs}`);
+    assert.equal(fs.statSync(path.join(deviceWorkspace, "projects", "new-project")).isDirectory(), true);
+    assert.equal(directoryTask.capability, "device.workspace.create_directory");
+    assert.equal(directoryTask.task.verificationEvidence[0].kind, "device-workspace-directory-create");
+    const directoryApprovals = await (await fetch(baseUrl + "/api/control-plane/approvals", { headers: { cookie } })).json() as any;
+    assert.equal(directoryApprovals.approvals.find((item: any) => item.id === directoryApproval.approvalId)?.status, "consumed");
+
     const createContent = "Founder-approved new local PC file";
     const createTaskResponse = await fetch(baseUrl + "/api/control-plane/tasks", {
       method: "POST",
