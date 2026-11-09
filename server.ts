@@ -11,7 +11,7 @@ import { createServer as createViteServer } from "vite";
 import { GoogleGenAI } from "@google/genai";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { WebSocketServer, WebSocket } from "ws";
-import { DeviceBridgeManager } from "./agent-core/device-bridge-manager.ts";
+import { DeviceBridgeManager, DeviceCommandUncertainError } from "./agent-core/device-bridge-manager.ts";
 import { createDeviceRegistry } from "./agent-core/create-device-registry.ts";
 
 let activeDeviceBridgeManager: DeviceBridgeManager | undefined;
@@ -145,7 +145,7 @@ import { MayaPersistentStore } from "./agent-core/persistent-store.ts";
 import { runFunctionCallingTurn } from "./agent-core/function-call-loop.ts";
 import { CapabilityRegistry } from "./agent-core/capability-registry.ts";
 import { createApprovalRepository } from "./agent-core/create-approval-repository.ts";
-import { TaskOrchestrator } from "./agent-core/task-orchestrator.ts";
+import { TaskOrchestrator, UncertainTaskExecutionError } from "./agent-core/task-orchestrator.ts";
 import { createTaskRepository } from "./agent-core/create-task-repository.ts";
 import { createAuditRepository } from "./agent-core/create-audit-repository.ts";
 import { createMemoryRepository } from "./agent-core/create-memory-repository.ts";
@@ -240,12 +240,18 @@ const taskOrchestrator = new TaskOrchestrator(
       if (capability === "device.workspace.write_file") {
         const manager = activeDeviceBridgeManager;
         if (!manager) throw new Error("Local device bridge is not available.");
-        const result = await manager.executeApprovedWrite({
-          deviceId: String(args.deviceId || ""),
-          founderId: "founder-primary",
-          path: String(args.path || ""),
-          content: typeof args.content === "string" ? args.content : "",
-        }) as { verified?: boolean; sha256?: string };
+        let result: { verified?: boolean; sha256?: string };
+        try {
+          result = await manager.executeApprovedWrite({
+            deviceId: String(args.deviceId || ""),
+            founderId: "founder-primary",
+            path: String(args.path || ""),
+            content: typeof args.content === "string" ? args.content : "",
+          }) as { verified?: boolean; sha256?: string };
+        } catch (error) {
+          if (error instanceof DeviceCommandUncertainError) throw new UncertainTaskExecutionError(error.message);
+          throw error;
+        }
         if (result?.verified !== true || typeof result.sha256 !== "string" || !/^[a-f0-9]{64}$/.test(result.sha256)) {
           throw new Error("Local device did not return valid write verification evidence.");
         }
