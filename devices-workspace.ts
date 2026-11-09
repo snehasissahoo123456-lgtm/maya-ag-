@@ -94,7 +94,7 @@ export class MayaDevicesWorkspace extends LitElement {
       <div class="space-y-4 p-4 md:p-6">
         <header class="flex flex-wrap items-start justify-between gap-3">
           <div><h2 class="text-xl font-semibold text-white">Local devices</h2>
-            <p class="muted mt-1 max-w-2xl">Pair your Windows PC with a one-time code. The current connector is read-only: system information, workspace listing and text-file reading only.</p>
+            <p class="muted mt-1 max-w-2xl">Pair your Windows PC with a one-time code. Direct device commands are read-only: system information, workspace listing and text-file reading. Existing-file replacement is available only through the Founder task queue after exact approval.</p>
           </div>
           <button class="btn" @click=${() => this.refresh()}>Refresh</button>
         </header>
@@ -135,7 +135,7 @@ export class MayaDevicesWorkspace extends LitElement {
           `)}
         </section>
         ${this.commandResult ? html`<section class="panel"><div class="muted mb-2 uppercase tracking-wide">Command result</div><pre>${this.commandResult}</pre></section>` : ""}
-        <p class="muted text-amber-200/80">Safety boundary: no shell, file writes/deletes, browser session access, keystrokes, screenshots, payments or arbitrary application control are enabled.</p>
+        <p class="muted text-amber-200/80">Safety boundary: direct device commands remain read-only. Approved existing-file replacement is routed through the Founder task queue; no shell, delete, browser session access, keystrokes, screenshots, payments or arbitrary application control is enabled.</p>
       </div>
     `;
   }
