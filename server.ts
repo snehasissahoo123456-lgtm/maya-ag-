@@ -362,18 +362,19 @@ const taskOrchestrator = new TaskOrchestrator(
       if (capability === "device.workspace.list_directory") {
         const manager = activeDeviceBridgeManager;
         if (!manager) throw new Error("Local device bridge is not available.");
-        const entries = await manager.executeCommand({
+        const result = await manager.executeCommand({
           deviceId: String(args.deviceId || ""),
           founderId: "founder-primary",
-          command: "workspace.list",
+          command: "workspace.list_directory",
           args: { path: String(args.path || ".") },
-        }) as unknown;
-        if (!Array.isArray(entries) || entries.length > 100 || entries.some(entry =>
-          !entry || typeof entry.name !== "string" || entry.name.length > 255 ||
-          !["file", "directory"].includes(entry.type))) {
+        }) as { path?: unknown; entries?: unknown[]; count?: unknown; truncated?: unknown };
+        if (result?.path !== String(args.path || ".") || !Array.isArray(result.entries) ||
+            result.entries.length > 100 || result.count !== result.entries.length ||
+            typeof result.truncated !== "boolean" || result.entries.some(entry =>
+              !entry || typeof entry.name !== "string" || entry.name.length > 255 ||
+              !["file", "directory"].includes(entry.type))) {
           throw new Error("Local device returned an invalid directory listing.");
         }
-        const result = { path: String(args.path || "."), entries, count: entries.length, truncated: entries.length >= 100 };
         const digest = createHash("sha256").update(JSON.stringify(result), "utf8").digest("hex");
         return {
           result,
