@@ -13,7 +13,7 @@ if (-not (Test-Path $Credentials) -and -not $env:MAYA_PAIRING_CODE) {
   $env:MAYA_PAIRING_CODE = Read-Host "One-time pairing code from Maya > Devices"
 }
 
-Write-Host "Starting Maya read-only local device bridge."
+Write-Host "Starting Maya local device bridge."
 Write-Host "Workspace root: $env:MAYA_WORKSPACE_ROOT"
-Write-Host "No shell, file-write, browser, or remote-control commands are enabled."
+Write-Host "Direct commands are read-only. Existing-file replacement is available only through a separate exact-Founder-approved task."
 node --import tsx local-bridge.ts
