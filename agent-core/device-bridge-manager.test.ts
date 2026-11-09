@@ -39,6 +39,11 @@ test("device bridge pairs, authenticates commands to one Founder and rejects non
     await assert.rejects(() => manager.executeCommand({ deviceId: paired.device.id, founderId: "founder-a", command: "workspace.write_file", args: { path: "notes.txt", content: "bypass" } }), /read-only allowlist/i);
     assert.equal((await manager.list("founder-a"))[0].online, true);
     assert.equal(await manager.revoke(paired.device.id, "founder-a"), true);
+    assert.equal(manager.isOnline(paired.device.id, "founder-a"), false);
+    await assert.rejects(() => manager.executeCommand({ deviceId: paired.device.id, founderId: "founder-a", command: "system.info" }), /revoked/i);
+    await assert.rejects(() => manager.executeApprovedWrite({
+      deviceId: paired.device.id, founderId: "founder-a", path: "notes.txt", content: "must not write after revoke",
+    }), /revoked/i);
   } finally { fs.rmSync(directory, { recursive: true, force: true }); }
 });
 
