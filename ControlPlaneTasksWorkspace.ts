@@ -100,6 +100,7 @@ export class MayaControlPlaneTasksWorkspace extends LitElement {
     this.busy = true;
     this.message = "";
     this.lastResult = "";
+    let confirmation = "";
     try {
       const body: Record<string, unknown> = {
         instruction: this.instruction.trim(),
@@ -116,15 +117,17 @@ export class MayaControlPlaneTasksWorkspace extends LitElement {
         const approvalResponse = await this.request(`/api/control-plane/tasks/${encodeURIComponent(taskId)}/request-approval`, { method: "POST" });
         const approvalData = await approvalResponse.json();
         if (!approvalResponse.ok) throw new Error(approvalData.error || "Task was created, but approval request could not be opened.");
-        this.message = "Write task created. Review the exact path and replacement content, then approve or reject it below.";
+        confirmation = "Write task created. Review the exact path and replacement content, then approve or reject it below.";
       } else {
-        this.message = "Read task created. It will run automatically only if the task worker is enabled; otherwise you can execute it manually.";
+        confirmation = "Read task created. It will run automatically only if the task worker is enabled; otherwise you can execute it manually.";
       }
       this.instruction = "";
       await this.refresh();
+      this.message = confirmation;
     } catch (error) {
-      this.message = error instanceof Error ? error.message : "Task creation failed.";
+      const failure = error instanceof Error ? error.message : "Task creation failed.";
       await this.refresh();
+      this.message = failure;
     } finally { this.busy = false; }
   }
 
@@ -143,12 +146,15 @@ export class MayaControlPlaneTasksWorkspace extends LitElement {
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || "Approval decision failed.");
-      this.message = approved
+      const confirmation = approved
         ? "Approved for this exact task and payload. The worker will execute it if enabled."
         : "Rejected. This task is cancelled and cannot execute.";
       await this.refresh();
+      this.message = confirmation;
     } catch (error) {
-      this.message = error instanceof Error ? error.message : "Approval decision failed.";
+      const failure = error instanceof Error ? error.message : "Approval decision failed.";
+      await this.refresh();
+      this.message = failure;
     } finally { this.busyId = ""; }
   }
 
@@ -158,10 +164,12 @@ export class MayaControlPlaneTasksWorkspace extends LitElement {
       const response = await this.request(`/api/control-plane/tasks/${encodeURIComponent(task.task.id)}/request-approval`, { method: "POST" });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || "Could not request approval.");
-      this.message = "Approval request created.";
       await this.refresh();
+      this.message = "Approval request created.";
     } catch (error) {
-      this.message = error instanceof Error ? error.message : "Approval request failed.";
+      const failure = error instanceof Error ? error.message : "Approval request failed.";
+      await this.refresh();
+      this.message = failure;
     } finally { this.busyId = ""; }
   }
 
@@ -179,8 +187,8 @@ export class MayaControlPlaneTasksWorkspace extends LitElement {
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || "Task execution failed.");
       this.lastResult = JSON.stringify({ task: data.task, result: data.result }, null, 2);
-      this.message = "Task executed and the server returned its verification evidence.";
       await this.refresh();
+      this.message = "Task executed and the server returned its verification evidence.";
     } catch (error) {
       this.message = error instanceof Error ? error.message : "Task execution failed.";
       await this.refresh();
