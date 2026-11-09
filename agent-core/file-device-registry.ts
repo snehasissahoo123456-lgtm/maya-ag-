@@ -6,7 +6,7 @@ import type { DeviceMetadata, DeviceRegistry, PairedDevice, RegisteredDevice } f
 interface StoredDevice extends RegisteredDevice { tokenHash: string; }
 interface Pairing { codeHash: string; founderId: string; createdAt: string; expiresAt: string; consumedAt?: string; }
 interface RegistryFile { version: 1; devices: StoredDevice[]; pairings: Pairing[]; }
-const CAPABILITIES = ["system.info", "workspace.list", "workspace.read_file"];
+const CAPABILITIES = ["system.info", "workspace.list", "workspace.read_file", "workspace.write_file"];
 
 function hash(value: string): string { return createHash("sha256").update(value).digest("hex"); }
 function safeEqualHex(a: string, b: string): boolean {
