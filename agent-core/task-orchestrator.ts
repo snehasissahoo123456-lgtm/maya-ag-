@@ -25,6 +25,7 @@ export class UncertainTaskExecutionError extends Error {
 export class TaskOrchestrator {
   private readonly executing = new Set<string>();
   constructor(private readonly repository: TaskRepository, private readonly capabilities: CapabilityRegistry, private readonly approvals: ApprovalRepository, private readonly runner: CapabilityRunner, private readonly audit?: AuditRepository) {}
+  isExecuting(taskId: string): boolean { return this.executing.has(taskId); }
   async enqueue(input: { id: string; founderId: string; instruction: string; capability: string; args: Record<string, unknown>; actor: AgentIdentity; riskLevel?: RiskLevel }): Promise<TaskEnvelope> {
     if (input.actor.founderId !== input.founderId) throw new Error("Task Founder does not match authenticated actor.");
     const { definition, args } = this.capabilities.validate(input.capability, input.actor, input.args);
