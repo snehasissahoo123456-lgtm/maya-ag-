@@ -26,7 +26,7 @@ Exit gate: partial evidence exists for the task API and its read-only capability
 
 ## Phase 2 — Cloud control plane
 - [x] Add an initial server-only Supabase conversation table migration, owner-immutability trigger, deny-by-default client RLS posture, and adapter request/error tests.
-- [x] Wire chat-message and chat-stream routes to a Founder-scoped conversation repository; persist and restore Gemini SDK history, including function-call parts. File storage is the default; live Supabase provisioning is not verified.
+- [x] Wire chat-message and chat-stream routes to a Founder-scoped conversation repository; persist and restore Gemini SDK history, including function-call parts. Add authenticated list/read/delete APIs. File storage is the default; live Supabase provisioning is not verified.
 - Device registry and device-bound credentials.
 - Durable task queue, planner, scheduler, policy engine, event stream, and observability.
 - AI provider adapter with server-side secrets and configurable quotas.
