@@ -76,8 +76,8 @@ export async function executeLocalBridgeCommand(rootInput: string, command: stri
     const content = args.content;
     if (typeof content !== "string" || Buffer.byteLength(content, "utf8") > 100_000) throw new Error("Replacement content must be text no larger than 100 KB.");
     const temp = path.join(path.dirname(file), `.maya-write.${process.pid}.${randomUUID()}.tmp`);
-    fs.writeFileSync(temp, content, { encoding: "utf8", mode: stat.mode & 0o777, flag: "wx" });
     try {
+      fs.writeFileSync(temp, content, { encoding: "utf8", mode: stat.mode & 0o777, flag: "wx" });
       fs.renameSync(temp, file);
     } catch (error) {
       try { fs.rmSync(temp, { force: true }); } catch {}
