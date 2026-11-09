@@ -31,7 +31,7 @@ export class MayaControlPlaneTasksWorkspace extends LitElement {
   @state() private worker: any = null;
   @state() private instruction = "";
   @state() private filePath = "README.md";
-  @state() private capability: "workspace.read_file" | "device.workspace.read_file" | "workspace.write_file" | "device.workspace.write_file" | "device.workspace.create_file" | "device.workspace.create_directory" = "workspace.read_file";
+  @state() private capability: "workspace.read_file" | "device.workspace.read_file" | "device.workspace.git_status" | "workspace.write_file" | "device.workspace.write_file" | "device.workspace.create_file" | "device.workspace.create_directory" = "workspace.read_file";
   @state() private content = "";
   @state() private busy = false;
   @state() private busyId = "";
@@ -92,7 +92,7 @@ export class MayaControlPlaneTasksWorkspace extends LitElement {
 
   private async createTask() {
     if (this.busy || !this.instruction.trim() || !this.filePath.trim()) return;
-    const isRead = ["workspace.read_file", "device.workspace.read_file"].includes(this.capability);
+    const isRead = ["workspace.read_file", "device.workspace.read_file", "device.workspace.git_status"].includes(this.capability);
     const isMutation = !isRead;
     const requiresContent = requiresFileContent(this.capability);
     if (requiresContent && !this.content.length) {
@@ -236,9 +236,15 @@ export class MayaControlPlaneTasksWorkspace extends LitElement {
           </div>
           <div class="grid gap-3 md:grid-cols-2">
             <label class="space-y-1"><span class="muted">Task instruction</span><input .value=${this.instruction} @input=${(e: Event) => this.instruction = (e.target as HTMLInputElement).value} maxlength="1000" placeholder="Read the project overview"></label>
-            <label class="space-y-1"><span class="muted">Capability</span><select .value=${this.capability} @change=${(e: Event) => this.capability = (e.target as HTMLSelectElement).value as any}>
+            <label class="space-y-1"><span class="muted">Capability</span><select .value=${this.capability} @change=${(e: Event) => {
+              const next = (e.target as HTMLSelectElement).value as any;
+              this.capability = next;
+              if (next === "device.workspace.git_status" && this.filePath === "README.md") this.filePath = ".";
+              if (next !== "device.workspace.git_status" && this.filePath === ".") this.filePath = "README.md";
+            }}>
               <option value="workspace.read_file">Read a workspace file</option>
               <option value="device.workspace.read_file">Read a paired-PC text file</option>
+              <option value="device.workspace.git_status">Inspect paired-PC Git status (read-only)</option>
               <option value="workspace.write_file">Replace an existing server text file (approval required)</option>
               <option value="device.workspace.write_file">Replace an existing paired-PC text file (approval required)</option>
               <option value="device.workspace.create_file">Create a new paired-PC text file (approval required)</option>
@@ -250,13 +256,13 @@ export class MayaControlPlaneTasksWorkspace extends LitElement {
                 ${this.devices.map(device => html`<option value=${device.id} ?disabled=${!device.online || Boolean(device.revokedAt)}>${device.name} · ${device.revokedAt ? "revoked" : device.online ? "online" : "offline"}</option>`)}
               </select></label>
             ` : ""}
-            <label class="space-y-1 md:col-span-2"><span class="muted">${this.capability.startsWith("device.workspace.") ? "Device workspace-relative path" : "Workspace-relative path"}</span><input .value=${this.filePath} @input=${(e: Event) => this.filePath = (e.target as HTMLInputElement).value} maxlength="1024" placeholder="docs/status.md"></label>
+            <label class="space-y-1 md:col-span-2"><span class="muted">${this.capability === "device.workspace.git_status" ? "Git workspace directory" : this.capability.startsWith("device.workspace.") ? "Device workspace-relative path" : "Workspace-relative path"}</span><input .value=${this.filePath} @input=${(e: Event) => this.filePath = (e.target as HTMLInputElement).value} maxlength="1024" placeholder=${this.capability === "device.workspace.git_status" ? "." : "docs/status.md"}></label>
             ${requiresFileContent(this.capability) ? html`
               <label class="space-y-1 md:col-span-2"><span class="muted">Exact file content (maximum 100 KB)</span><textarea .value=${this.content} @input=${(e: Event) => this.content = (e.target as HTMLTextAreaElement).value} maxlength="100000" placeholder="Paste the complete file content…"></textarea></label>
             ` : ""}
           </div>
           <div class="flex flex-wrap items-center justify-between gap-3">
-            <p class="muted">${["workspace.read_file", "device.workspace.read_file"].includes(this.capability) ? "Read tasks do not modify files; local reads require an online paired PC." : "Creating this task opens an approval request; it does not perform the action."}</p>
+            <p class="muted">${["workspace.read_file", "device.workspace.read_file", "device.workspace.git_status"].includes(this.capability) ? "Read tasks do not modify files; local reads require an online paired PC." : "Creating this task opens an approval request; it does not perform the action."}</p>
             <button class="btn primary" ?disabled=${this.busy || !this.instruction.trim() || !this.filePath.trim() || (this.capability.startsWith("device.workspace.") && !this.devices.some(device => device.id === this.deviceId && device.online))} @click=${() => this.createTask()}>${this.busy ? "Creating…" : "Create task"}</button>
           </div>
         </section>
