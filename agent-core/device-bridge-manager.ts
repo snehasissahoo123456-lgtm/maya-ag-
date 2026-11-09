@@ -220,6 +220,36 @@ export class DeviceBridgeManager {
     });
   }
 
+  /**
+   * Trusted server-side path used only after the task orchestrator consumes
+   * an exact Founder approval for moving one local workspace file.
+   */
+  async executeApprovedMoveFile(input: { deviceId: string; founderId: string; fromPath: string; toPath: string }): Promise<unknown> {
+    if (!input.deviceId || input.deviceId.length > 128 || !input.founderId) throw new Error("A valid Founder-owned device is required.");
+    if (typeof input.fromPath !== "string" || !input.fromPath.trim() || input.fromPath.length > 1024 ||
+        typeof input.toPath !== "string" || !input.toPath.trim() || input.toPath.length > 1024) {
+      throw new Error("Valid source and destination workspace-relative paths are required.");
+    }
+    const current = this.connected.get(input.deviceId);
+    if (!current || current.device.founderId !== input.founderId || this.revokedDeviceIds.has(input.deviceId)) throw new Error("Device is offline, revoked or not registered for this Founder.");
+    const requestId = randomUUID();
+    const args = { fromPath: input.fromPath, toPath: input.toPath };
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.pending.delete(requestId);
+        reject(new DeviceCommandUncertainError("Local file move timed out; inspect both source and destination paths before retrying."));
+      }, this.commandTimeoutMs);
+      this.pending.set(requestId, { deviceId: input.deviceId, resolve, reject, timer, sideEffecting: true });
+      try {
+        current.socket.send(JSON.stringify({ type: "command", requestId, command: "workspace.move_file", args }));
+      } catch {
+        clearTimeout(timer);
+        this.pending.delete(requestId);
+        reject(new DeviceCommandUncertainError("The local move command could not be confirmed as sent; inspect both paths before retrying."));
+      }
+    });
+  }
+
   async executeCommand(input: { deviceId: string; founderId: string; command: string; args?: Record<string, unknown> }): Promise<unknown> {
     if (!ALLOWED_COMMANDS.has(input.command)) throw new Error("Device command is not in the read-only allowlist.");
     const args = input.args || {};
