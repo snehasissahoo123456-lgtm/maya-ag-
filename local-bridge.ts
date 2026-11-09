@@ -209,7 +209,7 @@ export async function executeLocalBridgeCommand(rootInput: string, command: stri
         const found = fs.readdirSync(current, { withFileTypes: true });
         if (found.length > 500) truncated = true;
         entries = found.slice(0, 500);
-      } catch { return; }
+      } catch { truncated = true; return; }
       for (const entry of entries) {
         if (stopped) return;
         const candidate = path.join(current, entry.name);
@@ -228,7 +228,8 @@ export async function executeLocalBridgeCommand(rootInput: string, command: stri
         filesScanned++;
         try {
           const stat = fs.lstatSync(candidate);
-          if (!stat.isFile() || stat.isSymbolicLink() || stat.size > 256_000) continue;
+          if (!stat.isFile() || stat.isSymbolicLink()) continue;
+          if (stat.size > 256_000) { truncated = true; continue; }
           const bytes = fs.readFileSync(candidate);
           if (bytes.includes(0)) continue;
           const lines = bytes.toString("utf8").split(/\r?\n/);
@@ -248,7 +249,7 @@ export async function executeLocalBridgeCommand(rootInput: string, command: stri
               }
             }
           }
-        } catch { /* Skip files that disappear or become unreadable during the bounded scan. */ }
+        } catch { truncated = true; /* Skip files that disappear or become unreadable during the bounded scan. */ }
       }
     };
     walk(directory, 0);
