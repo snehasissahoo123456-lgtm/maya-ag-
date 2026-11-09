@@ -222,9 +222,21 @@ taskCapabilityRegistry.register({
   requiresApproval: true,
   verification: "Ask the enrolled local bridge to create the new file exclusively and return a verified SHA-256 digest.",
 });
-// Enabled task capabilities are safe server-workspace reads and exact-Founder-approved
-// replacement of existing server or paired-device files. Shell, deploy, payment and
-// arbitrary device-control capabilities remain blocked.
+taskCapabilityRegistry.register({
+  name: "device.workspace.create_directory",
+  description: "Create one new directory beneath an existing parent in an enrolled local device workspace after exact Founder approval.",
+  risk: "high",
+  allowedRoles: ["founder", "worker"],
+  requiredScopes: ["device:write"],
+  arguments: {
+    deviceId: { type: "string", required: true, maxLength: 128 },
+    path: { type: "string", required: true, maxLength: 1024 },
+  },
+  timeoutMs: 30_000,
+  requiresApproval: true,
+  verification: "Ask the enrolled local bridge to create one directory beneath an existing parent and verify the resulting directory.",
+});
+// Enabled task capabilities are safe workspace reads and exact-Founder-approved file and directory operations on enrolled PCs. Shell, deploy, payment and arbitrary device-control capabilities remain blocked.
 const approvalRepository = createApprovalRepository();
 const taskOrchestrator = new TaskOrchestrator(
   taskRepository,
@@ -276,6 +288,33 @@ const taskOrchestrator = new TaskOrchestrator(
             kind: "device-workspace-file-create-sha256",
             description: "The enrolled local device exclusively created the exact Founder-approved file and verified the resulting bytes.",
             reference: "sha256:" + result.sha256,
+            observedAt: new Date().toISOString(),
+          },
+        };
+      }
+      if (capability === "device.workspace.create_directory") {
+        const manager = activeDeviceBridgeManager;
+        if (!manager) throw new Error("Local device bridge is not available.");
+        let result: { verified?: boolean; created?: boolean; path?: string };
+        try {
+          result = await manager.executeApprovedCreateDirectory({
+            deviceId: String(args.deviceId || ""),
+            founderId: "founder-primary",
+            path: String(args.path || ""),
+          }) as { verified?: boolean; created?: boolean; path?: string };
+        } catch (error) {
+          if (error instanceof DeviceCommandUncertainError) throw new UncertainTaskExecutionError(error.message);
+          throw error;
+        }
+        if (result?.verified !== true || result.created !== true || typeof result.path !== "string") {
+          throw new UncertainTaskExecutionError("Local device did not return valid directory-creation evidence; inspect the target path before retrying.");
+        }
+        return {
+          result,
+          evidence: {
+            kind: "device-workspace-directory-create",
+            description: "The enrolled local device created and verified the exact Founder-approved directory.",
+            reference: "path:" + result.path,
             observedAt: new Date().toISOString(),
           },
         };
