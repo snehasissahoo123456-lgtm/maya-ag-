@@ -141,7 +141,7 @@ export class MayaPlanWorkspace extends LitElement {
                     ${state.error ? html`<div class='text-[10px] text-rose-300 mt-1'>${state.error}</div>` : ''}
                     ${state.evidence?.sha256 ? html`<div class='text-[10px] text-emerald-400 mt-1'>Verified result digest: ${state.evidence.sha256.slice(0, 16)}…</div>` : ''}
                   </div>
-                  ${step.requiresFounderApproval && state.status !== 'completed' && !approved ? html`<button class='shrink-0 px-3 py-1.5 rounded-lg border border-amber-500/40 text-amber-300 text-[11px] hover:bg-amber-500/10' @click=${() => this.approveStep(plan.id, step.id)}>Approve exact step</button>` : ''}
+                  ${step.requiresFounderApproval && state.status === 'awaiting_approval' && !approved ? html`<button class='shrink-0 px-3 py-1.5 rounded-lg border border-amber-500/40 text-amber-300 text-[11px] hover:bg-amber-500/10' @click=${() => this.approveStep(plan.id, step.id)}>Approve exact step</button>` : ''}
                 </div>`;
               })}
             </div>
