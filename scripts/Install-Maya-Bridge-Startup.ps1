@@ -43,7 +43,18 @@ $Config = [ordered]@{
 }
 $Config | ConvertTo-Json -Depth 4 | Set-Content -Path $ConfigFile -Encoding UTF8
 
-$PowerShellExe = Join-Path $PSHOME "powershell.exe"
+$PowerShellCommand = Get-Command powershell.exe -ErrorAction SilentlyContinue
+if (-not $PowerShellCommand) { $PowerShellCommand = Get-Command pwsh.exe -ErrorAction Stop }
+$PowerShellExe = $PowerShellCommand.Source
+if (-not $PowerShellExe -or -not (Test-Path $PowerShellExe -PathType Leaf)) {
+  throw "A supported Windows PowerShell executable could not be resolved."
+}
+$NodeCommand = Get-Command node.exe -ErrorAction SilentlyContinue
+if (-not $NodeCommand) { $NodeCommand = Get-Command node -ErrorAction SilentlyContinue }
+if (-not $NodeCommand) { throw "Node.js is required. Install Node.js and verify that node is on PATH before installing bridge startup." }
+if (-not (Test-Path (Join-Path $RepoRoot "node_modules\\tsx\\package.json"))) {
+  throw "Maya dependencies are missing. Run bun install (or npm install) in the repository before installing bridge startup."
+}
 $Arguments = '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' + $StartScript + '" -NonInteractive'
 $Action = New-ScheduledTaskAction -Execute $PowerShellExe -Argument $Arguments
 $CurrentUser = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
