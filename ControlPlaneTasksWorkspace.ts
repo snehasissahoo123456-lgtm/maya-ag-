@@ -190,8 +190,9 @@ export class MayaControlPlaneTasksWorkspace extends LitElement {
       await this.refresh();
       this.message = "Task executed and the server returned its verification evidence.";
     } catch (error) {
-      this.message = error instanceof Error ? error.message : "Task execution failed.";
+      const failure = error instanceof Error ? error.message : "Task execution failed.";
       await this.refresh();
+      this.message = failure;
     } finally { this.busyId = ""; }
   }
 
