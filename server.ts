@@ -821,45 +821,60 @@ async function startServer() {
     if (!founderId) return res.status(401).json({ success: false, error: "Verified Founder session required." });
     const requestedLimit = Number.parseInt(String(req.query.limit || "50"), 10);
     const limit = Number.isFinite(requestedLimit) ? Math.max(1, Math.min(100, requestedLimit)) : 50;
-    const conversations = await conversationRepository.list(founderId);
-    return res.json({
-      success: true,
-      conversations: conversations.slice(0, limit).map(item => ({
-        id: item.id,
-        title: item.title,
-        createdAt: item.createdAt,
-        updatedAt: item.updatedAt,
-        messageCount: item.messages.length,
-      })),
-    });
+    try {
+      const conversations = await conversationRepository.list(founderId);
+      return res.json({
+        success: true,
+        conversations: conversations.slice(0, limit).map(item => ({
+          id: item.id,
+          title: item.title,
+          createdAt: item.createdAt,
+          updatedAt: item.updatedAt,
+          messageCount: item.messages.length,
+        })),
+      });
+    } catch (error) {
+      console.error("[Maya] Conversation list failed:", error);
+      return res.status(503).json({ success: false, error: "Conversation storage is unavailable." });
+    }
   });
 
   app.get("/api/conversations/:id", async (req, res): Promise<any> => {
     const founderId = (req as any).authSession?.user?.id;
     if (!founderId) return res.status(401).json({ success: false, error: "Verified Founder session required." });
     if (!req.params.id || req.params.id.length > 128) return res.status(400).json({ success: false, error: "Invalid conversation id." });
-    const conversation = await conversationRepository.get(req.params.id, founderId);
-    if (!conversation) return res.status(404).json({ success: false, error: "Conversation not found." });
-    return res.json({ success: true, conversation });
+    try {
+      const conversation = await conversationRepository.get(req.params.id, founderId);
+      if (!conversation) return res.status(404).json({ success: false, error: "Conversation not found." });
+      return res.json({ success: true, conversation });
+    } catch (error) {
+      console.error("[Maya] Conversation read failed:", error);
+      return res.status(503).json({ success: false, error: "Conversation storage is unavailable." });
+    }
   });
 
   app.delete("/api/conversations/:id", async (req, res): Promise<any> => {
     const founderId = (req as any).authSession?.user?.id;
     if (!founderId) return res.status(401).json({ success: false, error: "Verified Founder session required." });
     if (!req.params.id || req.params.id.length > 128) return res.status(400).json({ success: false, error: "Invalid conversation id." });
-    const deleted = await conversationRepository.delete(req.params.id, founderId);
-    if (!deleted) return res.status(404).json({ success: false, error: "Conversation not found." });
-    chats.delete(`${founderId}:${req.params.id}`);
-    recordAudit({
-      id: "conversation-delete-" + randomTaskId(),
-      toolName: "conversation_delete",
-      params: { conversationId: req.params.id },
-      status: "success",
-      result: { deleted: true },
-      timestamp: new Date().toISOString(),
-      durationMs: 0,
-    });
-    return res.json({ success: true, deleted: req.params.id });
+    try {
+      const deleted = await conversationRepository.delete(req.params.id, founderId);
+      if (!deleted) return res.status(404).json({ success: false, error: "Conversation not found." });
+      chats.delete(`${founderId}:${req.params.id}`);
+      recordAudit({
+        id: "conversation-delete-" + randomTaskId(),
+        toolName: "conversation_delete",
+        params: { conversationId: req.params.id },
+        status: "success",
+        result: { deleted: true },
+        timestamp: new Date().toISOString(),
+        durationMs: 0,
+      });
+      return res.json({ success: true, deleted: req.params.id });
+    } catch (error) {
+      console.error("[Maya] Conversation deletion failed:", error);
+      return res.status(503).json({ success: false, error: "Conversation storage is unavailable." });
+    }
   });
 
   // Action Engine Memory Management
