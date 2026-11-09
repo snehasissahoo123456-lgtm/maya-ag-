@@ -108,14 +108,16 @@ test("local bridge returns bounded read-only Git status without diff contents", 
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "maya-bridge-git-status-"));
   try {
     fs.writeFileSync(path.join(root, "notes.md"), "tracked note");
+    fs.writeFileSync(path.join(root, ".env"), "SECRET=value");
     const initialized = spawnSync("git", ["init", "-q"], { cwd: root, encoding: "utf8", windowsHide: true });
     assert.equal(initialized.status, 0, initialized.stderr);
-    const staged = spawnSync("git", ["add", "notes.md"], { cwd: root, encoding: "utf8", windowsHide: true });
+    const staged = spawnSync("git", ["add", "notes.md", ".env"], { cwd: root, encoding: "utf8", windowsHide: true });
     assert.equal(staged.status, 0, staged.stderr);
     const result = await executeLocalBridgeCommand(root, "workspace.git_status", { path: "." }) as any;
     assert.equal(result.repository, ".");
     assert.match(result.branch, /No commits yet|main|master/);
     assert.ok(result.changes.some((change: any) => change.path === "notes.md"));
+    assert.equal(result.changes.some((change: any) => change.path === ".env"), false);
     assert.equal(typeof result.changeCount, "number");
     assert.equal(result.truncated, false);
     assert.equal("diff" in result, false);
