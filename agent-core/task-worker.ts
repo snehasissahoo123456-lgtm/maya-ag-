@@ -65,6 +65,26 @@ export class TaskWorker {
     return { ...this.status, enabled: !this.stopped, running: this.cycleActive };
   }
 
+  async recoverInterrupted(): Promise<number> {
+    if (this.repository.claimNext && this.repository.recoverExpiredClaims) {
+      return this.repository.recoverExpiredClaims(this.founderId);
+    }
+    if (this.startupRecoveryDone) return 0;
+    const envelopes = await this.repository.list(this.founderId);
+    let recovered = 0;
+    for (const envelope of envelopes) {
+      if (envelope.task.founderId !== this.founderId || !["running", "verifying"].includes(envelope.task.status)) continue;
+      if (this.orchestrator.isExecuting(envelope.task.id)) continue;
+      envelope.task = transitionTask(envelope.task, "requires_recovery", {
+        error: "Task was interrupted by a previous server process. Verify any side effects before creating a replacement task.",
+      });
+      await this.repository.put(envelope);
+      recovered++;
+    }
+    this.startupRecoveryDone = true;
+    return recovered;
+  }
+
   start(): void {
     if (!this.stopped) return;
     this.stopped = false;
@@ -154,20 +174,10 @@ export class TaskWorker {
           }
         }
       } else {
+        const recovered = await this.recoverInterrupted();
+        result.skipped += recovered;
         const envelopes = await this.repository.list(this.founderId);
         result.scanned = envelopes.length;
-        if (!this.startupRecoveryDone) {
-          for (const envelope of envelopes) {
-            if (envelope.task.founderId !== this.founderId || !["running", "verifying"].includes(envelope.task.status)) continue;
-            if (this.orchestrator.isExecuting(envelope.task.id)) continue;
-            envelope.task = transitionTask(envelope.task, "requires_recovery", {
-              error: "Task was interrupted by a previous worker process. Verify any side effects before creating a replacement task.",
-            });
-            await this.repository.put(envelope);
-            result.skipped++;
-          }
-          this.startupRecoveryDone = true;
-        }
         for (const envelope of envelopes) {
           if (envelope.task.founderId !== this.founderId || envelope.task.status !== "queued") continue;
           if (this.blockedTaskIds.has(envelope.task.id)) { result.skipped++; continue; }
