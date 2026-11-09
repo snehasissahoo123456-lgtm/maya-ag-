@@ -193,6 +193,21 @@ taskCapabilityRegistry.register({
   verification: "Read the requested local device file and record its SHA-256 digest as execution evidence.",
 });
 taskCapabilityRegistry.register({
+  name: "device.workspace.search_files",
+  description: "Search non-sensitive text files in an enrolled local workspace using a bounded literal query.",
+  risk: "low",
+  allowedRoles: ["founder", "worker"],
+  requiredScopes: ["device:read"],
+  arguments: {
+    deviceId: { type: "string", required: true, maxLength: 128 },
+    path: { type: "string", required: false, maxLength: 1024 },
+    query: { type: "string", required: true, maxLength: 200 },
+  },
+  timeoutMs: 10_000,
+  requiresApproval: false,
+  verification: "Search a bounded number of non-sensitive text files and record a SHA-256 digest of the result summary.",
+});
+taskCapabilityRegistry.register({
   name: "device.workspace.git_status",
   description: "Inspect the branch and tracked-file change summary of an enrolled local Git workspace without exposing diffs.",
   risk: "low",
@@ -325,6 +340,32 @@ const taskOrchestrator = new TaskOrchestrator(
           evidence: {
             kind: "device-workspace-file-sha256",
             description: "Read the requested non-sensitive local device file and calculated its SHA-256 digest.",
+            reference: "sha256:" + digest,
+            observedAt: new Date().toISOString(),
+          },
+        };
+      }
+      if (capability === "device.workspace.search_files") {
+        const manager = activeDeviceBridgeManager;
+        if (!manager) throw new Error("Local device bridge is not available.");
+        const result = await manager.executeCommand({
+          deviceId: String(args.deviceId || ""),
+          founderId: "founder-primary",
+          command: "workspace.search_files",
+          args: { path: String(args.path || "."), query: String(args.query || "") },
+        }) as { path?: unknown; query?: unknown; matches?: unknown[]; filesScanned?: unknown; directoriesScanned?: unknown; truncated?: unknown };
+        if (typeof result?.path !== "string" || result.query !== String(args.query || "") ||
+            !Array.isArray(result.matches) || result.matches.length > 100 ||
+            typeof result.filesScanned !== "number" || typeof result.directoriesScanned !== "number" ||
+            typeof result.truncated !== "boolean") {
+          throw new Error("Local device returned an invalid workspace search result.");
+        }
+        const digest = createHash("sha256").update(JSON.stringify(result), "utf8").digest("hex");
+        return {
+          result,
+          evidence: {
+            kind: "device-workspace-search-sha256",
+            description: "Searched a bounded set of non-sensitive local workspace text files and hashed the result summary.",
             reference: "sha256:" + digest,
             observedAt: new Date().toISOString(),
           },
@@ -1443,15 +1484,18 @@ async function startServer() {
     const instruction = typeof req.body?.instruction === "string" ? req.body.instruction.trim() : "";
     const capability = typeof req.body?.capability === "string" ? req.body.capability : "workspace.read_file";
     const isMoveFile = capability === "device.workspace.move_file";
+    const isSearchFiles = capability === "device.workspace.search_files";
     const filePath = isMoveFile
       ? (typeof req.body?.fromPath === "string" ? req.body.fromPath : "")
-      : (typeof req.body?.path === "string" ? req.body.path : "");
+      : (typeof req.body?.path === "string" ? req.body.path : isSearchFiles ? "." : "");
     const destinationPath = typeof req.body?.toPath === "string" ? req.body.toPath : "";
+    const searchQuery = typeof req.body?.query === "string" ? req.body.query : "";
     const deviceId = typeof req.body?.deviceId === "string" ? req.body.deviceId : "";
     const content = req.body?.content;
     if (!instruction || instruction.length > 1000) return res.status(400).json({ success: false, error: "Instruction must contain 1–1000 characters." });
-    if (!["workspace.read_file", "device.workspace.read_file", "device.workspace.git_status", "workspace.write_file", "device.workspace.write_file", "device.workspace.create_file", "device.workspace.create_directory", "device.workspace.move_file"].includes(capability)) return res.status(400).json({ success: false, error: "Capability is not enabled for the task control plane." });
-    if (!filePath || filePath.length > 1024) return res.status(400).json({ success: false, error: "A workspace-relative source path of 1–1024 characters is required." });
+    if (!["workspace.read_file", "device.workspace.read_file", "device.workspace.git_status", "device.workspace.search_files", "workspace.write_file", "device.workspace.write_file", "device.workspace.create_file", "device.workspace.create_directory", "device.workspace.move_file"].includes(capability)) return res.status(400).json({ success: false, error: "Capability is not enabled for the task control plane." });
+    if (!filePath || filePath.length > 1024) return res.status(400).json({ success: false, error: "A workspace-relative path of 1–1024 characters is required." });
+    if (isSearchFiles && (!searchQuery.trim() || searchQuery.length > 200)) return res.status(400).json({ success: false, error: "Search query must contain 1–200 characters." });
     if (isMoveFile && (!destinationPath || destinationPath.length > 1024)) return res.status(400).json({ success: false, error: "A workspace-relative destination path of 1–1024 characters is required." });
     const requiresFileContent = ["workspace.write_file", "device.workspace.write_file", "device.workspace.create_file"].includes(capability);
     if (requiresFileContent && (typeof content !== "string" || Buffer.byteLength(content, "utf8") > 100_000)) return res.status(400).json({ success: false, error: "File content must be text no larger than 100 KB." });
@@ -1464,18 +1508,20 @@ async function startServer() {
       }
       const scopes = capability === "workspace.write_file"
         ? ["workspace:read", "workspace:write"]
-        : ["device.workspace.read_file", "device.workspace.git_status"].includes(capability) ? ["device:read"]
+        : ["device.workspace.read_file", "device.workspace.git_status", "device.workspace.search_files"].includes(capability) ? ["device:read"]
           : capability.startsWith("device.workspace.") ? ["device:write"] : ["workspace:read"];
       const actor = { id: founderId, founderId, role: "founder" as const, scopes };
       const args = isMoveFile
         ? { deviceId, fromPath: filePath, toPath: destinationPath }
-        : capability === "workspace.write_file"
-          ? { path: filePath, content }
-          : ["device.workspace.read_file", "device.workspace.git_status", "device.workspace.create_directory"].includes(capability)
-            ? { deviceId, path: filePath }
-            : capability.startsWith("device.workspace.")
-              ? { deviceId, path: filePath, content }
-              : { path: filePath };
+        : isSearchFiles
+          ? { deviceId, path: filePath, query: searchQuery }
+          : capability === "workspace.write_file"
+            ? { path: filePath, content }
+            : ["device.workspace.read_file", "device.workspace.git_status", "device.workspace.create_directory"].includes(capability)
+              ? { deviceId, path: filePath }
+              : capability.startsWith("device.workspace.")
+                ? { deviceId, path: filePath, content }
+                : { path: filePath };
       const envelope = await taskOrchestrator.enqueue({
         id: "task-" + randomTaskId(),
         founderId,
