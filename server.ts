@@ -367,7 +367,7 @@ const taskOrchestrator = new TaskOrchestrator(
           founderId: "founder-primary",
           command: "workspace.list_directory",
           args: { path: String(args.path || ".") },
-        }) as { path?: unknown; entries?: unknown[]; count?: unknown; truncated?: unknown };
+        }) as { path?: unknown; entries?: Array<{ name?: unknown; type?: unknown }>; count?: unknown; truncated?: unknown };
         if (result?.path !== String(args.path || ".") || !Array.isArray(result.entries) ||
             result.entries.length > 100 || result.count !== result.entries.length ||
             typeof result.truncated !== "boolean" || result.entries.some(entry =>
