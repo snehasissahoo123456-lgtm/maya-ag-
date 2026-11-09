@@ -374,3 +374,22 @@ test("worker leaves an approved local device write queued when this process has 
   assert.equal(executions, 0);
   assert.equal((await repository.get("worker-device-offline"))?.task.status, "queued");
 });
+
+
+test("startup recovery can run while the background worker remains disabled", async () => {
+  const { worker, repository } = setup();
+  const task = transitionTask(transitionTask(createTask({
+    id: "worker-startup-recovery-disabled", founderId: "founder-primary", instruction: "Replace a local file",
+  }), "planning"), "running");
+  await repository.put({
+    task,
+    capability: "device.workspace.write_file",
+    args: { deviceId: "device-123", path: "notes.md", content: "approved content" },
+    attempts: 1,
+    idempotencyKey: "worker-startup-recovery-disabled",
+  });
+  assert.equal(worker.getStatus().enabled, false);
+  assert.equal(await worker.recoverInterrupted(), 1);
+  assert.equal(worker.getStatus().enabled, false);
+  assert.equal((await repository.get("worker-startup-recovery-disabled"))?.task.status, "requires_recovery");
+});
