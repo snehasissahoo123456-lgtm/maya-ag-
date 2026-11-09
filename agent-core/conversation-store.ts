@@ -7,6 +7,7 @@ export interface ConversationMessage {
   role: "system" | "user" | "assistant";
   content: string;
   createdAt: string;
+  parts?: Array<Record<string, unknown>>;
 }
 export interface ConversationRecord {
   id: string;
@@ -79,6 +80,8 @@ export class ConversationStore implements ConversationStoreAdapter {
     for (const message of record.messages) {
       if (!message || typeof message.id !== "string" || !["system", "user", "assistant"].includes(message.role) ||
           typeof message.content !== "string" || message.content.length > 100_000 ||
+          (message.parts !== undefined && (!Array.isArray(message.parts) || message.parts.length > 100 ||
+            JSON.stringify(message.parts).length > 1_000_000)) ||
           !Number.isFinite(Date.parse(message.createdAt))) throw new Error("Conversation contains an invalid message.");
     }
   }
