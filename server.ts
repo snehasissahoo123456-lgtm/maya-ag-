@@ -102,17 +102,23 @@ for (const suite of currentTestSuites) {
     assertion.message = "Not executed in this server process. Run the real validation command to obtain evidence.";
   }
 }
-let currentAuditLogs: ToolExecutionRecord[] = [
-  {
-    id: "init-audit-1",
-    toolName: "system_info",
-    params: {},
-    status: "success",
-    result: { status: "Maya prototype server started; agent capabilities are not yet verified.", pid: process.pid },
-    timestamp: new Date().toISOString(),
-    durationMs: 12,
-  },
-];
+const auditLogStore = new FileAuditLogStore<ToolExecutionRecord>();
+let currentAuditLogs: ToolExecutionRecord[] = auditLogStore.list(500);
+
+function recordAudit(record: ToolExecutionRecord): void {
+  auditLogStore.append(record);
+  currentAuditLogs = auditLogStore.list(500);
+}
+
+recordAudit({
+  id: "server-start-" + Date.now().toString(36),
+  toolName: "system_info",
+  params: {},
+  status: "success",
+  result: { status: "Maya server started; agent capabilities remain limited to explicitly enabled adapters.", pid: process.pid },
+  timestamp: new Date().toISOString(),
+  durationMs: 0,
+});
 
 import { WatcherService } from "./watcherService.ts";
 import { AuthService } from "./authService.ts";
@@ -123,6 +129,7 @@ import { CapabilityRegistry } from "./agent-core/capability-registry.ts";
 import { ApprovalLedger } from "./agent-core/approval-ledger.ts";
 import { TaskOrchestrator } from "./agent-core/task-orchestrator.ts";
 import { FileTaskRepository } from "./agent-core/file-task-repository.ts";
+import { FileAuditLogStore } from "./agent-core/audit-log-store.ts";
 
 const taskRepository = new FileTaskRepository();
 const taskCapabilityRegistry = new CapabilityRegistry();
@@ -264,7 +271,7 @@ const watcherService = new WatcherService({
     currentTestSuites = suites;
   },
   onAuditLog: (record) => {
-    currentAuditLogs.unshift(record);
+    recordAudit(record);
   },
 });
 watcherService.start();
@@ -522,7 +529,7 @@ async function startServer() {
       founderLoginAttempts.delete(clientKey);
       const secure = req.secure || req.headers["x-forwarded-proto"] === "https";
       res.cookie("maya_session", session.token, { httpOnly: true, secure, sameSite: "strict", path: "/", maxAge: 12 * 60 * 60 * 1000 });
-      currentAuditLogs.unshift({
+      recordAudit({
         id: "auth-founder-" + Date.now().toString(36), toolName: "auth_founder_password",
         params: { email: session.user.email }, status: "success",
         result: { user: session.user.name, role: session.user.role },
@@ -551,7 +558,7 @@ async function startServer() {
     try {
       const { phone, code, name } = req.body || {};
       const session = authService.verifyOtp(phone, code, name);
-      currentAuditLogs.unshift({
+      recordAudit({
         id: "auth-otp-" + Date.now().toString(36),
         toolName: "auth_phone_verify",
         params: { phone: session.user.phone },
@@ -592,7 +599,7 @@ async function startServer() {
 
   app.post("/api/platforms/probe-all", async (_req, res) => {
     const result = await platformService.probeAll();
-    currentAuditLogs.unshift({
+    recordAudit({
       id: "probe-all-" + Date.now().toString(36),
       toolName: "probe_all_platforms",
       params: { count: result.platforms.length },
@@ -690,7 +697,7 @@ async function startServer() {
         args: { path: filePath },
         actor,
       });
-      currentAuditLogs.unshift({
+      recordAudit({
         id: "control-task-create-" + randomTaskId(), toolName: "control_plane_task_create",
         params: { taskId: envelope.task.id, capability: envelope.capability }, status: "success",
         result: { status: envelope.task.status }, timestamp: new Date().toISOString(), durationMs: 0,
@@ -709,7 +716,7 @@ async function startServer() {
     try {
       const actor = { id: founderId, founderId, role: "founder" as const, scopes: ["workspace:read"] };
       const output = await taskOrchestrator.execute(req.params.id, actor);
-      currentAuditLogs.unshift({
+      recordAudit({
         id: "control-task-run-" + randomTaskId(), toolName: "control_plane_task_execute",
         params: { taskId: req.params.id }, status: "success",
         result: { status: output.task.status, evidence: output.task.verificationEvidence },
@@ -720,7 +727,7 @@ async function startServer() {
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       const conflict = /already in progress|not executable/i.test(message);
-      currentAuditLogs.unshift({
+      recordAudit({
         id: "control-task-error-" + randomTaskId(), toolName: "control_plane_task_execute",
         params: { taskId: req.params.id }, status: "failed",
         result: { error: message }, timestamp: new Date().toISOString(), durationMs: 0,
@@ -814,7 +821,7 @@ async function startServer() {
       timestamp: new Date().toISOString(),
       durationMs: Date.now() - startTime,
     };
-    currentAuditLogs.unshift(logItem);
+    recordAudit(logItem);
     currentAuditLogs = currentAuditLogs.slice(0, 500);
 
     return res.status(status === "success" ? 200 : 400)
