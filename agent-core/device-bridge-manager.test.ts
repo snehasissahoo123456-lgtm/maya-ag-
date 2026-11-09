@@ -121,6 +121,30 @@ test("approved local file move uses a separate server-only command path", async 
   } finally { fs.rmSync(directory, { recursive: true, force: true }); }
 });
 
+
+test("disconnect during an approved file move reports an uncertain side effect", async () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "maya-device-move-disconnect-"));
+  try {
+    const registry = new FileDeviceRegistry(directory);
+    const manager = new DeviceBridgeManager(registry);
+    const pairing = await manager.createPairing("founder-a");
+    const socket = new FakeSocket();
+    manager.accept(socket as any);
+    socket.receive({ type: "pair", code: pairing.code, device: { name: "Test PC", platform: "linux", architecture: "x64", runtimeVersion: "test" } });
+    await new Promise(resolve => setTimeout(resolve, 10));
+    const paired = socket.sent.find(item => item.type === "paired");
+    assert.ok(paired?.token);
+    const pending = manager.executeApprovedMoveFile({
+      deviceId: paired.device.id, founderId: "founder-a",
+      fromPath: "inbox/report.md", toPath: "archive/report.md",
+    });
+    await new Promise(resolve => setTimeout(resolve, 0));
+    assert.ok(socket.sent.some(item => item.type === "command" && item.command === "workspace.move_file"));
+    socket.close();
+    await assert.rejects(pending, DeviceCommandUncertainError);
+  } finally { fs.rmSync(directory, { recursive: true, force: true }); }
+});
+
 test("disconnect during a local write reports an uncertain side effect", async () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "maya-device-write-disconnect-"));
   try {
