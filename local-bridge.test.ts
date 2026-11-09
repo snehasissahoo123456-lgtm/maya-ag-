@@ -219,7 +219,7 @@ test("local bridge search is bounded, literal and excludes sensitive, binary and
     const credentialMatch = redacted.matches.find((item: any) => item.path === path.join("src", "config.ts"));
     assert.ok(credentialMatch);
     assert.equal(credentialMatch.preview.includes("private-value-123"), false);
-    assert.match(credentialMatch.preview, /\\[REDACTED\\]/);
+    assert.match(credentialMatch.preview, /\[REDACTED\]/);
     await assert.rejects(() => executeLocalBridgeCommand(root, "workspace.search_files", { query: "" }), /1–200 characters/i);
     await assert.rejects(() => executeLocalBridgeCommand(root, "workspace.search_files", { query: "x".repeat(201) }), /1–200 characters/i);
     await assert.rejects(() => executeLocalBridgeCommand(root, "workspace.search_files", { path: "../outside", query: "token" }), /escapes/i);
