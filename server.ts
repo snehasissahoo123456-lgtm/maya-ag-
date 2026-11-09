@@ -1489,7 +1489,7 @@ async function startServer() {
       ? (typeof req.body?.fromPath === "string" ? req.body.fromPath : "")
       : (typeof req.body?.path === "string" ? req.body.path : isSearchFiles ? "." : "");
     const destinationPath = typeof req.body?.toPath === "string" ? req.body.toPath : "";
-    const searchQuery = typeof req.body?.query === "string" ? req.body.query : "";
+    const searchQuery = typeof req.body?.query === "string" ? req.body.query.trim() : "";
     const deviceId = typeof req.body?.deviceId === "string" ? req.body.deviceId : "";
     const content = req.body?.content;
     if (!instruction || instruction.length > 1000) return res.status(400).json({ success: false, error: "Instruction must contain 1–1000 characters." });
