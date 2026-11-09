@@ -235,7 +235,7 @@ export class MayaControlPlaneTasksWorkspace extends LitElement {
               <option value="device.workspace.write_file">Replace an existing paired-PC text file (approval required)</option>
               <option value="device.workspace.create_file">Create a new paired-PC text file (approval required)</option>
             </select></label>
-            ${this.capability === "device.workspace.write_file" ? html`
+            ${this.capability.startsWith("device.workspace.") ? html`
               <label class="space-y-1 md:col-span-2"><span class="muted">Paired PC (must be online)</span><select .value=${this.deviceId} @change=${(e: Event) => this.deviceId = (e.target as HTMLSelectElement).value}>
                 <option value="">Select a paired PC</option>
                 ${this.devices.map(device => html`<option value=${device.id} ?disabled=${!device.online || Boolean(device.revokedAt)}>${device.name} · ${device.revokedAt ? "revoked" : device.online ? "online" : "offline"}</option>`)}
