@@ -76,6 +76,19 @@ test("real HTTP control-plane routes enforce Founder auth and execute only the r
     });
     assert.equal(csrfBlocked.status, 403, "cross-origin cookie-authenticated mutations must be rejected");
 
+    const missingOriginBlocked = await fetch(baseUrl + "/api/control-plane/tasks", {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie },
+      body: JSON.stringify({ instruction: "This must also be blocked", path: "README.md" }),
+    });
+    assert.equal(missingOriginBlocked.status, 403, "cookie-authenticated mutations without an origin must be rejected");
+
+    const logoutCsrfBlocked = await fetch(baseUrl + "/api/auth/logout", {
+      method: "POST",
+      headers: { cookie, origin: "https://attacker.invalid" },
+    });
+    assert.equal(logoutCsrfBlocked.status, 403, "cross-origin logout requests must be rejected");
+
     const created = await fetch(baseUrl + "/api/control-plane/tasks", {
       method: "POST",
       headers: { "content-type": "application/json", cookie, origin: baseUrl },
