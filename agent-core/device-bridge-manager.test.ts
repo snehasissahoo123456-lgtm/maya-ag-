@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
 import { WebSocket } from "ws";
-import { DeviceBridgeManager } from "./device-bridge-manager.ts";
+import { DeviceBridgeManager, DeviceCommandUncertainError } from "./device-bridge-manager.ts";
 import { FileDeviceRegistry } from "./file-device-registry.ts";
 import fs from "node:fs";
 import os from "node:os";
@@ -74,5 +74,28 @@ test("approved local file replacement uses a separate server-only command path",
     await assert.rejects(() => manager.executeApprovedWrite({
       deviceId: paired.device.id, founderId: "founder-a", path: "reports/status.md", content: "x".repeat(100_001),
     }), /100 KB/i);
+  } finally { fs.rmSync(directory, { recursive: true, force: true }); }
+});
+
+
+test("disconnect during a local write reports an uncertain side effect", async () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "maya-device-write-disconnect-"));
+  try {
+    const registry = new FileDeviceRegistry(directory);
+    const manager = new DeviceBridgeManager(registry);
+    const pairing = await manager.createPairing("founder-a");
+    const socket = new FakeSocket();
+    manager.accept(socket as any);
+    socket.receive({ type: "pair", code: pairing.code, device: { name: "Test PC", platform: "linux", architecture: "x64", runtimeVersion: "test" } });
+    await new Promise(resolve => setTimeout(resolve, 10));
+    const paired = socket.sent.find(item => item.type === "paired");
+    assert.ok(paired?.token);
+    const pending = manager.executeApprovedWrite({
+      deviceId: paired.device.id, founderId: "founder-a", path: "notes.md", content: "approved replacement",
+    });
+    await new Promise(resolve => setTimeout(resolve, 0));
+    assert.ok(socket.sent.some(item => item.type === "command" && item.command === "workspace.write_file"));
+    socket.close();
+    await assert.rejects(pending, DeviceCommandUncertainError);
   } finally { fs.rmSync(directory, { recursive: true, force: true }); }
 });
