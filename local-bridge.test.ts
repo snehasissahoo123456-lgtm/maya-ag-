@@ -26,14 +26,21 @@ test("local bridge reads only regular files inside the enrolled workspace", asyn
   } finally { fs.rmSync(parent, { recursive: true, force: true }); }
 });
 
-test("local bridge blocks credentials and all write or shell commands", async () => {
+test("local bridge permits only bounded replacement of an existing non-sensitive file", async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "maya-bridge-policy-"));
   try {
     fs.writeFileSync(path.join(root, ".env"), "SECRET=value");
     fs.writeFileSync(path.join(root, "notes.txt"), "safe");
     await assert.rejects(() => executeLocalBridgeCommand(root, "workspace.read_file", { path: ".env" }), /sensitive/i);
+    await assert.rejects(() => executeLocalBridgeCommand(root, "workspace.write_file", { path: ".env", content: "SECRET=changed" }), /sensitive/i);
     await assert.rejects(() => executeLocalBridgeCommand(root, "shell.exec", { command: "whoami" }), /allowlist/i);
-    await assert.rejects(() => executeLocalBridgeCommand(root, "workspace.write_file", { path: "notes.txt", content: "bad" }), /allowlist/i);
+    await assert.rejects(() => executeLocalBridgeCommand(root, "workspace.write_file", { path: "new-file.txt", content: "not allowed" }), /does not exist|resolve/i);
+    const written = await executeLocalBridgeCommand(root, "workspace.write_file", { path: "notes.txt", content: "Founder-approved local replacement" }) as any;
+    assert.equal(written.verified, true);
+    assert.equal(written.path, "notes.txt");
+    assert.match(written.sha256, /^[a-f0-9]{64}$/);
+    assert.equal(fs.readFileSync(path.join(root, "notes.txt"), "utf8"), "Founder-approved local replacement");
+    await assert.rejects(() => executeLocalBridgeCommand(root, "workspace.write_file", { path: "notes.txt", content: "x".repeat(100_001) }), /100 KB/i);
     const entries = await executeLocalBridgeCommand(root, "workspace.list", {}) as any[];
     assert.ok(!entries.some(entry => entry.name === ".env"));
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
