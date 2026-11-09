@@ -23,10 +23,13 @@ class MemoryRepo implements TaskRepository {
 }
 
 const founder = { id: "founder-session", founderId: "founder-primary", role: "founder" as const, scopes: ["workspace:read"] };
-function setup(run: (input: any) => Promise<any> = async () => ({
-  result: { path: "README.md" },
-  evidence: { kind: "sha256", description: "Read-only file digest verified.", observedAt: new Date().toISOString() },
-})) {
+function setup(
+  run: (input: any) => Promise<any> = async () => ({
+    result: { path: "README.md" },
+    evidence: { kind: "sha256", description: "Read-only file digest verified.", observedAt: new Date().toISOString() },
+  }),
+  isDeviceAvailable: (deviceId: string, founderId: string) => boolean = () => true,
+) {
   const repository = new MemoryRepo();
   const registry = new CapabilityRegistry();
   registry.register({
@@ -79,7 +82,7 @@ function setup(run: (input: any) => Promise<any> = async () => ({
   });
   const approvals = new ApprovalLedger();
   const orchestrator = new TaskOrchestrator(repository, registry, approvals, { run });
-  const worker = new TaskWorker(repository, orchestrator, registry, { founderId: "founder-primary", pollIntervalMs: 1000 }, approvals);
+  const worker = new TaskWorker(repository, orchestrator, registry, { founderId: "founder-primary", pollIntervalMs: 1000, isDeviceAvailable }, approvals);
   return { repository, registry, orchestrator, worker, approvals };
 }
 
@@ -347,4 +350,27 @@ test("file-backed worker parks interrupted running tasks for manual recovery", a
   const saved = await repository.get("worker-interrupted-1");
   assert.equal(saved?.task.status, "requires_recovery");
   assert.match(saved?.task.lastError || "", /interrupted/i);
+});
+
+
+test("worker leaves an approved local device write queued when this process has no device connection", async () => {
+  let executions = 0;
+  const { orchestrator, worker, repository } = setup(async () => {
+    executions++;
+    return { result: {}, evidence: { kind: "device-write", description: "Should not run", observedAt: new Date().toISOString() } };
+  }, () => false);
+  const deviceFounder = { ...founder, scopes: ["device:write"] };
+  await orchestrator.enqueue({
+    id: "worker-device-offline", founderId: "founder-primary", instruction: "Replace local file",
+    capability: "device.workspace.write_file",
+    args: { deviceId: "device-123", path: "notes.md", content: "Approved payload" },
+    actor: deviceFounder,
+  });
+  const pending = await orchestrator.requestApproval("worker-device-offline", deviceFounder);
+  await orchestrator.decideApproval({ approvalId: pending.approvalId, approved: true, actor: founder });
+  const result = await worker.runOnce();
+  assert.equal(result.executed, 0);
+  assert.equal(result.skipped, 1);
+  assert.equal(executions, 0);
+  assert.equal((await repository.get("worker-device-offline"))?.task.status, "queued");
 });
