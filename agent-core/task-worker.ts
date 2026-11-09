@@ -66,9 +66,9 @@ export class TaskWorker {
   }
 
   async recoverInterrupted(): Promise<number> {
-    if (this.repository.claimNext && this.repository.recoverExpiredClaims) {
-      return this.repository.recoverExpiredClaims(this.founderId);
-    }
+    // Supabase-backed repositories recover expired leased claims inside runOnce().
+    // This startup scan is only for the single-process file-backed repository.
+    if (this.repository.claimNext) return 0;
     if (this.startupRecoveryDone) return 0;
     const envelopes = await this.repository.list(this.founderId);
     let recovered = 0;
