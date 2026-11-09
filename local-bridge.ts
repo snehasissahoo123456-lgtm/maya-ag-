@@ -178,6 +178,87 @@ export async function executeLocalBridgeCommand(rootInput: string, command: stri
     if (stat.size > 50_000) throw new Error("File exceeds the 50 KB read limit.");
     return { path: path.relative(root, file), content: fs.readFileSync(file, "utf8") };
   }
+  if (command === "workspace.search_files") {
+    const directory = resolveAllowedPath(root, args.path || ".");
+    const directoryStat = fs.lstatSync(directory);
+    if (!directoryStat.isDirectory() || directoryStat.isSymbolicLink()) throw new Error("Search path must be a regular workspace directory.");
+    const query = typeof args.query === "string" ? args.query.trim() : "";
+    if (!query || query.length > 200) throw new Error("Search query must contain 1–200 characters.");
+    const maxResults = typeof args.maxResults === "number" && Number.isInteger(args.maxResults)
+      ? Math.min(100, Math.max(1, args.maxResults)) : 50;
+    const needle = query.toLocaleLowerCase();
+    const matches: Array<{ path: string; line: number; preview: string }> = [];
+    const maxFiles = 1_000;
+    const maxDirectories = 200;
+    const maxDepth = 8;
+    const deadline = Date.now() + 5_000;
+    let filesScanned = 0;
+    let directoriesScanned = 0;
+    let truncated = false;
+    let stopped = false;
+    const walk = (current: string, depth: number): void => {
+      if (stopped) return;
+      if (Date.now() >= deadline || directoriesScanned >= maxDirectories || depth > maxDepth) {
+        truncated = true;
+        stopped = true;
+        return;
+      }
+      directoriesScanned++;
+      let entries: fs.Dirent[];
+      try {
+        const found = fs.readdirSync(current, { withFileTypes: true });
+        if (found.length > 500) truncated = true;
+        entries = found.slice(0, 500);
+      } catch { return; }
+      for (const entry of entries) {
+        if (stopped) return;
+        const candidate = path.join(current, entry.name);
+        if (entry.isSymbolicLink() || isSensitive(candidate)) continue;
+        if (entry.isDirectory()) {
+          if (depth < maxDepth) walk(candidate, depth + 1);
+          else truncated = true;
+          continue;
+        }
+        if (!entry.isFile()) continue;
+        if (filesScanned >= maxFiles || Date.now() >= deadline) {
+          truncated = true;
+          stopped = true;
+          return;
+        }
+        filesScanned++;
+        try {
+          const stat = fs.lstatSync(candidate);
+          if (!stat.isFile() || stat.isSymbolicLink() || stat.size > 256_000) continue;
+          const bytes = fs.readFileSync(candidate);
+          if (bytes.includes(0)) continue;
+          const lines = bytes.toString("utf8").split(/\r?\n/);
+          for (let index = 0; index < lines.length; index++) {
+            if (lines[index].toLocaleLowerCase().includes(needle)) {
+              matches.push({
+                path: path.relative(root, candidate),
+                line: index + 1,
+                preview: lines[index].trim().slice(0, 240),
+              });
+              if (matches.length >= maxResults) {
+                truncated = true;
+                stopped = true;
+                return;
+              }
+            }
+          }
+        } catch { /* Skip files that disappear or become unreadable during the bounded scan. */ }
+      }
+    };
+    walk(directory, 0);
+    return {
+      path: path.relative(root, directory) || ".",
+      query,
+      matches,
+      filesScanned,
+      directoriesScanned,
+      truncated,
+    };
+  }
   if (command === "workspace.move_file") {
     const source = resolveAllowedPath(root, args.fromPath);
     const sourceStat = fs.lstatSync(source);
