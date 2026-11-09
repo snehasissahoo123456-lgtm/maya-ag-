@@ -59,6 +59,8 @@ test("real HTTP control-plane routes enforce Founder auth and execute only the r
     await waitForServer(baseUrl, child);
     const unauthenticated = await fetch(baseUrl + "/api/control-plane/tasks");
     assert.equal(unauthenticated.status, 401);
+    const unauthenticatedConversations = await fetch(baseUrl + "/api/conversations");
+    assert.equal(unauthenticatedConversations.status, 401);
 
     const login = await fetch(baseUrl + "/api/auth/founder-login", {
       method: "POST",
@@ -97,6 +99,11 @@ test("real HTTP control-plane routes enforce Founder auth and execute only the r
     assert.equal(offlineChat.status, 200);
     const offlineChatBody = await offlineChat.json() as any;
     assert.match(offlineChatBody.sessionId, /^conversation-[a-f0-9]+$/);
+    const conversationList = await fetch(baseUrl + "/api/conversations", { headers: { cookie } });
+    assert.equal(conversationList.status, 200);
+    assert.deepEqual((await conversationList.json() as any).conversations, []);
+    const unknownConversation = await fetch(baseUrl + "/api/conversations/not-found", { headers: { cookie } });
+    assert.equal(unknownConversation.status, 404);
 
     const created = await fetch(baseUrl + "/api/control-plane/tasks", {
       method: "POST",
