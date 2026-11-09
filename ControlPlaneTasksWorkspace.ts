@@ -30,7 +30,7 @@ export class MayaControlPlaneTasksWorkspace extends LitElement {
   @state() private worker: any = null;
   @state() private instruction = "";
   @state() private filePath = "README.md";
-  @state() private capability: "workspace.read_file" | "workspace.write_file" | "device.workspace.write_file" | "device.workspace.create_file" | "device.workspace.create_directory" = "workspace.read_file";
+  @state() private capability: "workspace.read_file" | "device.workspace.read_file" | "workspace.write_file" | "device.workspace.write_file" | "device.workspace.create_file" | "device.workspace.create_directory" = "workspace.read_file";
   @state() private content = "";
   @state() private busy = false;
   @state() private busyId = "";
@@ -91,8 +91,9 @@ export class MayaControlPlaneTasksWorkspace extends LitElement {
 
   private async createTask() {
     if (this.busy || !this.instruction.trim() || !this.filePath.trim()) return;
-    const isWrite = this.capability !== "workspace.read_file";
-    const requiresContent = ["workspace.write_file", "device.workspace.write_file", "device.workspace.create_file"].includes(this.capability);
+    const isRead = ["workspace.read_file", "device.workspace.read_file"].includes(this.capability);
+    const isMutation = !isRead;
+    const requiresContent = requiresFileContent(this.capability);
     if (requiresContent && !this.content.length) {
       this.message = "Enter the exact file content before creating this task.";
       return;
@@ -117,7 +118,7 @@ export class MayaControlPlaneTasksWorkspace extends LitElement {
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || "Task creation failed.");
       const taskId = data.task?.id;
-      if (isWrite && taskId) {
+      if (isMutation && taskId) {
         const approvalResponse = await this.request(`/api/control-plane/tasks/${encodeURIComponent(taskId)}/request-approval`, { method: "POST" });
         const approvalData = await approvalResponse.json();
         if (!approvalResponse.ok) throw new Error(approvalData.error || "Task was created, but approval request could not be opened.");
@@ -219,7 +220,7 @@ export class MayaControlPlaneTasksWorkspace extends LitElement {
           <div>
             <p class="muted uppercase tracking-[0.18em] text-cyan-300">Founder control plane</p>
             <h2 class="text-xl font-semibold text-white mt-1">Verified task workspace</h2>
-            <p class="muted mt-1 max-w-3xl">Create bounded server or paired-PC workspace tasks. Every file write or creation requires your approval for the exact device, path and content.</p>
+            <p class="muted mt-1 max-w-3xl">Create bounded server or paired-PC workspace tasks. Every file write, file creation or directory creation requires your approval for the exact device and path; file actions also bind the complete content.</p>
           </div>
           <div class="flex items-center gap-2">
             <span class="rounded-full border px-2 py-1 text-xs ${workerEnabled ? "text-emerald-300 border-emerald-500/30" : "text-slate-300 border-slate-700"}">Worker ${workerEnabled ? "enabled" : "disabled"}</span>
@@ -236,6 +237,7 @@ export class MayaControlPlaneTasksWorkspace extends LitElement {
             <label class="space-y-1"><span class="muted">Task instruction</span><input .value=${this.instruction} @input=${(e: Event) => this.instruction = (e.target as HTMLInputElement).value} maxlength="1000" placeholder="Read the project overview"></label>
             <label class="space-y-1"><span class="muted">Capability</span><select .value=${this.capability} @change=${(e: Event) => this.capability = (e.target as HTMLSelectElement).value as any}>
               <option value="workspace.read_file">Read a workspace file</option>
+              <option value="device.workspace.read_file">Read a paired-PC text file</option>
               <option value="workspace.write_file">Replace an existing server text file (approval required)</option>
               <option value="device.workspace.write_file">Replace an existing paired-PC text file (approval required)</option>
               <option value="device.workspace.create_file">Create a new paired-PC text file (approval required)</option>
@@ -253,7 +255,7 @@ export class MayaControlPlaneTasksWorkspace extends LitElement {
             ` : ""}
           </div>
           <div class="flex flex-wrap items-center justify-between gap-3">
-            <p class="muted">${this.capability !== "workspace.read_file" ? "Creating this task opens an approval request; it does not write the file." : "Read tasks do not modify files."}</p>
+            <p class="muted">${["workspace.read_file", "device.workspace.read_file"].includes(this.capability) ? "Read tasks do not modify files; local reads require an online paired PC." : "Creating this task opens an approval request; it does not perform the action."}</p>
             <button class="btn primary" ?disabled=${this.busy || !this.instruction.trim() || !this.filePath.trim() || (this.capability.startsWith("device.workspace.") && !this.devices.some(device => device.id === this.deviceId && device.online))} @click=${() => this.createTask()}>${this.busy ? "Creating…" : "Create task"}</button>
           </div>
         </section>
