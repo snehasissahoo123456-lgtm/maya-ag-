@@ -34,6 +34,23 @@ test("device bridge pairs, authenticates commands to one Founder and rejects non
     assert.ok(command?.requestId);
     socket.receive({ type: "command_result", requestId: command.requestId, success: true, result: { platform: "linux" } });
     assert.deepEqual(await commandPromise, { platform: "linux" });
+    const searchPromise = manager.executeCommand({
+      deviceId: paired.device.id, founderId: "founder-a", command: "workspace.search_files",
+      args: { path: ".", query: "executeTask" },
+    });
+    await new Promise(resolve => setTimeout(resolve, 0));
+    const searchCommand = socket.sent.find(item => item.type === "command" && item.command === "workspace.search_files");
+    assert.ok(searchCommand?.requestId);
+    assert.deepEqual(searchCommand.args, { path: ".", query: "executeTask" });
+    socket.receive({ type: "command_result", requestId: searchCommand.requestId, success: true, result: {
+      path: ".", query: "executeTask", matches: [], filesScanned: 4, directoriesScanned: 2, truncated: false,
+    } });
+    assert.deepEqual(await searchPromise, {
+      path: ".", query: "executeTask", matches: [], filesScanned: 4, directoriesScanned: 2, truncated: false,
+    });
+    await assert.rejects(() => manager.executeCommand({
+      deviceId: paired.device.id, founderId: "founder-a", command: "workspace.search_files", args: { query: "" },
+    }), /1–200 characters/i);
     await assert.rejects(() => manager.executeCommand({ deviceId: paired.device.id, founderId: "founder-b", command: "system.info" }), /not registered/i);
     await assert.rejects(() => manager.executeCommand({ deviceId: paired.device.id, founderId: "founder-a", command: "shell.exec", args: { command: "whoami" } }), /read-only allowlist/i);
     await assert.rejects(() => manager.executeCommand({ deviceId: paired.device.id, founderId: "founder-a", command: "workspace.write_file", args: { path: "notes.txt", content: "bypass" } }), /read-only allowlist/i);
