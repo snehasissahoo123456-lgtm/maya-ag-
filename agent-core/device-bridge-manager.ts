@@ -4,7 +4,14 @@ import type { RegisteredDevice, DeviceMetadata, DeviceRegistry } from "./device-
 
 type SocketLike = WebSocket;
 interface ConnectedDevice { device: RegisteredDevice; socket: SocketLike; }
-interface PendingCommand { deviceId: string; resolve: (value: unknown) => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout>; }
+interface PendingCommand { deviceId: string; resolve: (value: unknown) => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout>; sideEffecting?: boolean; }
+
+export class DeviceCommandUncertainError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "DeviceCommandUncertainError";
+  }
+}
 const ALLOWED_COMMANDS = new Set(["system.info", "workspace.list", "workspace.read_file"]);
 
 export class DeviceBridgeManager {
@@ -30,7 +37,9 @@ export class DeviceBridgeManager {
       for (const [id, pending] of this.pending) {
         if (pending.deviceId === device.id) {
           clearTimeout(pending.timer);
-          pending.reject(new Error("Device disconnected during command execution."));
+          pending.reject(pending.sideEffecting
+            ? new DeviceCommandUncertainError("Device disconnected during a file replacement; verify the target file before retrying.")
+            : new Error("Device disconnected during command execution."));
           this.pending.delete(id);
         }
       }
@@ -75,12 +84,24 @@ export class DeviceBridgeManager {
           clearTimeout(pending.timer);
           this.pending.delete(requestId);
           if (message.success !== true) {
-            pending.reject(new Error(String(message.error || "Local device command failed.").slice(0, 500)));
+            pending.reject(pending.sideEffecting
+            ? new DeviceCommandUncertainError("Local device reported a write failure after receiving the command; verify the target file before retrying.")
+            : new Error(String(message.error || "Local device command failed.").slice(0, 500)));
             return;
           }
           let serialized: string;
-          try { serialized = JSON.stringify(message.result); } catch { pending.reject(new Error("Device returned an unserializable result.")); return; }
-          if (serialized.length > 250_000) { pending.reject(new Error("Device result exceeds the 250 KB limit.")); return; }
+          try { serialized = JSON.stringify(message.result); } catch {
+            pending.reject(pending.sideEffecting
+              ? new DeviceCommandUncertainError("Device returned an unverifiable write result; inspect the target file before retrying.")
+              : new Error("Device returned an unserializable result."));
+            return;
+          }
+          if (serialized.length > 250_000) {
+            pending.reject(pending.sideEffecting
+              ? new DeviceCommandUncertainError("Device write result exceeded the response limit; inspect the target file before retrying.")
+              : new Error("Device result exceeds the 250 KB limit."));
+            return;
+          }
           pending.resolve(message.result);
           return;
         }
@@ -124,9 +145,9 @@ export class DeviceBridgeManager {
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(requestId);
-        reject(new Error("Local device write command timed out."));
+        reject(new DeviceCommandUncertainError("Local device write timed out; inspect the target file before retrying."));
       }, this.commandTimeoutMs);
-      this.pending.set(requestId, { deviceId: input.deviceId, resolve, reject, timer });
+      this.pending.set(requestId, { deviceId: input.deviceId, resolve, reject, timer, sideEffecting: true });
       try {
         current.socket.send(JSON.stringify({ type: "command", requestId, command: "workspace.write_file", args }));
       } catch (error) {
