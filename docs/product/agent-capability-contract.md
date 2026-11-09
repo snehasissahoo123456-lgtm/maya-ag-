@@ -62,23 +62,28 @@ These are target domains. A domain becomes available only after its real provide
 15. Cloud deployment, durable storage, backups, and availability.
 16. Performance, cost, and reliability optimization.
 
-## Verified current implementation
+## Verified development-branch implementation
 
-- Founder password authentication backed by server-side environment secrets, timing-safe password comparison, short-lived in-memory sessions, HttpOnly/SameSite cookies, and failed-login throttling.
-- Default-deny REST authorization and session-gated WebSocket upgrades.
-- Atomic JSON persistence for tasks, memories, and Founder preferences in a single-instance data directory.
-- Bounded Gemini function-calling loop with an allowlist for workspace listing/reading, system information, queued task creation/listing, memory save/search, and actual lint/test/build execution.
-- Gemini Google Search grounding enabled in chat configuration.
-- Sensitive workspace paths are blocked from agent file reads.
-- Unconfigured platforms are displayed as degraded, not falsely online.
-- GitHub Actions validates locked dependency installation, typecheck, unit tests, and production build.
+The following capabilities exist across the current stacked development branches; they are not all present on `main` until their pull requests are reviewed and merged.
 
-## Not implemented
+- Founder password authentication backed by server-side environment secrets, timing-safe password comparison, HttpOnly/SameSite session cookies, default-deny REST authorization and session-gated WebSocket upgrades. Sessions are still in-memory in the default configuration.
+- Founder dashboard, task queue and approval workspace with live health/task data and honest disabled-worker status.
+- Task lifecycle/orchestrator, capability registry, task repository, single-use exact-action approval ledger, SHA-256 action binding, audit events and verification-evidence-gated completion.
+- Opt-in background task worker with bounded capability allowlists, recovery handling and no automatic replay of uncertain side effects. It is disabled by default.
+- Goal planning and sequential plan execution through the server tool allowlist; exact Founder approval is required for state-mutating steps. A separate opt-in single-process goal-plan worker exists; it is disabled by default.
+- Read-only scheduled jobs, bounded CEO orchestration with specialist reasoning, and persistent CEO run history. Specialist agents currently reason within bounded scopes; they are not yet unrestricted tool-using autonomous workers.
+- Founder-scoped persistent conversation and memory repositories, keyword/semantic retrieval adapters, feedback scoring and optional Supabase repositories/migrations. Live Supabase migrations and production database validation remain operator tasks.
+- Paired local-PC connector with one-time Founder pairing, token-hash storage on the server, WSS for remote connections, revocation, system information, workspace listing/reading and read-only Git status.
+- Separate high-risk PC task capabilities for exact-approved file replacement, exclusive file creation, one-level directory creation and non-overwriting file movement. Each mutation requires a single-use Founder approval bound to exact arguments; results include verification evidence. Direct device command APIs remain read-only.
+- GitHub Actions checks locked dependency installation, TypeScript typecheck, unit/integration tests, production build, Compose configuration and Docker image build on the current device-control development chain.
 
-- Google OAuth verification, SMS delivery, multi-user/department credentials, persistent session storage, or database migrations.
-- Server-side approval ledger bound to exact actions.
-- Real task worker/scheduler, retries, event bus, idempotency, checkpoints, or autonomous task execution.
-- Agent Factory, CEO/Developer multi-agent delegation, or specialist agents.
-- PC connector, VS Code extension, Android Gradle project/APK, kiosk provisioning, or Discord bot.
-- General file writing, arbitrary terminal execution, browser control, email/calendar/WhatsApp/notification/deployment integrations.
-- Production cloud deployment, persistent cloud volume/database, backups, disaster recovery, and end-to-end operational monitoring.
+## Not implemented or not production-ready
+
+- Verified Google OAuth, SMS delivery, multi-user/department identity, persistent session storage and live application of database migrations.
+- Distributed device registry/connection routing, distributed plan-worker leases, and live two-process concurrency validation for every worker.
+- Full Agent Factory, dynamic department creation, durable per-agent queues, unrestricted CEO-to-specialist tool delegation, and production-grade budget metering.
+- Production PC service installation, signed connector updates, VS Code extension, Android app/APK, kiosk provisioning and Discord bot.
+- Arbitrary terminal/shell execution, browser automation, keystrokes, screenshots, arbitrary app control, permanent file deletion and external email/calendar/WhatsApp/payment/deployment actions.
+- Production cloud deployment, validated persistent hosting, backups, disaster recovery, security penetration testing and end-to-end 24/7 operations.
+
+Maya remains a bounded development prototype. The presence of a capability adapter or migration file does not mean the corresponding external service is connected or production-validated.
