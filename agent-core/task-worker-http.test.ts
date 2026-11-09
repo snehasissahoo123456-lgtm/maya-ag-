@@ -295,7 +295,7 @@ test("real HTTP worker writes to an enrolled local PC only after exact Founder a
     socket.on("message", async raw => {
       let message: any;
       try { message = JSON.parse(raw.toString()); } catch { return; }
-      if (message.type !== "command" || !["workspace.write_file", "workspace.create_file", "workspace.create_directory"].includes(message.command)) return;
+      if (message.type !== "command" || !["workspace.read_file", "workspace.write_file", "workspace.create_file", "workspace.create_directory"].includes(message.command)) return;
       try {
         const result = await executeLocalBridgeCommand(deviceWorkspace, message.command, message.args || {});
         socket?.send(JSON.stringify({ type: "command_result", requestId: message.requestId, success: true, result }));
@@ -303,6 +303,34 @@ test("real HTTP worker writes to an enrolled local PC only after exact Founder a
         socket?.send(JSON.stringify({ type: "command_result", requestId: message.requestId, success: false, error: error instanceof Error ? error.message : String(error) }));
       }
     });
+
+    const readTaskResponse = await fetch(baseUrl + "/api/control-plane/tasks", {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie },
+      body: JSON.stringify({
+        instruction: "Read the notes file from my paired PC",
+        capability: "device.workspace.read_file",
+        deviceId: paired.device.id,
+        path: "notes.md",
+      }),
+    });
+    assert.equal(readTaskResponse.status, 201, `Device read task creation failed. Server output:\n${logs}`);
+    const readTask = await readTaskResponse.json() as any;
+    assert.equal(readTask.task.requiresApproval, false);
+    const readTaskId = readTask.task.id;
+    const readDeadline = Date.now() + 12_000;
+    let readFinished: any = null;
+    while (Date.now() < readDeadline) {
+      const response = await fetch(baseUrl + "/api/control-plane/tasks", { headers: { cookie } });
+      const data = await response.json() as any;
+      readFinished = data.tasks.find((item: any) => item.task.id === readTaskId);
+      if (readFinished?.task.status === "completed" || readFinished?.task.status === "failed") break;
+      await new Promise(resolve => setTimeout(resolve, 150));
+    }
+    assert.equal(readFinished?.task.status, "completed", `Paired-PC read task did not complete. Server output:\n${logs}`);
+    assert.equal(readFinished.capability, "device.workspace.read_file");
+    assert.equal(readFinished.result.content, "Original local PC contents");
+    assert.match(readFinished.task.verificationEvidence[0].reference, /^sha256:[a-f0-9]{64}$/);
 
     const replacement = "Founder-approved local device replacement";
     const created = await fetch(baseUrl + "/api/control-plane/tasks", {
