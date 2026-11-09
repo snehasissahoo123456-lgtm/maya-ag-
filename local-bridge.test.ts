@@ -22,6 +22,8 @@ test("local bridge reads only regular files inside the enrolled workspace", asyn
       fs.symlinkSync(path.join(root, "inside.txt"), path.join(root, "linked-inside.txt"), "file");
       await assert.rejects(() => executeLocalBridgeCommand(root, "workspace.read_file", { path: "linked-outside/private.txt" }), /symbolic links/i);
       await assert.rejects(() => executeLocalBridgeCommand(root, "workspace.read_file", { path: "linked-inside.txt" }), /symbolic links/i);
+      await assert.rejects(() => executeLocalBridgeCommand(root, "workspace.write_file", { path: "linked-inside.txt", content: "symlink write" }), /symbolic links/i);
+      await assert.rejects(() => executeLocalBridgeCommand(root, "workspace.write_file", { path: "linked-outside/private.txt", content: "symlink write" }), /symbolic links/i);
     }
   } finally { fs.rmSync(parent, { recursive: true, force: true }); }
 });
