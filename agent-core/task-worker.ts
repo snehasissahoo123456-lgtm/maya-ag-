@@ -80,7 +80,9 @@ export class TaskWorker {
   private async executeAllowed(envelope: TaskEnvelope): Promise<"executed" | "skipped"> {
     if (envelope.task.founderId !== this.founderId) return "skipped";
     const isRead = envelope.capability === "workspace.read_file";
-    const isApprovedWrite = envelope.capability === "workspace.write_file";
+    const isWorkspaceWrite = envelope.capability === "workspace.write_file";
+    const isDeviceWrite = envelope.capability === "device.workspace.write_file";
+    const isApprovedWrite = isWorkspaceWrite || isDeviceWrite;
     if (!isRead && !isApprovedWrite) return "skipped";
     if (isRead && envelope.task.requiresApproval) return "skipped";
     if (isApprovedWrite && (!envelope.task.requiresApproval || !this.approvals)) return "skipped";
@@ -89,7 +91,7 @@ export class TaskWorker {
       id: "maya-internal-task-worker:" + this.workerId,
       founderId: this.founderId,
       role: "worker",
-      scopes: isApprovedWrite ? ["workspace:read", "workspace:write"] : ["workspace:read"],
+      scopes: isWorkspaceWrite ? ["workspace:read", "workspace:write"] : isDeviceWrite ? ["device:write"] : ["workspace:read"],
     };
     const { definition } = this.capabilities.validate(envelope.capability, actor, envelope.args);
     if (!definition.allowedRoles.includes("worker")) return "skipped";
