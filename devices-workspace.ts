@@ -3,7 +3,7 @@ import { customElement, state } from "lit/decorators.js";
 
 interface EnrolledDevice {
   id: string; name: string; platform: string; architecture: string;
-  runtimeVersion: string; online: boolean; createdAt: string; lastSeenAt: string;
+  runtimeVersion: string; online: boolean; revokedAt?: string; createdAt: string; lastSeenAt: string;
 }
 
 @customElement("maya-devices-workspace")
@@ -122,14 +122,14 @@ export class MayaDevicesWorkspace extends LitElement {
             <article class="panel">
               <div class="flex flex-wrap items-center justify-between gap-3">
                 <div><div class="font-medium">${device.name}</div><div class="muted">${device.platform} · ${device.architecture} · ${device.runtimeVersion}</div></div>
-                <div class="flex items-center gap-2"><span class="rounded-full px-2 py-1 text-xs ${device.online ? "bg-emerald-500/10 text-emerald-300" : "bg-slate-800 text-slate-400"}">${device.online ? "Online" : "Offline"}</span>
-                  <button class="btn danger" @click=${() => this.revoke(device)}>Revoke</button></div>
+                <div class="flex items-center gap-2"><span class="rounded-full px-2 py-1 text-xs ${device.online ? "bg-emerald-500/10 text-emerald-300" : "bg-slate-800 text-slate-400"}">${device.revokedAt ? "Revoked" : device.online ? "Online" : "Offline"}</span>
+                  <button class="btn danger" ?disabled=${Boolean(device.revokedAt)} @click=${() => this.revoke(device)}>${device.revokedAt ? "Revoked" : "Revoke"}</button></div>
               </div>
               <div class="mt-3 flex flex-wrap gap-2">
-                <button class="btn" ?disabled=${!device.online} @click=${() => this.command(device, "system.info")}>System info</button>
-                <button class="btn" ?disabled=${!device.online} @click=${() => this.command(device, "workspace.list", { path: "." })}>List workspace</button>
+                <button class="btn" ?disabled=${!device.online || Boolean(device.revokedAt)} @click=${() => this.command(device, "system.info")}>System info</button>
+                <button class="btn" ?disabled=${!device.online || Boolean(device.revokedAt)} @click=${() => this.command(device, "workspace.list", { path: "." })}>List workspace</button>
                 <input .value=${this.filePath} aria-label="Workspace relative file path" @input=${(event: Event) => this.filePath = (event.target as HTMLInputElement).value}>
-                <button class="btn" ?disabled=${!device.online} @click=${() => this.command(device, "workspace.read_file", { path: this.filePath })}>Read file</button>
+                <button class="btn" ?disabled=${!device.online || Boolean(device.revokedAt)} @click=${() => this.command(device, "workspace.read_file", { path: this.filePath })}>Read file</button>
               </div>
             </article>
           `)}
