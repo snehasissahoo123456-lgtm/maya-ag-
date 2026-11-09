@@ -2268,7 +2268,7 @@ MULTILINGUAL & RAPID REACTION:
     if (goalPlanWorkerEnabled) goalPlanWorker.start();
     if (scheduleWorkerEnabled) scheduleWorker.start();
     console.log(`[Backend] Server running on http://localhost:${PORT}`);
-    console.log(`[Task Worker] ${taskWorkerEnabled ? "enabled (read-only allowlist)" : "disabled; set MAYA_TASK_WORKER_ENABLED=true to opt in"}`);
+    console.log(`[Task Worker] ${taskWorkerEnabled ? "enabled (bounded allowlist; mutations require exact Founder approval)" : "disabled; set MAYA_TASK_WORKER_ENABLED=true to opt in"}`);
     console.log(`[Goal Plan Worker] ${goalPlanWorkerEnabled ? "enabled (single-instance; Founder-approved plans only)" : "disabled; set MAYA_PLAN_WORKER_ENABLED=true to opt in"}`);
     console.log(`[Schedule Worker] ${scheduleWorkerEnabled ? "enabled (read-only workspace jobs; task worker required)" : "disabled; set MAYA_SCHEDULE_WORKER_ENABLED=true to opt in"}`);
   });
