@@ -8,7 +8,7 @@ interface StoredAuditFile<T> {
   entries: T[];
 }
 
-const SECRET_KEY = /(password|token|secret|api[_-]?key|authorization|cookie|credential)/i;
+const SECRET_KEY = /(password|token|secret|api[_-]?key|authorization|cookie|credential|content|prompt|message|output|request[_-]?body|raw[_-]?input)/i;
 
 function redact(value: unknown, depth = 0): unknown {
   if (depth > 8) return "[MAX_DEPTH]";
