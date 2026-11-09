@@ -253,7 +253,7 @@ const taskOrchestrator = new TaskOrchestrator(
           throw error;
         }
         if (result?.verified !== true || typeof result.sha256 !== "string" || !/^[a-f0-9]{64}$/.test(result.sha256)) {
-          throw new Error("Local device did not return valid write verification evidence.");
+          throw new UncertainTaskExecutionError("Local device did not return valid write verification evidence; inspect the target file before retrying.");
         }
         return {
           result,
