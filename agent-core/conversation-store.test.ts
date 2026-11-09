@@ -53,3 +53,22 @@ test("prevents conversation ownership changes and rejects corrupt stores", async
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("serializes concurrent conversation writes without dropping records", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "maya-conversations-concurrent-"));
+  const file = path.join(dir, "conversations.json");
+  try {
+    const store = new ConversationStore(file);
+    await Promise.all([
+      store.upsert({ ...record("founder-a"), id: "conversation-a" }),
+      store.upsert({ ...record("founder-a"), id: "conversation-b" }),
+      store.upsert({ ...record("founder-a"), id: "conversation-c" }),
+    ]);
+    const restarted = new ConversationStore(file);
+    assert.deepEqual((await restarted.list("founder-a")).map(item => item.id).sort(), [
+      "conversation-a", "conversation-b", "conversation-c",
+    ]);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
