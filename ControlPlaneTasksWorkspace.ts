@@ -17,6 +17,10 @@ interface ControlApproval {
   status: "pending" | "approved" | "rejected" | "consumed" | "expired";
 }
 
+function requiresFileContent(capability: string): boolean {
+  return ["workspace.write_file", "device.workspace.write_file", "device.workspace.create_file"].includes(capability);
+}
+
 @customElement("maya-control-plane-tasks-workspace")
 export class MayaControlPlaneTasksWorkspace extends LitElement {
   @state() private tasks: ControlTask[] = [];
@@ -26,7 +30,7 @@ export class MayaControlPlaneTasksWorkspace extends LitElement {
   @state() private worker: any = null;
   @state() private instruction = "";
   @state() private filePath = "README.md";
-  @state() private capability: "workspace.read_file" | "workspace.write_file" | "device.workspace.write_file" | "device.workspace.create_file" = "workspace.read_file";
+  @state() private capability: "workspace.read_file" | "workspace.write_file" | "device.workspace.write_file" | "device.workspace.create_file" | "device.workspace.create_directory" = "workspace.read_file";
   @state() private content = "";
   @state() private busy = false;
   @state() private busyId = "";
@@ -88,8 +92,9 @@ export class MayaControlPlaneTasksWorkspace extends LitElement {
   private async createTask() {
     if (this.busy || !this.instruction.trim() || !this.filePath.trim()) return;
     const isWrite = this.capability !== "workspace.read_file";
-    if (isWrite && !this.content.length) {
-      this.message = "Enter the exact replacement content before creating a write task.";
+    const requiresContent = ["workspace.write_file", "device.workspace.write_file", "device.workspace.create_file"].includes(this.capability);
+    if (requiresContent && !this.content.length) {
+      this.message = "Enter the exact file content before creating this task.";
       return;
     }
     if (this.capability.startsWith("device.workspace.") && !this.devices.some(device => device.id === this.deviceId && device.online)) {
@@ -106,7 +111,7 @@ export class MayaControlPlaneTasksWorkspace extends LitElement {
         capability: this.capability,
         path: this.filePath.trim(),
       };
-      if (isWrite) body.content = this.content;
+      if (requiresContent) body.content = this.content;
       if (this.capability.startsWith("device.workspace.")) body.deviceId = this.deviceId;
       const response = await this.request("/api/control-plane/tasks", { method: "POST", body: JSON.stringify(body) });
       const data = await response.json();
@@ -116,7 +121,7 @@ export class MayaControlPlaneTasksWorkspace extends LitElement {
         const approvalResponse = await this.request(`/api/control-plane/tasks/${encodeURIComponent(taskId)}/request-approval`, { method: "POST" });
         const approvalData = await approvalResponse.json();
         if (!approvalResponse.ok) throw new Error(approvalData.error || "Task was created, but approval request could not be opened.");
-        confirmation = "Write task created. Review the exact path and replacement content, then approve or reject it below.";
+        confirmation = "Approved-action task created. Review the exact device and path, then approve or reject it below.";
       } else {
         confirmation = "Read task created. It will run automatically only if the task worker is enabled; otherwise you can execute it manually.";
       }
@@ -225,7 +230,7 @@ export class MayaControlPlaneTasksWorkspace extends LitElement {
         <section class="panel space-y-4">
           <div>
             <h3 class="font-medium text-white">Create a workspace task</h3>
-            <p class="muted mt-1">Reads are limited to non-sensitive text files up to 50 KB. Writes replace existing text files or create new files in existing directories, up to 100 KB, after exact approval; directories, symlinks and shell commands remain blocked.</p>
+            <p class="muted mt-1">Reads are limited to non-sensitive text files up to 50 KB. File replacement/creation is limited to 100 KB and requires exact approval. Directory creation makes one new folder beneath an existing parent and also requires exact approval; recursive creation, symlinks and shell commands remain blocked.</p>
           </div>
           <div class="grid gap-3 md:grid-cols-2">
             <label class="space-y-1"><span class="muted">Task instruction</span><input .value=${this.instruction} @input=${(e: Event) => this.instruction = (e.target as HTMLInputElement).value} maxlength="1000" placeholder="Read the project overview"></label>
@@ -234,6 +239,7 @@ export class MayaControlPlaneTasksWorkspace extends LitElement {
               <option value="workspace.write_file">Replace an existing server text file (approval required)</option>
               <option value="device.workspace.write_file">Replace an existing paired-PC text file (approval required)</option>
               <option value="device.workspace.create_file">Create a new paired-PC text file (approval required)</option>
+              <option value="device.workspace.create_directory">Create one paired-PC directory (approval required)</option>
             </select></label>
             ${this.capability.startsWith("device.workspace.") ? html`
               <label class="space-y-1 md:col-span-2"><span class="muted">Paired PC (must be online)</span><select .value=${this.deviceId} @change=${(e: Event) => this.deviceId = (e.target as HTMLSelectElement).value}>
@@ -242,8 +248,8 @@ export class MayaControlPlaneTasksWorkspace extends LitElement {
               </select></label>
             ` : ""}
             <label class="space-y-1 md:col-span-2"><span class="muted">${this.capability.startsWith("device.workspace.") ? "Device workspace-relative path" : "Workspace-relative path"}</span><input .value=${this.filePath} @input=${(e: Event) => this.filePath = (e.target as HTMLInputElement).value} maxlength="1024" placeholder="docs/status.md"></label>
-            ${this.capability !== "workspace.read_file" ? html`
-              <label class="space-y-1 md:col-span-2"><span class="muted">Exact replacement content (maximum 100 KB)</span><textarea .value=${this.content} @input=${(e: Event) => this.content = (e.target as HTMLTextAreaElement).value} maxlength="100000" placeholder="Paste the complete replacement file content…"></textarea></label>
+            ${requiresFileContent(this.capability) ? html`
+              <label class="space-y-1 md:col-span-2"><span class="muted">Exact file content (maximum 100 KB)</span><textarea .value=${this.content} @input=${(e: Event) => this.content = (e.target as HTMLTextAreaElement).value} maxlength="100000" placeholder="Paste the complete file content…"></textarea></label>
             ` : ""}
           </div>
           <div class="flex flex-wrap items-center justify-between gap-3">
