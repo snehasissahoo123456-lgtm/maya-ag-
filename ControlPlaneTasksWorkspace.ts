@@ -296,7 +296,7 @@ export class MayaControlPlaneTasksWorkspace extends LitElement {
                 <div class="flex flex-wrap items-start justify-between gap-3">
                   <div class="min-w-0">
                     <h4 class="text-sm font-semibold text-white">${task.instruction}</h4>
-                    <p class="muted mt-1">${item.capability} · ${String(item.args.path || "")} · ${item.capability.startsWith("device.") ? "Device " + String(item.args.deviceId || "") : "Server workspace"} · ${task.riskLevel} risk</p>
+                    <p class="muted mt-1">${item.capability} · ${item.capability === "device.workspace.move_file" ? String(item.args.fromPath || "") + " → " + String(item.args.toPath || "") : String(item.args.path || "")} · ${item.capability.startsWith("device.") ? "Device " + String(item.args.deviceId || "") : "Server workspace"} · ${task.riskLevel} risk</p>
                     <p class="muted font-mono mt-1">${task.id}</p>
                   </div>
                   <span class="rounded-full border px-2 py-1 text-[10px] uppercase ${this.statusClass(task.status)}">${task.status.replaceAll("_", " ")}</span>
