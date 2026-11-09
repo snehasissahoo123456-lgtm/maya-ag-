@@ -248,16 +248,18 @@ This module is intentionally described as file-backed persistence, not a product
 - [x] Store only device-token hashes on the server and local device token in a restricted user-profile file
 - [x] Authenticated device inventory, online status, command relay and credential revocation
 - [x] Dedicated Devices workspace and Windows PowerShell launcher
-- [x] Restrict device commands to system information, workspace listing and bounded text-file reads
+- [x] Keep direct device commands read-only: system information, workspace listing, bounded text-file reads and Git status summaries
 - [x] Reject workspace traversal, symlinks and sensitive credential paths
 - [x] Test pairing, token storage, Founder isolation, live WebSocket command relay and HTTP authorization
+- [x] Add exact-action Founder-approved local file replacement, exclusive file creation, single-directory creation and non-overwriting file movement through the task orchestrator
+- [x] Verify local file moves by destination SHA-256 before removing the source name; preserve source on failed verification
 - [ ] Add transactional Supabase device registry and multi-instance connection routing
-- [ ] Add audited capability grants and exact-action Founder approval before enabling write, shell or browser-control capabilities
+- [ ] Add broader audited capability grants before shell, browser-control or arbitrary application actions
 - [ ] Add Windows service installation, secure auto-start, health monitoring and signed updater
 - [ ] Add Android remote client and mobile push notification support
 - [ ] Run threat modelling and penetration testing before enabling broader PC control
 
-Current connector is intentionally read-only. It is not a general remote desktop, shell, or arbitrary computer-control agent.
+Direct device commands remain read-only. Mutating file operations are exposed only as separate high-risk task capabilities requiring single-use exact Founder approval. The connector is not a general remote desktop, shell, or arbitrary computer-control agent.
 
 
 ## Approved goal-plan background worker — development branch
