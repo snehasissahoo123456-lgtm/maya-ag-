@@ -34,7 +34,7 @@ test("device bridge pairs, authenticates commands to one Founder and rejects non
     assert.ok(command?.requestId);
     socket.receive({ type: "command_result", requestId: command.requestId, success: true, result: { platform: "linux" } });
     assert.deepEqual(await commandPromise, { platform: "linux" });
-    await assert.rejects(() => manager.executeCommand({ deviceId: paired.device.id, founderId: "founder-b", command: "system.info" }), /offline or not registered/i);
+    await assert.rejects(() => manager.executeCommand({ deviceId: paired.device.id, founderId: "founder-b", command: "system.info" }), /not registered/i);
     await assert.rejects(() => manager.executeCommand({ deviceId: paired.device.id, founderId: "founder-a", command: "shell.exec", args: { command: "whoami" } }), /read-only allowlist/i);
     await assert.rejects(() => manager.executeCommand({ deviceId: paired.device.id, founderId: "founder-a", command: "workspace.write_file", args: { path: "notes.txt", content: "bypass" } }), /read-only allowlist/i);
     assert.equal((await manager.list("founder-a"))[0].online, true);
@@ -75,7 +75,7 @@ test("approved local file replacement uses a separate server-only command path",
     assert.deepEqual(await writePromise, { verified: true, sha256: "a".repeat(64) });
     await assert.rejects(() => manager.executeApprovedWrite({
       deviceId: paired.device.id, founderId: "founder-b", path: "reports/status.md", content: "wrong founder",
-    }), /offline or not registered/i);
+    }), /not registered/i);
     await assert.rejects(() => manager.executeApprovedWrite({
       deviceId: paired.device.id, founderId: "founder-a", path: "reports/status.md", content: "x".repeat(100_001),
     }), /100 KB/i);
