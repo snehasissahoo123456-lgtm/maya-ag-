@@ -32,10 +32,17 @@ test("local bridge permits only bounded replacement of an existing non-sensitive
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "maya-bridge-policy-"));
   try {
     fs.writeFileSync(path.join(root, ".env"), "SECRET=value");
+    fs.mkdirSync(path.join(root, ".ssh"));
+    fs.writeFileSync(path.join(root, ".ssh", "id_ed25519"), "PRIVATE KEY");
+    fs.mkdirSync(path.join(root, ".aws"));
+    fs.writeFileSync(path.join(root, ".aws", "credentials"), "AWS_SECRET");
     fs.writeFileSync(path.join(root, "notes.txt"), "safe");
     fs.writeFileSync(path.join(root, "binary.dat"), Buffer.from([0, 1, 2, 3]));
     await assert.rejects(() => executeLocalBridgeCommand(root, "workspace.read_file", { path: ".env" }), /sensitive/i);
     await assert.rejects(() => executeLocalBridgeCommand(root, "workspace.write_file", { path: ".env", content: "SECRET=changed" }), /sensitive/i);
+    await assert.rejects(() => executeLocalBridgeCommand(root, "workspace.read_file", { path: ".ssh/id_ed25519" }), /sensitive/i);
+    await assert.rejects(() => executeLocalBridgeCommand(root, "workspace.write_file", { path: ".aws/credentials", content: "AWS_SECRET=changed" }), /sensitive/i);
+    await assert.rejects(() => executeLocalBridgeCommand(root, "workspace.create_file", { path: ".ssh/new_key", content: "PRIVATE KEY" }), /sensitive/i);
     await assert.rejects(() => executeLocalBridgeCommand(root, "shell.exec", { command: "whoami" }), /allowlist/i);
     await assert.rejects(() => executeLocalBridgeCommand(root, "workspace.write_file", { path: "new-file.txt", content: "not allowed" }), /does not exist|resolve/i);
     await assert.rejects(() => executeLocalBridgeCommand(root, "workspace.write_file", { path: "binary.dat", content: "text replacement" }), /binary files/i);
