@@ -25,6 +25,7 @@ Status: Foundation is merged. Persistent single-instance Founder session storage
 Exit gate: partial evidence exists for the task API and its read-only capability. Still required: comprehensive route/tool authorization tests, shared transactional storage, and security acceptance testing. Session persistence is local and single-instance; production multi-instance deployment still needs a transactional shared store. No general-purpose worker or privileged action is enabled.
 
 ## Phase 2 — Cloud control plane
+- [x] Add an initial server-only Supabase conversation table migration, owner-immutability trigger, deny-by-default client RLS posture, and adapter request/error tests. The adapter is not yet wired into live chat routes.
 - Device registry and device-bound credentials.
 - Durable task queue, planner, scheduler, policy engine, event stream, and observability.
 - AI provider adapter with server-side secrets and configurable quotas.
