@@ -51,22 +51,32 @@ export class ConversationStore implements ConversationStoreAdapter {
 
   async upsert(record: ConversationRecord): Promise<ConversationRecord> {
     this.validateRecord(record);
-    const previous = this.records.get(record.id);
-    if (previous && previous.founderId !== record.founderId) throw new Error("Conversation ownership cannot be changed.");
-    const next = structuredClone(record);
-    this.records.set(next.id, next);
-    try { await this.persist(); }
-    catch (error) { if (previous) this.records.set(record.id, previous); else this.records.delete(record.id); throw error; }
-    return structuredClone(next);
+    return this.enqueueWrite(() => {
+      const previous = this.records.get(record.id);
+      if (previous && previous.founderId !== record.founderId) {
+        throw new Error("Conversation ownership cannot be changed.");
+      }
+      const saved = structuredClone(record);
+      this.records.set(saved.id, saved);
+      try { this.writeFile(); }
+      catch (error) {
+        if (previous) this.records.set(record.id, previous);
+        else this.records.delete(record.id);
+        throw error;
+      }
+      return structuredClone(saved);
+    });
   }
 
   async delete(id: string, founderId: string): Promise<boolean> {
-    const previous = this.records.get(id);
-    if (!previous || previous.founderId !== founderId) return false;
-    this.records.delete(id);
-    try { await this.persist(); }
-    catch (error) { this.records.set(id, previous); throw error; }
-    return true;
+    return this.enqueueWrite(() => {
+      const previous = this.records.get(id);
+      if (!previous || previous.founderId !== founderId) return false;
+      this.records.delete(id);
+      try { this.writeFile(); }
+      catch (error) { this.records.set(id, previous); throw error; }
+      return true;
+    });
   }
 
   private validateRecord(record: ConversationRecord): void {
@@ -102,9 +112,9 @@ export class ConversationStore implements ConversationStoreAdapter {
     }
   }
 
-  private persist(): Promise<void> {
-    const run = this.writeQueue.then(() => this.writeFile());
-    this.writeQueue = run.catch(() => undefined);
+  private enqueueWrite<T>(operation: () => T): Promise<T> {
+    const run = this.writeQueue.then(operation);
+    this.writeQueue = run.then(() => undefined, () => undefined);
     return run;
   }
 
@@ -114,9 +124,13 @@ export class ConversationStore implements ConversationStoreAdapter {
     try { fs.chmodSync(directory, 0o700); } catch {}
     const state: StoredConversations = { version: 1, updatedAt: new Date().toISOString(), conversations: [...this.records.values()] };
     const temp = path.join(directory, `.conversations.${process.pid}.${Date.now()}.${randomBytes(4).toString("hex")}.tmp`);
-    fs.writeFileSync(temp, JSON.stringify(state, null, 2), { encoding: "utf8", mode: 0o600, flag: "wx" });
-    try { fs.renameSync(temp, this.filePath); }
-    catch (error) { try { fs.rmSync(temp, { force: true }); } catch {} throw error; }
+    try {
+      fs.writeFileSync(temp, JSON.stringify(state, null, 2), { encoding: "utf8", mode: 0o600, flag: "wx" });
+      fs.renameSync(temp, this.filePath);
+    } catch (error) {
+      try { fs.rmSync(temp, { force: true }); } catch {}
+      throw error;
+    }
     try { fs.chmodSync(this.filePath, 0o600); } catch {}
   }
 }
