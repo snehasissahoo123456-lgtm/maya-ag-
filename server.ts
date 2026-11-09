@@ -255,7 +255,7 @@ function randomTaskId(): string {
   return randomBytes(8).toString("hex");
 }
 
-const authService = new AuthService();
+const authService = new AuthService(path.join(process.env.MAYA_DATA_DIR || path.resolve(process.cwd(), "..", "maya-data"), "sessions.json"));
 const platformService = new PlatformService();
 
 const watcherService = new WatcherService({
