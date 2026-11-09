@@ -125,6 +125,20 @@ function setup(
     requiresApproval: false,
     verification: "Hash the bounded workspace search result.",
   });
+  registry.register({
+    name: "device.workspace.list_directory",
+    description: "List up to 100 non-sensitive entries in one local workspace directory.",
+    risk: "low",
+    allowedRoles: ["founder", "worker"],
+    requiredScopes: ["device:read"],
+    arguments: {
+      deviceId: { type: "string", required: true, maxLength: 128 },
+      path: { type: "string", required: false, maxLength: 1024 },
+    },
+    timeoutMs: 5000,
+    requiresApproval: false,
+    verification: "Hash the bounded directory listing.",
+  });
   const approvals = new ApprovalLedger();
   const orchestrator = new TaskOrchestrator(repository, registry, approvals, { run });
   const worker = new TaskWorker(repository, orchestrator, registry, { founderId: "founder-primary", pollIntervalMs: 1000, isDeviceAvailable }, approvals);
@@ -441,6 +455,31 @@ test("startup recovery can run while the background worker remains disabled", as
 
 
 
+
+
+test("worker executes bounded local directory listing without mutation approval", async () => {
+  let executedCapability = "";
+  let executedArgs: Record<string, unknown> | undefined;
+  const { orchestrator, worker, repository } = setup(async input => {
+    executedCapability = input.capability;
+    executedArgs = input.args;
+    return {
+      result: { path: "src", entries: [{ name: "agent.ts", type: "file" }, { name: "core", type: "directory" }], count: 2, truncated: false },
+      evidence: { kind: "device-list-sha256", description: "Bounded local directory listing hashed.", reference: "sha256:" + "d".repeat(64), observedAt: new Date().toISOString() },
+    };
+  });
+  const deviceFounder = { ...founder, scopes: ["device:read"] };
+  const args = { deviceId: "device-123", path: "src" };
+  await orchestrator.enqueue({
+    id: "worker-device-list-1", founderId: "founder-primary", instruction: "List the paired PC source directory",
+    capability: "device.workspace.list_directory", args, actor: deviceFounder,
+  });
+  const result = await worker.runOnce();
+  assert.equal(result.executed, 1);
+  assert.equal(executedCapability, "device.workspace.list_directory");
+  assert.deepEqual(executedArgs, args);
+  assert.equal((await repository.get("worker-device-list-1"))?.task.status, "completed");
+});
 
 test("worker executes bounded local workspace search without mutation approval", async () => {
   let executedCapability = "";
