@@ -104,6 +104,53 @@ test("local bridge creates only one new directory under an existing non-sensitiv
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
 
+
+test("local bridge moves only regular non-sensitive files without overwriting and verifies bytes", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "maya-bridge-move-"));
+  try {
+    fs.mkdirSync(path.join(root, "inbox"));
+    fs.mkdirSync(path.join(root, "archive"));
+    fs.mkdirSync(path.join(root, ".ssh"));
+    fs.writeFileSync(path.join(root, "inbox", "report.md"), "move this exact content");
+    fs.writeFileSync(path.join(root, "archive", "existing.md"), "keep destination");
+    fs.writeFileSync(path.join(root, ".ssh", "id_ed25519"), "private key");
+    const moved = await executeLocalBridgeCommand(root, "workspace.move_file", {
+      fromPath: "inbox/report.md", toPath: "archive/report.md",
+    }) as any;
+    assert.equal(moved.moved, true);
+    assert.equal(moved.verified, true);
+    assert.equal(moved.fromPath, path.join("inbox", "report.md"));
+    assert.equal(moved.toPath, path.join("archive", "report.md"));
+    assert.match(moved.sha256, /^[a-f0-9]{64}$/);
+    assert.equal(fs.existsSync(path.join(root, "inbox", "report.md")), false);
+    assert.equal(fs.readFileSync(path.join(root, "archive", "report.md"), "utf8"), "move this exact content");
+    await assert.rejects(() => executeLocalBridgeCommand(root, "workspace.move_file", {
+      fromPath: "archive/report.md", toPath: "archive/existing.md",
+    }), /already exists/i);
+    assert.equal(fs.existsSync(path.join(root, "archive", "report.md")), true);
+    assert.equal(fs.readFileSync(path.join(root, "archive", "existing.md"), "utf8"), "keep destination");
+    await assert.rejects(() => executeLocalBridgeCommand(root, "workspace.move_file", {
+      fromPath: ".ssh/id_ed25519", toPath: "archive/key.txt",
+    }), /sensitive/i);
+    await assert.rejects(() => executeLocalBridgeCommand(root, "workspace.move_file", {
+      fromPath: "archive/report.md", toPath: "../outside.md",
+    }), /escapes/i);
+    await assert.rejects(() => executeLocalBridgeCommand(root, "workspace.move_file", {
+      fromPath: "archive/report.md", toPath: "archive/report.md",
+    }), /already exists|different/i);
+    if (process.platform !== "win32") {
+      const outside = fs.mkdtempSync(path.join(os.tmpdir(), "maya-move-outside-"));
+      try {
+        fs.symlinkSync(outside, path.join(root, "linked"), "dir");
+        await assert.rejects(() => executeLocalBridgeCommand(root, "workspace.move_file", {
+          fromPath: "archive/report.md", toPath: "linked/escape.md",
+        }), /symbolic links/i);
+      } finally { fs.rmSync(outside, { recursive: true, force: true }); }
+    }
+    await assert.rejects(() => executeLocalBridgeCommand(root, "shell.exec", { command: "whoami" }), /allowlist/i);
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
 test("local bridge returns bounded read-only Git status without diff contents", async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "maya-bridge-git-status-"));
   try {
