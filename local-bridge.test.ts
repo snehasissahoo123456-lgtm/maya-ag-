@@ -143,6 +143,20 @@ test("local bridge moves only regular non-sensitive files without overwriting an
     await assert.rejects(() => executeLocalBridgeCommand(root, "workspace.move_file", {
       fromPath: "archive/report.md", toPath: "archive/report.md",
     }), /already exists|different/i);
+    await assert.rejects(() => executeLocalBridgeCommand(root, "workspace.move_file", {
+      fromPath: "missing.txt", toPath: "archive/missing.txt",
+    }), /does not exist|resolve/i);
+    await assert.rejects(() => executeLocalBridgeCommand(root, "workspace.move_file", {
+      fromPath: "archive/report.md", toPath: "missing-parent/report.md",
+    }), /parent does not exist/i);
+    await assert.rejects(() => executeLocalBridgeCommand(root, "workspace.move_file", {
+      fromPath: "archive", toPath: "archive-folder",
+    }), /regular non-symlink files/i);
+    fs.writeFileSync(path.join(root, "oversized.bin"), Buffer.alloc(5_000_001, 1));
+    await assert.rejects(() => executeLocalBridgeCommand(root, "workspace.move_file", {
+      fromPath: "oversized.bin", toPath: "archive/oversized.bin",
+    }), /5 MB/i);
+    assert.equal(fs.existsSync(path.join(root, "oversized.bin")), true);
     if (process.platform !== "win32") {
       const outside = fs.mkdtempSync(path.join(os.tmpdir(), "maya-move-outside-"));
       try {
