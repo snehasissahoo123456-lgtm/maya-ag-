@@ -39,7 +39,7 @@ export class DeviceBridgeManager {
         if (pending.deviceId === device.id) {
           clearTimeout(pending.timer);
           pending.reject(pending.sideEffecting
-            ? new DeviceCommandUncertainError("Device disconnected during a file replacement; verify the target file before retrying.")
+            ? new DeviceCommandUncertainError("Device disconnected during an approved local file operation; inspect the affected paths before retrying.")
             : new Error("Device disconnected during command execution."));
           this.pending.delete(id);
         }
@@ -86,20 +86,20 @@ export class DeviceBridgeManager {
           this.pending.delete(requestId);
           if (message.success !== true) {
             pending.reject(pending.sideEffecting
-            ? new DeviceCommandUncertainError("Local device reported a write failure after receiving the command; verify the target file before retrying.")
+            ? new DeviceCommandUncertainError("Local device reported a failure after receiving an approved file operation; inspect the affected paths before retrying.")
             : new Error(String(message.error || "Local device command failed.").slice(0, 500)));
             return;
           }
           let serialized: string;
           try { serialized = JSON.stringify(message.result); } catch {
             pending.reject(pending.sideEffecting
-              ? new DeviceCommandUncertainError("Device returned an unverifiable write result; inspect the target file before retrying.")
+              ? new DeviceCommandUncertainError("Device returned an unverifiable result for an approved file operation; inspect the affected paths before retrying.")
               : new Error("Device returned an unserializable result."));
             return;
           }
           if (serialized.length > 250_000) {
             pending.reject(pending.sideEffecting
-              ? new DeviceCommandUncertainError("Device write result exceeded the response limit; inspect the target file before retrying.")
+              ? new DeviceCommandUncertainError("Approved file-operation result exceeded the response limit; inspect the affected paths before retrying.")
               : new Error("Device result exceeds the 250 KB limit."));
             return;
           }
