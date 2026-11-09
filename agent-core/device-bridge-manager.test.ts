@@ -137,3 +137,40 @@ test("approved local file creation uses a separate server-only command path", as
     }), /100 KB/i);
   } finally { fs.rmSync(directory, { recursive: true, force: true }); }
 });
+
+test("approved local directory creation uses a separate server-only command path", async () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "maya-device-approved-directory-"));
+  try {
+    const registry = new FileDeviceRegistry(directory);
+    const manager = new DeviceBridgeManager(registry);
+    const pairing = await manager.createPairing("founder-a");
+    const socket = new FakeSocket();
+    manager.accept(socket as any);
+    socket.receive({ type: "pair", code: pairing.code, device: { name: "Test PC", platform: "linux", architecture: "x64", runtimeVersion: "test" } });
+    await new Promise(resolve => setTimeout(resolve, 10));
+    const paired = socket.sent.find(item => item.type === "paired");
+    assert.ok(paired?.token);
+
+    await assert.rejects(() => manager.executeCommand({
+      deviceId: paired.device.id, founderId: "founder-a", command: "workspace.create_directory", args: { path: "projects/new" },
+    }), /read-only allowlist/i);
+
+    const createPromise = manager.executeApprovedCreateDirectory({
+      deviceId: paired.device.id, founderId: "founder-a", path: "projects/new",
+    });
+    await new Promise(resolve => setTimeout(resolve, 0));
+    const command = socket.sent.find(item => item.type === "command" && item.command === "workspace.create_directory");
+    assert.ok(command?.requestId);
+    assert.deepEqual(command.args, { path: "projects/new" });
+    socket.receive({ type: "command_result", requestId: command.requestId, success: true, result: { verified: true, created: true, path: "projects/new" } });
+    assert.deepEqual(await createPromise, { verified: true, created: true, path: "projects/new" });
+
+    await assert.rejects(() => manager.executeApprovedCreateDirectory({
+      deviceId: paired.device.id, founderId: "founder-b", path: "projects/other",
+    }), /not registered/i);
+    await manager.revoke(paired.device.id, "founder-a");
+    await assert.rejects(() => manager.executeApprovedCreateDirectory({
+      deviceId: paired.device.id, founderId: "founder-a", path: "projects/revoked",
+    }), /revoked/i);
+  } finally { fs.rmSync(directory, { recursive: true, force: true }); }
+});
