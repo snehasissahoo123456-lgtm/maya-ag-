@@ -45,7 +45,7 @@ export class TaskOrchestrator {
     if (!approval) throw new Error("Approval not found for this Founder.");
     const envelope = await this.requireTask(approval.taskId, input.actor.founderId);
     if (envelope.task.status !== "awaiting_approval") throw new Error("Task is no longer waiting for this approval.");
-    let decision;
+    let decision: Awaited<ReturnType<ApprovalRepository["decide"]>>;
     try {
       decision = await this.approvals.decide({ approvalId: input.approvalId, founderId: input.actor.founderId, approved: input.approved });
     } catch (error) {
