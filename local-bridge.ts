@@ -156,7 +156,7 @@ export async function executeLocalBridgeCommand(rootInput: string, command: stri
     });
     if (processResult.error) throw new Error("Git status could not run: " + processResult.error.message.slice(0, 200));
     if (processResult.status !== 0) throw new Error("Git status failed: " + String(processResult.stderr || "Not a Git repository.").trim().slice(0, 300));
-    const lines = String(processResult.stdout || "").split(/\\r?\\n/).filter(Boolean);
+    const lines = String(processResult.stdout || "").split(/\r?\n/).filter(Boolean);
     const branch = lines.find(line => line.startsWith("## "))?.slice(3) || "unknown";
     const changes = lines.filter(line => !line.startsWith("## ")).flatMap(line => {
       const rawPath = line.slice(3).split(" -> ").pop() || "";
