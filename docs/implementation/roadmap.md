@@ -1,7 +1,7 @@
 # Maya Implementation Roadmap
 
-Branch: maya/persistent-founder-sessions
-Status: Foundation is merged. Persistent single-instance Founder session storage is implemented on the session branch. A follow-on branch adds CSRF/origin checks for cookie-authenticated mutations and requires its own CI verification. No Android APK or production deployment is claimed.
+Branch: maya/csrf-origin-protection
+Status: Consolidated security foundation is in draft PR #37. Persistent Founder sessions, cookie-origin protection, redacted durable audit storage, and Founder-scoped Gemini conversation persistence are implemented in code. CI verification is required on the latest head before treating the newest conversation integration as validated. No Android APK or production deployment is claimed.
 
 ## Phase 0 — Baseline and contracts
 - [x] Replace the legacy sign-in mockup with a focused Founder password screen backed by the server-issued HttpOnly session cookie; hide unconfigured Google/SMS paths and remove misleading security claims.
