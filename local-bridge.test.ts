@@ -114,6 +114,11 @@ test("local bridge moves only regular non-sensitive files without overwriting an
     fs.writeFileSync(path.join(root, "inbox", "report.md"), "move this exact content");
     fs.writeFileSync(path.join(root, "archive", "existing.md"), "keep destination");
     fs.writeFileSync(path.join(root, ".ssh", "id_ed25519"), "private key");
+    fs.linkSync(path.join(root, ".ssh", "id_ed25519"), path.join(root, "mirror.txt"));
+    await assert.rejects(() => executeLocalBridgeCommand(root, "workspace.move_file", {
+      fromPath: "mirror.txt", toPath: "archive/mirror.txt",
+    }), /hard-linked/i);
+    assert.equal(fs.existsSync(path.join(root, "mirror.txt")), true);
     const moved = await executeLocalBridgeCommand(root, "workspace.move_file", {
       fromPath: "inbox/report.md", toPath: "archive/report.md",
     }) as any;
