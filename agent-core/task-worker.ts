@@ -22,7 +22,7 @@ export interface TaskWorkerOptions {
 }
 
 /**
- * Opt-in worker for read-only file reads and exact-Founder-approved file replacements.
+ * Opt-in worker for safe workspace reads plus exact-Founder-approved server and local-device file replacements.
  * Unknown, unapproved, failed and interrupted work is never broadened or auto-replayed.
  */
 export class TaskWorker {
