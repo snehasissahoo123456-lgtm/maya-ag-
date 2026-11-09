@@ -216,6 +216,47 @@ test("real HTTP worker replaces an existing workspace file only after exact Foun
     assert.match(finished.task.verificationEvidence[0].reference, /^sha256:[a-f0-9]{64}$/);
     const approvals = await (await fetch(baseUrl + "/api/control-plane/approvals", { headers: { cookie } })).json() as any;
     assert.equal(approvals.approvals.find((item: any) => item.id === approvalData.approvalId)?.status, "consumed");
+
+    const createContent = "Founder-approved new local PC file";
+    const createTaskResponse = await fetch(baseUrl + "/api/control-plane/tasks", {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie },
+      body: JSON.stringify({
+        instruction: "Create a new report on my paired PC",
+        capability: "device.workspace.create_file",
+        deviceId: paired.device.id,
+        path: "created-report.md",
+        content: createContent,
+      }),
+    });
+    assert.equal(createTaskResponse.status, 201, `Device create task creation failed. Server output:\n${logs}`);
+    const createTaskId = (await createTaskResponse.json() as any).task.id;
+    assert.equal(fs.existsSync(path.join(deviceWorkspace, "created-report.md")), false);
+    const createApprovalRequest = await fetch(baseUrl + `/api/control-plane/tasks/${encodeURIComponent(createTaskId)}/request-approval`, {
+      method: "POST", headers: { cookie },
+    });
+    assert.equal(createApprovalRequest.status, 200);
+    const createApproval = await createApprovalRequest.json() as any;
+    const createDecision = await fetch(baseUrl + `/api/control-plane/approvals/${encodeURIComponent(createApproval.approvalId)}/decision`, {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie },
+      body: JSON.stringify({ approved: true }),
+    });
+    assert.equal(createDecision.status, 200);
+    const createDeadline = Date.now() + 12_000;
+    let createdTask: any = null;
+    while (Date.now() < createDeadline) {
+      const response = await fetch(baseUrl + "/api/control-plane/tasks", { headers: { cookie } });
+      const data = await response.json() as any;
+      createdTask = data.tasks.find((item: any) => item.task.id === createTaskId);
+      if (createdTask?.task.status === "completed" || createdTask?.task.status === "failed") break;
+      await new Promise(resolve => setTimeout(resolve, 150));
+    }
+    assert.equal(createdTask?.task.status, "completed", `Approved device create did not complete. Server output:\n${logs}`);
+    assert.equal(fs.readFileSync(path.join(deviceWorkspace, "created-report.md"), "utf8"), createContent);
+    assert.match(createdTask.task.verificationEvidence[0].reference, /^sha256:[a-f0-9]{64}$/);
+    const createApprovals = await (await fetch(baseUrl + "/api/control-plane/approvals", { headers: { cookie } })).json() as any;
+    assert.equal(createApprovals.approvals.find((item: any) => item.id === createApproval.approvalId)?.status, "consumed");
   } catch (error) {
     throw new Error(`${error instanceof Error ? error.message : String(error)}\nServer output:\n${logs}`);
   } finally {
@@ -293,7 +334,7 @@ test("real HTTP worker writes to an enrolled local PC only after exact Founder a
     socket.on("message", async raw => {
       let message: any;
       try { message = JSON.parse(raw.toString()); } catch { return; }
-      if (message.type !== "command" || message.command !== "workspace.write_file") return;
+      if (message.type !== "command" || !["workspace.write_file", "workspace.create_file"].includes(message.command)) return;
       try {
         const result = await executeLocalBridgeCommand(deviceWorkspace, message.command, message.args || {});
         socket?.send(JSON.stringify({ type: "command_result", requestId: message.requestId, success: true, result }));
