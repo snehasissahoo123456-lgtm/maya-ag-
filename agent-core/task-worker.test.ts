@@ -95,6 +95,21 @@ function setup(
     requiresApproval: true,
     verification: "Verify the newly created local file with SHA-256.",
   });
+  registry.register({
+    name: "device.workspace.move_file",
+    description: "Move a local workspace file without overwriting an existing destination after Founder approval.",
+    risk: "high",
+    allowedRoles: ["founder", "worker"],
+    requiredScopes: ["device:write"],
+    arguments: {
+      deviceId: { type: "string", required: true, maxLength: 128 },
+      fromPath: { type: "string", required: true, maxLength: 1024 },
+      toPath: { type: "string", required: true, maxLength: 1024 },
+    },
+    timeoutMs: 5000,
+    requiresApproval: true,
+    verification: "Verify the destination bytes and SHA-256 digest before removing the source.",
+  });
   const approvals = new ApprovalLedger();
   const orchestrator = new TaskOrchestrator(repository, registry, approvals, { run });
   const worker = new TaskWorker(repository, orchestrator, registry, { founderId: "founder-primary", pollIntervalMs: 1000, isDeviceAvailable }, approvals);
@@ -409,6 +424,34 @@ test("startup recovery can run while the background worker remains disabled", as
   assert.equal((await repository.get("worker-startup-recovery-disabled"))?.task.status, "requires_recovery");
 });
 
+
+
+test("worker executes a local PC file move only after exact Founder approval", async () => {
+  let executedCapability = "";
+  let executedArgs: Record<string, unknown> | undefined;
+  const { orchestrator, worker, repository, approvals } = setup(async input => {
+    executedCapability = input.capability;
+    executedArgs = input.args;
+    return {
+      result: { moved: true, verified: true, fromPath: "inbox/report.md", toPath: "archive/report.md", sha256: "f".repeat(64) },
+      evidence: { kind: "device-move-sha256", description: "Local file move verified.", reference: "sha256:" + "f".repeat(64), observedAt: new Date().toISOString() },
+    };
+  });
+  const deviceFounder = { ...founder, scopes: ["device:write"] };
+  const args = { deviceId: "device-123", fromPath: "inbox/report.md", toPath: "archive/report.md" };
+  await orchestrator.enqueue({
+    id: "worker-device-move-1", founderId: "founder-primary", instruction: "Move the report into the archive",
+    capability: "device.workspace.move_file", args, actor: deviceFounder,
+  });
+  const pending = await orchestrator.requestApproval("worker-device-move-1", deviceFounder);
+  await orchestrator.decideApproval({ approvalId: pending.approvalId, approved: true, actor: founder });
+  const result = await worker.runOnce();
+  assert.equal(result.executed, 1);
+  assert.equal(executedCapability, "device.workspace.move_file");
+  assert.deepEqual(executedArgs, args);
+  assert.equal((await repository.get("worker-device-move-1"))?.task.status, "completed");
+  assert.equal((await approvals.listForFounder("founder-primary")).find(item => item.id === pending.approvalId)?.status, "consumed");
+});
 
 test("worker creates a new local PC file only after exact Founder approval", async () => {
   let executedArgs: Record<string, unknown> | undefined;
