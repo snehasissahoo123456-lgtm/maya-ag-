@@ -248,9 +248,10 @@ This module is intentionally described as file-backed persistence, not a product
 - [x] Store only device-token hashes on the server and local device token in a restricted user-profile file
 - [x] Authenticated device inventory, online status, command relay and credential revocation
 - [x] Dedicated Devices workspace and Windows PowerShell launcher
-- [x] Keep direct device commands read-only: system information, workspace listing, bounded text-file reads and Git status summaries
+- [x] Keep direct device commands read-only: system information, workspace listing, bounded text-file reads, literal text search and Git status summaries
 - [x] Reject workspace traversal, symlinks and sensitive credential paths
 - [x] Test pairing, token storage, Founder isolation, live WebSocket command relay and HTTP authorization
+- [x] Add bounded read-only literal search across non-sensitive local workspace text files with file/depth/time/result limits
 - [x] Add exact-action Founder-approved local file replacement, exclusive file creation, single-directory creation and non-overwriting file movement through the task orchestrator
 - [x] Verify local file moves by destination SHA-256 before removing the source name; preserve source on failed verification
 - [ ] Add transactional Supabase device registry and multi-instance connection routing
