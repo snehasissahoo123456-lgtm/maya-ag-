@@ -9,7 +9,7 @@
     "start": "node --env-file-if-exists=.env dist/server.cjs",
     "preview": "vite preview",
     "lint": "tsc --noEmit",
-    "test": "tsx --test agent-core/control-plane-http.test.ts agent-core/file-task-repository.test.ts agent-core/task-lifecycle.test.ts agent-core/persistent-store.test.ts agent-core/function-call-loop.test.ts agent-core/capability-registry.test.ts agent-core/approval-ledger.test.ts agent-core/task-orchestrator.test.ts agent-core/delegation-policy.test.ts authService.test.ts agent-core/product-capability-catalog.test.ts"
+    "test": "tsx --test agent-core/create-conversation-repository.test.ts agent-core/control-plane-http.test.ts agent-core/file-task-repository.test.ts agent-core/task-lifecycle.test.ts agent-core/persistent-store.test.ts agent-core/function-call-loop.test.ts agent-core/capability-registry.test.ts agent-core/approval-ledger.test.ts agent-core/task-orchestrator.test.ts agent-core/delegation-policy.test.ts authService.test.ts agent-core/product-capability-catalog.test.ts"
   },
   "dependencies": {
     "@google/genai": "^1.34.0",
