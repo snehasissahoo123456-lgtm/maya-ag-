@@ -250,7 +250,7 @@ export class MayaControlPlaneTasksWorkspace extends LitElement {
         <section class="panel space-y-4">
           <div>
             <h3 class="font-medium text-white">Create a workspace task</h3>
-            <p class="muted mt-1">Reads are limited to non-sensitive text files up to 50 KB. File replacement/creation is limited to 100 KB and requires exact approval. Directory creation is non-recursive. File moves require exact approval, remain inside the paired-PC workspace, and cannot overwrite an existing destination; symlinks and shell commands remain blocked.</p>
+            <p class="muted mt-1">Reads are limited to non-sensitive text files up to 50 KB. Search uses literal queries, scans at most 1,000 files/200 directories for five seconds, returns at most 100 snippets, and redacts common credential patterns. File replacement/creation is limited to 100 KB and requires exact approval. Directory creation is non-recursive. File moves require exact approval, remain inside the paired-PC workspace, and cannot overwrite an existing destination; symlinks and shell commands remain blocked.</p>
           </div>
           <div class="grid gap-3 md:grid-cols-2">
             <label class="space-y-1"><span class="muted">Task instruction</span><input .value=${this.instruction} @input=${(e: Event) => this.instruction = (e.target as HTMLInputElement).value} maxlength="1000" placeholder="Read the project overview"></label>
