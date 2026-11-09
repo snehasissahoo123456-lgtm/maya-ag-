@@ -84,7 +84,7 @@ function resolveCreatablePath(root: string, relativePath: unknown): string {
 }
 
 function resolveCreatableDirectoryPath(root: string, relativePath: unknown): string {
-  if (typeof relativePath !== "string" || !relativePath.trim() || relativePath.length > 1024 || path.isAbsolute(relativePath) || relativePath.includes("\\0")) {
+  if (typeof relativePath !== "string" || !relativePath.trim() || relativePath.length > 1024 || path.isAbsolute(relativePath) || relativePath.includes("\0")) {
     throw new Error("A valid workspace-relative new-directory path is required.");
   }
   const segments = relativePath.split(/[\\/]+/);
