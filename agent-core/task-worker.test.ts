@@ -110,6 +110,21 @@ function setup(
     requiresApproval: true,
     verification: "Verify the destination bytes and SHA-256 digest before removing the source.",
   });
+  registry.register({
+    name: "device.workspace.search_files",
+    description: "Search bounded non-sensitive local workspace text files.",
+    risk: "low",
+    allowedRoles: ["founder", "worker"],
+    requiredScopes: ["device:read"],
+    arguments: {
+      deviceId: { type: "string", required: true, maxLength: 128 },
+      path: { type: "string", required: false, maxLength: 1024 },
+      query: { type: "string", required: true, maxLength: 200 },
+    },
+    timeoutMs: 5000,
+    requiresApproval: false,
+    verification: "Hash the bounded workspace search result.",
+  });
   const approvals = new ApprovalLedger();
   const orchestrator = new TaskOrchestrator(repository, registry, approvals, { run });
   const worker = new TaskWorker(repository, orchestrator, registry, { founderId: "founder-primary", pollIntervalMs: 1000, isDeviceAvailable }, approvals);
@@ -425,6 +440,31 @@ test("startup recovery can run while the background worker remains disabled", as
 });
 
 
+
+
+test("worker executes bounded local workspace search without mutation approval", async () => {
+  let executedCapability = "";
+  let executedArgs: Record<string, unknown> | undefined;
+  const { orchestrator, worker, repository } = setup(async input => {
+    executedCapability = input.capability;
+    executedArgs = input.args;
+    return {
+      result: { query: "executeTask", matches: [{ path: "src/agent.ts", line: 12, preview: "executeTask()" }], filesScanned: 8, directoriesScanned: 2, truncated: false },
+      evidence: { kind: "device-search-sha256", description: "Bounded local search result hashed.", reference: "sha256:" + "a".repeat(64), observedAt: new Date().toISOString() },
+    };
+  });
+  const deviceFounder = { ...founder, scopes: ["device:read"] };
+  const args = { deviceId: "device-123", path: ".", query: "executeTask" };
+  await orchestrator.enqueue({
+    id: "worker-device-search-1", founderId: "founder-primary", instruction: "Find executeTask in the paired PC workspace",
+    capability: "device.workspace.search_files", args, actor: deviceFounder,
+  });
+  const result = await worker.runOnce();
+  assert.equal(result.executed, 1);
+  assert.equal(executedCapability, "device.workspace.search_files");
+  assert.deepEqual(executedArgs, args);
+  assert.equal((await repository.get("worker-device-search-1"))?.task.status, "completed");
+});
 
 test("worker executes a local PC file move only after exact Founder approval", async () => {
   let executedCapability = "";
