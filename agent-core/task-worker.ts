@@ -24,7 +24,7 @@ export interface TaskWorkerOptions {
 }
 
 /**
- * Opt-in worker for safe workspace reads plus exact-Founder-approved server and local-device file replacements.
+ * Opt-in worker for safe workspace reads plus exact-Founder-approved server/local-device file replacements, local file creation and non-overwriting local file moves.
  * Unknown, unapproved, failed and interrupted work is never broadened or auto-replayed.
  */
 export class TaskWorker {
@@ -107,7 +107,7 @@ export class TaskWorker {
     const isRead = envelope.capability === "workspace.read_file";
     const isDeviceRead = ["device.workspace.read_file", "device.workspace.git_status"].includes(envelope.capability);
     const isWorkspaceWrite = envelope.capability === "workspace.write_file";
-    const isDeviceWrite = ["device.workspace.write_file", "device.workspace.create_file", "device.workspace.create_directory"].includes(envelope.capability);
+    const isDeviceWrite = ["device.workspace.write_file", "device.workspace.create_file", "device.workspace.create_directory", "device.workspace.move_file"].includes(envelope.capability);
     const isApprovedWrite = isWorkspaceWrite || isDeviceWrite;
     if (!isRead && !isDeviceRead && !isApprovedWrite) return "skipped";
     if ((isRead || isDeviceRead) && envelope.task.requiresApproval) return "skipped";
