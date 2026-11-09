@@ -3,13 +3,14 @@
 ## Current verified repository state
 The original repository is a web-based Action Engine cockpit built with TypeScript, Node.js, Express, WebSockets, and a React/Lit frontend. It includes Gemini integration, task and memory UI, tool definitions, and platform/watcher services.
 
-The current implementation is a prototype, not a production autonomous operator. Demo authentication and fabricated success responses have been removed; REST routes now default-deny without a verified session; WebSocket access requires a session cookie; and workspace file reads/listings are path-contained. Founder password sign-in uses a server-configured email/password, timing-safe password comparison, rate limiting, and an HttpOnly SameSite cookie. Founder sessions are now persisted for a single server instance using SHA-256 token hashes, atomic local JSON replacement, restrictive file permissions, expiry checks, and persisted revocation; raw bearer tokens are not written to disk. Google OAuth and SMS verification are not configured. Tasks, memories, persona preferences, task records, and approvals use local file stores; sessions and audit logs are not a transactional multi-instance database.
+The current implementation is a prototype, not a production autonomous operator. Demo authentication and fabricated success responses have been removed; REST routes now default-deny without a verified session; WebSocket access requires a session cookie; and workspace file reads/listings are path-contained. Founder password sign-in uses a server-configured email/password, timing-safe password comparison, rate limiting, and an HttpOnly SameSite cookie. Founder sessions are now persisted for a single server instance using SHA-256 token hashes, atomic local JSON replacement, restrictive file permissions, expiry checks, and persisted revocation; raw bearer tokens are not written to disk. Google OAuth and SMS verification are not configured. Tasks, memories, persona preferences, task records, and approvals use local file stores; sessions, task state, approvals, and audit history use single-instance local stores rather than a transactional multi-instance database; audit events are redacted and bounded.
 
 ## Current development branch
 \`maya/persistent-founder-sessions\`
 
 ## Foundation work added
 - Persistent Founder session recovery and revocation using SHA-256 token hashes (single-instance file store; raw tokens are not persisted).
+- Durable bounded audit history with atomic file replacement and sensitive-field/content redaction (single-instance only).
 - Target cloud + local architecture.
 - Security baseline and threat model.
 - Phased implementation roadmap.
