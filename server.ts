@@ -303,6 +303,33 @@ function handlePersonaCommands(rawMsg: string): string | null {
   return null;
 }
 
+function isAllowedRequestOrigin(req: any): boolean {
+  const rawOrigin = typeof req.headers.origin === "string" && req.headers.origin
+    ? req.headers.origin
+    : typeof req.headers.referer === "string" ? req.headers.referer : "";
+  if (!rawOrigin || rawOrigin === "null") return false;
+
+  let sourceOrigin: string;
+  try {
+    const parsed = new URL(rawOrigin);
+    if (parsed.protocol !== "https:" && parsed.protocol !== "http:") return false;
+    sourceOrigin = parsed.origin;
+  } catch {
+    return false;
+  }
+
+  const configuredOrigins = (process.env.MAYA_ALLOWED_ORIGINS || "")
+    .split(",")
+    .map(value => value.trim())
+    .filter(Boolean)
+    .flatMap(value => {
+      try { return [new URL(value).origin]; } catch { return []; }
+    });
+  const requestHost = typeof req.get === "function" ? req.get("host") : req.headers.host;
+  const requestOrigin = requestHost ? `${req.protocol}://${requestHost}` : "";
+  return sourceOrigin === requestOrigin || configuredOrigins.includes(sourceOrigin);
+}
+
 async function startServer() {
   const app = express();
   const server = http.createServer(app);
@@ -333,10 +360,18 @@ async function startServer() {
     "/auth/logout",
   ]);
   app.use("/api", (req, res, next) => {
-    if (publicApiPaths.has(req.path)) return next();
     const authorization = req.headers.authorization || "";
-    const bearer = authorization.match(/^Bearer\s+(.+)$/i)?.[1];
+    const bearer = authorization.match(/^Bearer\\s+(.+)$/i)?.[1];
     const cookieToken = (req.headers.cookie || "").split(";").map((part) => part.trim()).find((part) => part.startsWith("maya_session="))?.slice("maya_session=".length);
+    const mutatingMethod = ["POST", "PUT", "PATCH", "DELETE"].includes(req.method);
+
+    // Cookie-authenticated state changes require a same-origin browser request.
+    // Non-browser clients should use an explicit bearer credential instead.
+    if (!bearer && cookieToken && mutatingMethod && !isAllowedRequestOrigin(req)) {
+      return res.status(403).json({ success: false, error: "Cross-origin request blocked. Send a valid same-origin Origin or Referer header." });
+    }
+    if (publicApiPaths.has(req.path)) return next();
+
     const session = authService.validateSession(bearer || cookieToken);
     if (!session) {
       return res.status(401).json({ success: false, error: "Authentication required. No verified session is active." });
