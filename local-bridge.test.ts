@@ -75,3 +75,29 @@ test("local bridge permits only bounded replacement of an existing non-sensitive
     assert.ok(!entries.some(entry => entry.name === ".env"));
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
+
+test("local bridge creates only one new directory under an existing non-sensitive parent", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "maya-bridge-directory-"));
+  try {
+    fs.mkdirSync(path.join(root, "projects"));
+    const created = await executeLocalBridgeCommand(root, "workspace.create_directory", { path: "projects/new-project" }) as any;
+    assert.equal(created.created, true);
+    assert.equal(created.verified, true);
+    assert.equal(created.path, path.join("projects", "new-project"));
+    assert.equal(fs.statSync(path.join(root, "projects", "new-project")).isDirectory(), true);
+    await assert.rejects(() => executeLocalBridgeCommand(root, "workspace.create_directory", { path: "projects/new-project" }), /already exists/i);
+    await assert.rejects(() => executeLocalBridgeCommand(root, "workspace.create_directory", { path: "missing/child" }), /parent does not exist/i);
+    await assert.rejects(() => executeLocalBridgeCommand(root, "workspace.create_directory", { path: "../outside" }), /escapes|dot segments/i);
+    await assert.rejects(() => executeLocalBridgeCommand(root, "workspace.create_directory", { path: "." }), /dot segments|equals/i);
+    await assert.rejects(() => executeLocalBridgeCommand(root, "workspace.create_directory", { path: ".ssh/new-key-dir" }), /sensitive/i);
+    if (process.platform !== "win32") {
+      const outside = fs.mkdtempSync(path.join(os.tmpdir(), "maya-directory-outside-"));
+      try {
+        fs.symlinkSync(outside, path.join(root, "linked-parent"), "dir");
+        await assert.rejects(() => executeLocalBridgeCommand(root, "workspace.create_directory", { path: "linked-parent/escape" }), /symbolic links/i);
+      } finally { fs.rmSync(outside, { recursive: true, force: true }); }
+    }
+    await assert.rejects(() => executeLocalBridgeCommand(root, "workspace.create_directory", { path: "projects/new-file", extra: true } as any), /already exists|parent/i);
+    await assert.rejects(() => executeLocalBridgeCommand(root, "shell.exec", { command: "whoami" }), /allowlist/i);
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
