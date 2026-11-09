@@ -60,18 +60,17 @@ export class MayaControlPlaneTasksWorkspace extends LitElement {
   private async refresh() {
     this.message = "Loading Founder task and approval records…";
     try {
-      const [tasksResponse, approvalsResponse, healthResponse, devicesResponse] = await Promise.all([
+      const [tasksResponse, approvalsResponse, healthResponse] = await Promise.all([
         this.request("/api/control-plane/tasks"),
         this.request("/api/control-plane/approvals"),
         this.request("/api/health"),
-        this.request("/api/devices"),
       ]);
       const tasksData = await tasksResponse.json();
       if (!tasksResponse.ok) throw new Error(tasksData.error || "Task list unavailable.");
       const approvalsData = await approvalsResponse.json();
       if (!approvalsResponse.ok) throw new Error(approvalsData.error || "Approval list unavailable.");
-      const devicesData = await devicesResponse.json();
-      if (!devicesResponse.ok) throw new Error(devicesData.error || "Device list unavailable.");
+      const devicesResponse = await this.request("/api/devices").catch(() => undefined);
+      const devicesData = devicesResponse?.ok ? await devicesResponse.json() : {};
       this.tasks = Array.isArray(tasksData.tasks) ? tasksData.tasks : [];
       this.approvals = Array.isArray(approvalsData.approvals) ? approvalsData.approvals : [];
       this.devices = Array.isArray(devicesData.devices) ? devicesData.devices : [];
