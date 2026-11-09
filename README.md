@@ -18,7 +18,7 @@ Implemented and tested foundations include:
 - Founder-scoped Gemini chat history persistence through the configured conversation repository. File storage is the default. A server-only Supabase adapter and migration are included; the migration has not been applied to a live Supabase project.
 - Specialist-agent manifests and delegation-policy templates. These are not live autonomous agents.
 
-Maya is still a prototype, not a production autonomous operator. Verified Google OAuth and SMS OTP are not configured. Shared transactional storage for sessions, tasks, approvals and audit events; durable multi-instance workers; retry/idempotency recovery; complete route/tool authorization; PC/VS Code connector; Android app/APK; live multi-agent execution; and external-service integrations remain unfinished. A Gemini API key is not configured in this repository session, so live model calls and persisted chat behavior against the Gemini service have not been verified here.
+Maya is still a prototype, not a production autonomous operator. Verified Google OAuth and SMS OTP are not configured. Shared transactional storage for sessions, tasks, approvals and audit events; durable multi-instance workers; retry/idempotency recovery; complete route/tool authorization; PC/VS Code connector; Android app/APK; live multi-agent execution; and external-service integrations remain unfinished. Live Gemini API calls and persisted chat behavior against the external Gemini service have not been verified in this development workflow.
 
 ## Run locally
 Requirements: a supported Node.js runtime and dependencies installed from the repository lockfile.
