@@ -347,6 +347,7 @@ test("real HTTP worker writes to an enrolled local PC only after exact Founder a
     const approvals = await (await fetch(baseUrl + "/api/control-plane/approvals", { headers: { cookie } })).json() as any;
     assert.equal(approvals.approvals.find((item: any) => item.id === approvalData.approvalId)?.status, "consumed");
 
+    fs.mkdirSync(path.join(deviceWorkspace, "projects"));
     const directoryTaskResponse = await fetch(baseUrl + "/api/control-plane/tasks", {
       method: "POST",
       headers: { "content-type": "application/json", cookie },
