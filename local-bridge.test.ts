@@ -222,7 +222,7 @@ test("local bridge search is bounded, literal and excludes sensitive, binary and
     const credentialMatch = redacted.matches.find((item: any) => item.path === path.join("src", "config.ts"));
     assert.ok(credentialMatch);
     assert.equal(credentialMatch.preview.includes("private-value-123"), false);
-    assert.match(credentialMatch.preview, /\[REDACTED\]/);
+    assert.equal(credentialMatch.preview.includes("[REDACTED]"), true);
     const jsonSecret = await executeLocalBridgeCommand(root, "workspace.search_files", { query: "client_secret" }) as any;
     assert.equal(jsonSecret.matches[0].preview.includes("json-secret-456"), false);
     const bearerSecret = await executeLocalBridgeCommand(root, "workspace.search_files", { query: "Bearer" }) as any;
