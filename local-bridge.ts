@@ -178,6 +178,42 @@ export async function executeLocalBridgeCommand(rootInput: string, command: stri
     if (stat.size > 50_000) throw new Error("File exceeds the 50 KB read limit.");
     return { path: path.relative(root, file), content: fs.readFileSync(file, "utf8") };
   }
+  if (command === "workspace.move_file") {
+    const source = resolveAllowedPath(root, args.fromPath);
+    const sourceStat = fs.lstatSync(source);
+    if (!sourceStat.isFile() || sourceStat.isSymbolicLink()) throw new Error("Only regular non-symlink files can be moved.");
+    if (sourceStat.size > 5_000_000) throw new Error("Source file exceeds the 5 MB move limit.");
+    const destination = resolveCreatablePath(root, args.toPath);
+    if (path.resolve(source) === path.resolve(destination)) throw new Error("Source and destination paths must be different.");
+    const sourceBytes = fs.readFileSync(source);
+    const sourceDigest = createHash("sha256").update(sourceBytes).digest("hex");
+    // linkSync is exclusive: it fails if the destination exists, unlike rename on POSIX.
+    // Both paths are constrained to this workspace, so the hard link remains on one volume.
+    fs.linkSync(source, destination);
+    try {
+      const destinationStat = fs.lstatSync(destination);
+      const destinationReal = fs.realpathSync(destination);
+      const destinationBytes = fs.readFileSync(destination);
+      const destinationDigest = createHash("sha256").update(destinationBytes).digest("hex");
+      if (!destinationStat.isFile() || destinationStat.isSymbolicLink() ||
+          !isWithinRoot(root, destinationReal) || destinationDigest !== sourceDigest ||
+          destinationBytes.length !== sourceBytes.length) {
+        throw new Error("Moved-file verification failed; source has been preserved.");
+      }
+      fs.unlinkSync(source);
+      return {
+        fromPath: path.relative(root, source),
+        toPath: path.relative(root, destination),
+        moved: true,
+        verified: true,
+        bytes: destinationBytes.length,
+        sha256: destinationDigest,
+      };
+    } catch (error) {
+      try { fs.unlinkSync(destination); } catch {}
+      throw error;
+    }
+  }
   if (command === "workspace.create_directory") {
     const directory = resolveCreatableDirectoryPath(root, args.path);
     fs.mkdirSync(directory, { mode: 0o755 });
