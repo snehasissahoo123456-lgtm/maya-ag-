@@ -193,6 +193,33 @@ export class DeviceBridgeManager {
     });
   }
 
+  /**
+   * Trusted server-side path used only after the task orchestrator consumes
+   * an exact Founder approval for creating one local workspace directory.
+   */
+  async executeApprovedCreateDirectory(input: { deviceId: string; founderId: string; path: string }): Promise<unknown> {
+    if (!input.deviceId || input.deviceId.length > 128 || !input.founderId) throw new Error("A valid Founder-owned device is required.");
+    if (typeof input.path !== "string" || !input.path.trim() || input.path.length > 1024) throw new Error("A valid workspace-relative directory path is required.");
+    const current = this.connected.get(input.deviceId);
+    if (!current || current.device.founderId !== input.founderId || this.revokedDeviceIds.has(input.deviceId)) throw new Error("Device is offline, revoked or not registered for this Founder.");
+    const requestId = randomUUID();
+    const args = { path: input.path };
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.pending.delete(requestId);
+        reject(new DeviceCommandUncertainError("Local directory creation timed out; inspect the target path before retrying."));
+      }, this.commandTimeoutMs);
+      this.pending.set(requestId, { deviceId: input.deviceId, resolve, reject, timer, sideEffecting: true });
+      try {
+        current.socket.send(JSON.stringify({ type: "command", requestId, command: "workspace.create_directory", args }));
+      } catch {
+        clearTimeout(timer);
+        this.pending.delete(requestId);
+        reject(new DeviceCommandUncertainError("The local directory command could not be confirmed as sent; inspect the target path before retrying."));
+      }
+    });
+  }
+
   async executeCommand(input: { deviceId: string; founderId: string; command: string; args?: Record<string, unknown> }): Promise<unknown> {
     if (!ALLOWED_COMMANDS.has(input.command)) throw new Error("Device command is not in the read-only allowlist.");
     const args = input.args || {};
