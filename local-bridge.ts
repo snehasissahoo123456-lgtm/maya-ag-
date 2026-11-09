@@ -182,6 +182,7 @@ export async function executeLocalBridgeCommand(rootInput: string, command: stri
     const source = resolveAllowedPath(root, args.fromPath);
     const sourceStat = fs.lstatSync(source);
     if (!sourceStat.isFile() || sourceStat.isSymbolicLink()) throw new Error("Only regular non-symlink files can be moved.");
+    if (sourceStat.nlink !== 1) throw new Error("Pre-existing hard-linked files are blocked from movement.");
     if (sourceStat.size > 5_000_000) throw new Error("Source file exceeds the 5 MB move limit.");
     const destination = resolveCreatablePath(root, args.toPath);
     if (path.resolve(source) === path.resolve(destination)) throw new Error("Source and destination paths must be different.");
@@ -195,8 +196,14 @@ export async function executeLocalBridgeCommand(rootInput: string, command: stri
       const destinationReal = fs.realpathSync(destination);
       const destinationBytes = fs.readFileSync(destination);
       const destinationDigest = createHash("sha256").update(destinationBytes).digest("hex");
+      const sourceAfterStat = fs.lstatSync(source);
+      const sourceAfterBytes = fs.readFileSync(source);
+      const sourceAfterDigest = createHash("sha256").update(sourceAfterBytes).digest("hex");
       if (!destinationStat.isFile() || destinationStat.isSymbolicLink() ||
-          !isWithinRoot(root, destinationReal) || destinationDigest !== sourceDigest ||
+          !isWithinRoot(root, destinationReal) || destinationStat.nlink !== 2 ||
+          destinationStat.dev !== sourceStat.dev || destinationStat.ino !== sourceStat.ino ||
+          sourceAfterStat.dev !== destinationStat.dev || sourceAfterStat.ino !== destinationStat.ino ||
+          destinationDigest !== sourceDigest || sourceAfterDigest !== sourceDigest ||
           destinationBytes.length !== sourceBytes.length) {
         throw new Error("Moved-file verification failed; source has been preserved.");
       }
