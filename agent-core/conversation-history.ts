@@ -48,3 +48,22 @@ export function restoreGeminiHistory(messages: ConversationMessage[]): GeminiHis
       : message.content ? [{ text: message.content }] : [],
   }));
 }
+
+/** Validate browser-provided history before using it to seed a new Founder conversation. */
+export function normalizeIncomingGeminiHistory(value: unknown): GeminiHistoryItem[] {
+  if (value === undefined || value === null) return [];
+  if (!Array.isArray(value) || value.length > 5000) {
+    throw new Error("Incoming conversation history is invalid or exceeds the message limit.");
+  }
+  return value.map((item: any) => {
+    const role = item?.role === "assistant" ? "model" : item?.role;
+    if (role !== "user" && role !== "model") {
+      throw new Error("Incoming conversation history contains an unsupported role.");
+    }
+    if (!Array.isArray(item.parts) || item.parts.length > 100 ||
+        JSON.stringify(item.parts).length > 1_000_000) {
+      throw new Error("Incoming conversation history contains invalid or oversized parts.");
+    }
+    return { role, parts: structuredClone(item.parts) };
+  });
+}
