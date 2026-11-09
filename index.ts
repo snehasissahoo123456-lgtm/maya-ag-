@@ -21,6 +21,7 @@ import './SpecialistWorkspace.ts';
 import './CEOWorkspace.ts';
 import './devices-workspace.ts';
 import './SchedulesWorkspace.ts';
+import './ControlPlaneTasksWorkspace.ts';
 
 import {
   SYB_VENTURES,
@@ -1883,7 +1884,7 @@ Status: Ready to build upon Founder "go ahead".`;
       return counts;
     }, {});
     const serverLabel = this.dashboardApiStatus === 'online' ? 'Reachable' : this.dashboardApiStatus === 'offline' ? 'Unavailable' : 'Checking';
-    const workerLabel = this.dashboardWorkerStatus === 'enabled' ? 'Enabled · read-only' : this.dashboardWorkerStatus === 'disabled' ? 'Disabled' : 'Unknown';
+    const workerLabel = this.dashboardWorkerStatus === 'enabled' ? 'Enabled · reads + approved writes' : this.dashboardWorkerStatus === 'disabled' ? 'Disabled' : 'Unknown';
     const taskLabel = this.dashboardTasksStatus === 'available'
       ? 'Founder task data loaded'
       : this.dashboardTasksStatus === 'unauthenticated'
@@ -1930,7 +1931,7 @@ Status: Ready to build upon Founder "go ahead".`;
           <article class="rounded-2xl border border-slate-800 bg-slate-900/80 p-4">
             <div class="flex items-center justify-between text-xs text-slate-400"><span>Background worker</span><span class="material-symbols-outlined text-amber-300">precision_manufacturing</span></div>
             <div class="mt-3 text-sm font-semibold text-white">${workerLabel}</div>
-            <p class="mt-1 text-[11px] text-slate-500">Server-reported state; when enabled it can run only the read-only workspace file capability.</p>
+            <p class="mt-1 text-[11px] text-slate-500">Server-reported state; when enabled it can run safe file reads and exact-Founder-approved replacements of existing files.</p>
           </article>
           <article class="rounded-2xl border border-slate-800 bg-slate-900/80 p-4">
             <div class="flex items-center justify-between text-xs text-slate-400"><span>Voice availability</span><span class="material-symbols-outlined text-emerald-300">graphic_eq</span></div>
@@ -2748,6 +2749,7 @@ Status: Ready to build upon Founder "go ahead".`;
   private renderTasksTab(selectedVenture: SYBVenture) {
     return html`
       <div class="space-y-6">
+        <maya-control-plane-tasks-workspace></maya-control-plane-tasks-workspace>
         <!-- Header & Action -->
         <div class="flex flex-wrap items-center justify-between gap-4">
           <div>
