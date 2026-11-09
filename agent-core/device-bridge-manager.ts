@@ -16,6 +16,7 @@ const ALLOWED_COMMANDS = new Set(["system.info", "workspace.list", "workspace.re
 
 export class DeviceBridgeManager {
   private readonly connected = new Map<string, ConnectedDevice>();
+  private readonly revokedDeviceIds = new Set<string>();
   private readonly pending = new Map<string, PendingCommand>();
   constructor(private readonly registry: DeviceRegistry, private readonly commandTimeoutMs = 15_000) {}
 
