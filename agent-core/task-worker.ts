@@ -20,6 +20,7 @@ export interface TaskWorkerOptions {
   workerId?: string;
   leaseMs?: number;
   maxTasksPerCycle?: number;
+  isDeviceAvailable?: (deviceId: string, founderId: string) => boolean;
 }
 
 /**
@@ -32,6 +33,7 @@ export class TaskWorker {
   private readonly workerId: string;
   private readonly leaseMs: number;
   private readonly maxTasksPerCycle: number;
+  private readonly isDeviceAvailable?: (deviceId: string, founderId: string) => boolean;
   private timer?: ReturnType<typeof setTimeout>;
   private cyclePromise?: Promise<{ scanned: number; executed: number; skipped: number; failed: number; busy?: boolean }>;
   private stopped = true;
@@ -54,6 +56,7 @@ export class TaskWorker {
     const requestedMaxTasks = Number.isFinite(options.maxTasksPerCycle) ? Math.floor(options.maxTasksPerCycle!) : 20;
     this.leaseMs = Math.min(300_000, Math.max(5_000, requestedLease));
     this.maxTasksPerCycle = Math.min(100, Math.max(1, requestedMaxTasks));
+    this.isDeviceAvailable = options.isDeviceAvailable;
     const requestedInterval = Number.isFinite(options.pollIntervalMs) ? options.pollIntervalMs! : 3000;
     this.pollIntervalMs = Math.min(60_000, Math.max(1_000, requestedInterval));
   }
@@ -88,6 +91,10 @@ export class TaskWorker {
     if (!isRead && !isApprovedWrite) return "skipped";
     if (isRead && envelope.task.requiresApproval) return "skipped";
     if (isApprovedWrite && (!envelope.task.requiresApproval || !this.approvals)) return "skipped";
+    if (isDeviceWrite) {
+      const deviceId = typeof envelope.args.deviceId === "string" ? envelope.args.deviceId : "";
+      if (!deviceId || !this.isDeviceAvailable?.(deviceId, this.founderId)) return "skipped";
+    }
 
     const actor: AgentIdentity = {
       id: "maya-internal-task-worker:" + this.workerId,
