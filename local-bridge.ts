@@ -170,7 +170,7 @@ export async function executeLocalBridgeCommand(rootInput: string, command: stri
       try { directoryHandle.closeSync(); } catch {}
     }
     return {
-      path: path.relative(root, directory) || ".",
+      path: String(args.path || "."),
       entries,
       count: entries.length,
       truncated,
