@@ -203,7 +203,7 @@ taskCapabilityRegistry.register({
     path: { type: "string", required: true, maxLength: 1024 },
     content: { type: "string", required: true, maxLength: 100_000 },
   },
-  timeoutMs: 15_000,
+  timeoutMs: 30_000,
   requiresApproval: true,
   verification: "Ask the enrolled local bridge to atomically replace the existing file and return a verified SHA-256 digest.",
 });
