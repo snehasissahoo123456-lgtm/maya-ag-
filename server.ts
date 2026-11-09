@@ -1326,9 +1326,10 @@ async function startServer() {
     const deviceId = typeof req.body?.deviceId === "string" ? req.body.deviceId : "";
     const content = req.body?.content;
     if (!instruction || instruction.length > 1000) return res.status(400).json({ success: false, error: "Instruction must contain 1–1000 characters." });
-    if (!["workspace.read_file", "workspace.write_file", "device.workspace.write_file", "device.workspace.create_file"].includes(capability)) return res.status(400).json({ success: false, error: "Capability is not enabled for the task control plane." });
+    if (!["workspace.read_file", "workspace.write_file", "device.workspace.write_file", "device.workspace.create_file", "device.workspace.create_directory"].includes(capability)) return res.status(400).json({ success: false, error: "Capability is not enabled for the task control plane." });
     if (!filePath || filePath.length > 1024) return res.status(400).json({ success: false, error: "A workspace-relative file path of 1–1024 characters is required." });
-    if (capability !== "workspace.read_file" && (typeof content !== "string" || Buffer.byteLength(content, "utf8") > 100_000)) return res.status(400).json({ success: false, error: "Write content must be text no larger than 100 KB." });
+    const requiresFileContent = ["workspace.write_file", "device.workspace.write_file", "device.workspace.create_file"].includes(capability);
+    if (requiresFileContent && (typeof content !== "string" || Buffer.byteLength(content, "utf8") > 100_000)) return res.status(400).json({ success: false, error: "File content must be text no larger than 100 KB." });
     if (capability.startsWith("device.workspace.") && (!deviceId || deviceId.length > 128)) return res.status(400).json({ success: false, error: "A valid enrolled device ID is required for a local-device write." });
     try {
       if (capability.startsWith("device.workspace.")) {
@@ -1342,7 +1343,11 @@ async function startServer() {
       const actor = { id: founderId, founderId, role: "founder" as const, scopes };
       const args = capability === "workspace.write_file"
         ? { path: filePath, content }
-        : capability.startsWith("device.workspace.") ? { deviceId, path: filePath, content } : { path: filePath };
+        : capability === "device.workspace.create_directory"
+          ? { deviceId, path: filePath }
+          : capability.startsWith("device.workspace.")
+            ? { deviceId, path: filePath, content }
+            : { path: filePath };
       const envelope = await taskOrchestrator.enqueue({
         id: "task-" + randomTaskId(),
         founderId,
