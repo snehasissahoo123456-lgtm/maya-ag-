@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import { createHash, randomUUID } from "node:crypto";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -65,7 +66,27 @@ export async function executeLocalBridgeCommand(rootInput: string, command: stri
     if (stat.size > 50_000) throw new Error("File exceeds the 50 KB read limit.");
     return { path: path.relative(root, file), content: fs.readFileSync(file, "utf8") };
   }
-  throw new Error("Local bridge command is not in the read-only allowlist.");
+  if (command === "workspace.write_file") {
+    const file = resolveAllowedPath(root, args.path);
+    const stat = fs.lstatSync(file);
+    if (!stat.isFile() || stat.isSymbolicLink()) throw new Error("Only existing regular non-symlink files can be replaced.");
+    if (stat.size > 100_000) throw new Error("Existing file exceeds the 100 KB write limit.");
+    const content = args.content;
+    if (typeof content !== "string" || Buffer.byteLength(content, "utf8") > 100_000) throw new Error("Replacement content must be text no larger than 100 KB.");
+    const temp = path.join(path.dirname(file), `.maya-write.${process.pid}.${randomUUID()}.tmp`);
+    fs.writeFileSync(temp, content, { encoding: "utf8", mode: stat.mode & 0o777, flag: "wx" });
+    try {
+      fs.renameSync(temp, file);
+    } catch (error) {
+      try { fs.rmSync(temp, { force: true }); } catch {}
+      throw error;
+    }
+    const verified = fs.readFileSync(file, "utf8");
+    if (verified !== content) throw new Error("Local write verification failed; resulting bytes differ from the approved payload.");
+    const sha256 = createHash("sha256").update(verified, "utf8").digest("hex");
+    return { path: path.relative(root, file), bytes: Buffer.byteLength(verified, "utf8"), sha256, verified: true };
+  }
+  throw new Error("Local bridge command is not in the allowlist.");
 }
 
 function readCredentials(file: string): BridgeCredentials | undefined {
