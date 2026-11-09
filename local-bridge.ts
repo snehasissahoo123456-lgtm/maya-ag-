@@ -204,12 +204,18 @@ export async function executeLocalBridgeCommand(rootInput: string, command: stri
         return;
       }
       directoriesScanned++;
-      let entries: fs.Dirent[];
+      const entries: fs.Dirent[] = [];
+      let directoryHandle: fs.Dir | undefined;
       try {
-        const found = fs.readdirSync(current, { withFileTypes: true });
-        if (found.length > 500) truncated = true;
-        entries = found.slice(0, 500);
+        directoryHandle = fs.opendirSync(current);
+        for (let index = 0; index < 500; index++) {
+          const entry = directoryHandle.readSync();
+          if (!entry) break;
+          entries.push(entry);
+        }
+        if (directoryHandle.readSync()) truncated = true;
       } catch { truncated = true; return; }
+      finally { try { directoryHandle?.closeSync(); } catch {} }
       for (const entry of entries) {
         if (stopped) return;
         const candidate = path.join(current, entry.name);
