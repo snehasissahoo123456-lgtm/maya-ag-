@@ -117,7 +117,7 @@ export class DeviceBridgeManager {
 
   isOnline(deviceId: string, founderId: string): boolean {
     const current = this.connected.get(deviceId);
-    return Boolean(current && current.device.founderId === founderId);
+    return Boolean(current && current.device.founderId === founderId && !this.revokedDeviceIds.has(deviceId));
   }
 
   async list(founderId: string): Promise<Array<RegisteredDevice & { online: boolean }>> {
@@ -128,6 +128,7 @@ export class DeviceBridgeManager {
   async revoke(deviceId: string, founderId: string): Promise<boolean> {
     const revoked = await this.registry.revoke(deviceId, founderId);
     if (!revoked) return false;
+    this.revokedDeviceIds.add(deviceId);
     const current = this.connected.get(deviceId);
     if (current) current.socket.close(4004, "Device revoked by Founder");
     return true;
@@ -144,7 +145,7 @@ export class DeviceBridgeManager {
     if (typeof input.path !== "string" || !input.path.trim() || input.path.length > 1024) throw new Error("A valid workspace-relative path is required.");
     if (typeof input.content !== "string" || Buffer.byteLength(input.content, "utf8") > 100_000) throw new Error("Replacement content must be text no larger than 100 KB.");
     const current = this.connected.get(input.deviceId);
-    if (!current || current.device.founderId !== input.founderId) throw new Error("Device is offline or not registered for this Founder.");
+    if (!current || current.device.founderId !== input.founderId || this.revokedDeviceIds.has(input.deviceId)) throw new Error("Device is offline, revoked or not registered for this Founder.");
     const requestId = randomUUID();
     const args = { path: input.path, content: input.content };
     return new Promise((resolve, reject) => {
@@ -173,7 +174,7 @@ export class DeviceBridgeManager {
       throw new Error("Workspace path is invalid.");
     }
     const current = this.connected.get(input.deviceId);
-    if (!current || current.device.founderId !== input.founderId) throw new Error("Device is offline or not registered for this Founder.");
+    if (!current || current.device.founderId !== input.founderId || this.revokedDeviceIds.has(input.deviceId)) throw new Error("Device is offline, revoked or not registered for this Founder.");
     const requestId = randomUUID();
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
