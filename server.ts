@@ -130,8 +130,11 @@ import { ApprovalLedger } from "./agent-core/approval-ledger.ts";
 import { TaskOrchestrator } from "./agent-core/task-orchestrator.ts";
 import { FileTaskRepository } from "./agent-core/file-task-repository.ts";
 import { FileAuditLogStore } from "./agent-core/audit-log-store.ts";
+import { createConversationRepository } from "./agent-core/create-conversation-repository.ts";
+import { normalizeIncomingGeminiHistory, restoreGeminiHistory, storeGeminiHistory } from "./agent-core/conversation-history.ts";
 
 const taskRepository = new FileTaskRepository();
+const conversationRepository = createConversationRepository();
 const taskCapabilityRegistry = new CapabilityRegistry();
 taskCapabilityRegistry.register({
   name: "workspace.read_file",
@@ -260,6 +263,53 @@ async function executeAgentTool(name: string, args: Record<string, unknown>): Pr
 
 function randomTaskId(): string {
   return randomBytes(8).toString("hex");
+}
+
+function resolveConversationId(value: unknown): string | null {
+  if (value === undefined || value === null || value === "") return "conversation-" + randomTaskId();
+  if (typeof value !== "string") return null;
+  const id = value.trim();
+  return id.length > 0 && id.length <= 128 ? id : null;
+}
+
+async function loadFounderChat(
+  ai: any,
+  founderId: string,
+  conversationId: string,
+  model: string | undefined,
+  config: any,
+  incomingHistory: unknown,
+): Promise<any> {
+  const cacheKey = `${founderId}:${conversationId}`;
+  const cached = chats.get(cacheKey);
+  if (cached) return cached;
+
+  const saved = await conversationRepository.get(conversationId, founderId);
+  const history = saved
+    ? restoreGeminiHistory(saved.messages)
+    : normalizeIncomingGeminiHistory(incomingHistory);
+  const chat = ai.chats.create({ model: resolveModel(model), config, history });
+  chats.set(cacheKey, chat);
+  if (chats.size > 1000) {
+    const oldestKey = chats.keys().next().value;
+    if (oldestKey) chats.delete(oldestKey);
+  }
+  return chat;
+}
+
+async function persistFounderConversation(chat: any, founderId: string, conversationId: string): Promise<void> {
+  const now = new Date().toISOString();
+  const existing = await conversationRepository.get(conversationId, founderId);
+  const messages = storeGeminiHistory(chat.getHistory(), existing?.messages || [], conversationId, now);
+  const firstUserMessage = messages.find(message => message.role === "user" && message.content);
+  await conversationRepository.upsert({
+    id: conversationId,
+    founderId,
+    title: existing?.title || firstUserMessage?.content.slice(0, 80) || "New conversation",
+    messages,
+    createdAt: existing?.createdAt || now,
+    updatedAt: now,
+  });
 }
 
 const authService = new AuthService(path.join(process.env.MAYA_DATA_DIR || path.resolve(process.cwd(), "..", "maya-data"), "sessions.json"));
@@ -942,6 +992,10 @@ You act as an autonomous founder-grade CTO, lead engineer, and QA engineer.
   app.post("/api/chat-message", async (req, res): Promise<any> => {
     try {
       const { sessionId, model, config: incomingConfig, history, message, msgConfig } = req.body || {};
+      const founderId = (req as any).authSession?.user?.id;
+      if (!founderId) return res.status(401).json({ error: "Verified Founder session required." });
+      const conversationId = resolveConversationId(sessionId);
+      if (!conversationId) return res.status(400).json({ error: "Conversation id must contain 1–128 characters." });
 
       // Check if this message is a persona control command
       const cmdResponse = handlePersonaCommands(String(message || ""));
@@ -993,17 +1047,10 @@ MULTILINGUAL & RAPID REACTION:
       }
 
       const ai = new GoogleGenAI({ apiKey });
-      let chat = sessionId ? chats.get(sessionId) : undefined;
-      if (!chat) {
-        chat = ai.chats.create({
-          model: resolveModel(model),
-          config,
-          history,
-        });
-        if (sessionId) chats.set(sessionId, chat);
-      }
+      const chat = await loadFounderChat(ai, founderId, conversationId, model, config, history);
       const response = await runFunctionCallingTurn(chat, message, executeAgentTool);
-      return res.json(serializeGenerateContentResponse(response));
+      await persistFounderConversation(chat, founderId, conversationId);
+      return res.json({ ...serializeGenerateContentResponse(response), sessionId: conversationId });
     } catch (error: any) {
       console.error("[Backend] /api/chat-message error:", error);
       return res.status(500).json({ error: error.message || "Failed to send chat message." });
@@ -1013,6 +1060,10 @@ MULTILINGUAL & RAPID REACTION:
   app.post("/api/chat-stream", async (req, res): Promise<any> => {
     try {
       const { sessionId, model, config: incomingConfig, history, message, msgConfig } = req.body || {};
+      const founderId = (req as any).authSession?.user?.id;
+      if (!founderId) return res.status(401).json({ error: "Verified Founder session required." });
+      const conversationId = resolveConversationId(sessionId);
+      if (!conversationId) return res.status(400).json({ error: "Conversation id must contain 1–128 characters." });
 
       // Check if this message is a persona control command
       const cmdResponse = handlePersonaCommands(String(message || ""));
@@ -1066,20 +1117,13 @@ MULTILINGUAL & RAPID REACTION:
       }
 
       const ai = new GoogleGenAI({ apiKey });
-      let chat = sessionId ? chats.get(sessionId) : undefined;
-      if (!chat) {
-        chat = ai.chats.create({
-          model: resolveModel(model),
-          config,
-          history,
-        });
-        if (sessionId) chats.set(sessionId, chat);
-      }
+      const chat = await loadFounderChat(ai, founderId, conversationId, model, config, history);
       const response = await runFunctionCallingTurn(chat, message, executeAgentTool);
+      await persistFounderConversation(chat, founderId, conversationId);
       res.setHeader("Content-Type", "application/x-ndjson");
       res.setHeader("Cache-Control", "no-cache");
       res.setHeader("Connection", "keep-alive");
-      res.write(JSON.stringify(serializeGenerateContentResponse(response)) + "\n");
+      res.write(JSON.stringify({ ...serializeGenerateContentResponse(response), sessionId: conversationId }) + "\n");
       res.end();
     } catch (error: any) {
       console.error("[Backend] /api/chat-stream error:", error);
