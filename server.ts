@@ -1003,6 +1003,7 @@ You act as an autonomous founder-grade CTO, lead engineer, and QA engineer.
         return res.json({
           text: cmdResponse,
           candidates: [{ content: { parts: [{ text: cmdResponse }] } }],
+          sessionId: conversationId,
         });
       }
 
@@ -1043,6 +1044,7 @@ MULTILINGUAL & RAPID REACTION:
         return res.json({
           text: fallbackText,
           candidates: [{ content: { parts: [{ text: fallbackText }] } }],
+          sessionId: conversationId,
         });
       }
 
@@ -1071,7 +1073,7 @@ MULTILINGUAL & RAPID REACTION:
         res.setHeader("Content-Type", "application/x-ndjson");
         res.setHeader("Cache-Control", "no-cache");
         res.setHeader("Connection", "keep-alive");
-        res.write(JSON.stringify({ text: cmdResponse, candidates: [{ content: { parts: [{ text: cmdResponse }] } }] }) + "\n");
+        res.write(JSON.stringify({ text: cmdResponse, candidates: [{ content: { parts: [{ text: cmdResponse }] } }], sessionId: conversationId }) + "\n");
         res.end();
         return;
       }
@@ -1109,7 +1111,7 @@ MULTILINGUAL & RAPID REACTION:
         const words = fallbackText.split(" ");
         for (let i = 0; i < words.length; i += 3) {
           const chunk = words.slice(i, i + 3).join(" ") + " ";
-          res.write(JSON.stringify({ text: chunk, candidates: [{ content: { parts: [{ text: chunk }] } }] }) + "\n");
+          res.write(JSON.stringify({ text: chunk, candidates: [{ content: { parts: [{ text: chunk }] } }], sessionId: conversationId }) + "\n");
           await new Promise((r) => setTimeout(r, 30));
         }
         res.end();
