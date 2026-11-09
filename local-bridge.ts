@@ -84,7 +84,7 @@ function resolveCreatablePath(root: string, relativePath: unknown): string {
 }
 
 export async function executeLocalBridgeCommand(rootInput: string, command: string, args: Record<string, unknown> = {}): Promise<unknown> {
-  const root = path.resolve(rootInput);
+  const root = fs.realpathSync(path.resolve(rootInput));
   if (command === "system.info") {
     return { node: process.version, platform: process.platform, architecture: process.arch, hostname: os.hostname(), uptimeSeconds: Math.floor(os.uptime()), memory: os.totalmem() };
   }
