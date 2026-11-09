@@ -6,7 +6,7 @@ The original repository is a web-based Action Engine cockpit built with TypeScri
 The current implementation is a prototype, not a production autonomous operator. Demo authentication and fabricated success responses have been removed; REST routes now default-deny without a verified session; WebSocket access requires a session cookie; and workspace file reads/listings are path-contained. Founder password sign-in uses a server-configured email/password, timing-safe password comparison, rate limiting, and an HttpOnly SameSite cookie. Founder sessions are now persisted for a single server instance using SHA-256 token hashes, atomic local JSON replacement, restrictive file permissions, expiry checks, and persisted revocation; raw bearer tokens are not written to disk. Google OAuth and SMS verification are not configured. Tasks, memories, persona preferences, task records, and approvals use local file stores; sessions, task state, approvals, and audit history use single-instance local stores rather than a transactional multi-instance database; audit events are redacted and bounded.
 
 ## Current development branch
-\`maya/persistent-founder-sessions\`
+\`maya/csrf-origin-protection\`
 
 ## Foundation work added
 - Persistent Founder session recovery and revocation using SHA-256 token hashes (single-instance file store; raw tokens are not persisted).
