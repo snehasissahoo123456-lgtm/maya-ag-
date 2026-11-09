@@ -31,7 +31,8 @@ export class MayaControlPlaneTasksWorkspace extends LitElement {
   @state() private worker: any = null;
   @state() private instruction = "";
   @state() private filePath = "README.md";
-  @state() private capability: "workspace.read_file" | "device.workspace.read_file" | "device.workspace.git_status" | "workspace.write_file" | "device.workspace.write_file" | "device.workspace.create_file" | "device.workspace.create_directory" = "workspace.read_file";
+  @state() private destinationPath = "archive/README.md";
+  @state() private capability: "workspace.read_file" | "device.workspace.read_file" | "device.workspace.git_status" | "workspace.write_file" | "device.workspace.write_file" | "device.workspace.create_file" | "device.workspace.create_directory" | "device.workspace.move_file" = "workspace.read_file";
   @state() private content = "";
   @state() private busy = false;
   @state() private busyId = "";
@@ -95,6 +96,11 @@ export class MayaControlPlaneTasksWorkspace extends LitElement {
     const isRead = ["workspace.read_file", "device.workspace.read_file", "device.workspace.git_status"].includes(this.capability);
     const isMutation = !isRead;
     const requiresContent = requiresFileContent(this.capability);
+    const isMoveFile = this.capability === "device.workspace.move_file";
+    if (isMoveFile && (!this.destinationPath.trim() || this.destinationPath.trim().length > 1024)) {
+      this.message = "Enter a valid destination path inside the paired-PC workspace.";
+      return;
+    }
     if (requiresContent && !this.content.length) {
       this.message = "Enter the exact file content before creating this task.";
       return;
@@ -111,8 +117,13 @@ export class MayaControlPlaneTasksWorkspace extends LitElement {
       const body: Record<string, unknown> = {
         instruction: this.instruction.trim(),
         capability: this.capability,
-        path: this.filePath.trim(),
       };
+      if (isMoveFile) {
+        body.fromPath = this.filePath.trim();
+        body.toPath = this.destinationPath.trim();
+      } else {
+        body.path = this.filePath.trim();
+      }
       if (requiresContent) body.content = this.content;
       if (this.capability.startsWith("device.workspace.")) body.deviceId = this.deviceId;
       const response = await this.request("/api/control-plane/tasks", { method: "POST", body: JSON.stringify(body) });
@@ -232,7 +243,7 @@ export class MayaControlPlaneTasksWorkspace extends LitElement {
         <section class="panel space-y-4">
           <div>
             <h3 class="font-medium text-white">Create a workspace task</h3>
-            <p class="muted mt-1">Reads are limited to non-sensitive text files up to 50 KB. File replacement/creation is limited to 100 KB and requires exact approval. Directory creation makes one new folder beneath an existing parent and also requires exact approval; recursive creation, symlinks and shell commands remain blocked.</p>
+            <p class="muted mt-1">Reads are limited to non-sensitive text files up to 50 KB. File replacement/creation is limited to 100 KB and requires exact approval. Directory creation is non-recursive. File moves require exact approval, remain inside the paired-PC workspace, and cannot overwrite an existing destination; symlinks and shell commands remain blocked.</p>
           </div>
           <div class="grid gap-3 md:grid-cols-2">
             <label class="space-y-1"><span class="muted">Task instruction</span><input .value=${this.instruction} @input=${(e: Event) => this.instruction = (e.target as HTMLInputElement).value} maxlength="1000" placeholder="Read the project overview"></label>
@@ -249,6 +260,7 @@ export class MayaControlPlaneTasksWorkspace extends LitElement {
               <option value="device.workspace.write_file">Replace an existing paired-PC text file (approval required)</option>
               <option value="device.workspace.create_file">Create a new paired-PC text file (approval required)</option>
               <option value="device.workspace.create_directory">Create one paired-PC directory (approval required)</option>
+              <option value="device.workspace.move_file">Move a paired-PC file without overwriting (approval required)</option>
             </select></label>
             ${this.capability.startsWith("device.workspace.") ? html`
               <label class="space-y-1 md:col-span-2"><span class="muted">Paired PC (must be online)</span><select .value=${this.deviceId} @change=${(e: Event) => this.deviceId = (e.target as HTMLSelectElement).value}>
@@ -256,7 +268,8 @@ export class MayaControlPlaneTasksWorkspace extends LitElement {
                 ${this.devices.map(device => html`<option value=${device.id} ?disabled=${!device.online || Boolean(device.revokedAt)}>${device.name} · ${device.revokedAt ? "revoked" : device.online ? "online" : "offline"}</option>`)}
               </select></label>
             ` : ""}
-            <label class="space-y-1 md:col-span-2"><span class="muted">${this.capability === "device.workspace.git_status" ? "Git workspace directory" : this.capability.startsWith("device.workspace.") ? "Device workspace-relative path" : "Workspace-relative path"}</span><input .value=${this.filePath} @input=${(e: Event) => this.filePath = (e.target as HTMLInputElement).value} maxlength="1024" placeholder=${this.capability === "device.workspace.git_status" ? "." : "docs/status.md"}></label>
+            <label class="space-y-1 md:col-span-2"><span class="muted">${this.capability === "device.workspace.git_status" ? "Git workspace directory" : this.capability === "device.workspace.move_file" ? "Source file path" : this.capability.startsWith("device.workspace.") ? "Device workspace-relative path" : "Workspace-relative path"}</span><input .value=${this.filePath} @input=${(e: Event) => this.filePath = (e.target as HTMLInputElement).value} maxlength="1024" placeholder=${this.capability === "device.workspace.git_status" ? "." : "docs/status.md"}></label>
+            ${this.capability === "device.workspace.move_file" ? html`<label class="space-y-1 md:col-span-2"><span class="muted">Destination path (must not already exist)</span><input .value=${this.destinationPath} @input=${(e: Event) => this.destinationPath = (e.target as HTMLInputElement).value} maxlength="1024" placeholder="archive/status.md"></label>` : ""}
             ${requiresFileContent(this.capability) ? html`
               <label class="space-y-1 md:col-span-2"><span class="muted">Exact file content (maximum 100 KB)</span><textarea .value=${this.content} @input=${(e: Event) => this.content = (e.target as HTMLTextAreaElement).value} maxlength="100000" placeholder="Paste the complete file content…"></textarea></label>
             ` : ""}
