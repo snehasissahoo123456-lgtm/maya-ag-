@@ -80,6 +80,7 @@ test("local bridge creates only one new directory under an existing non-sensitiv
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "maya-bridge-directory-"));
   try {
     fs.mkdirSync(path.join(root, "projects"));
+    fs.mkdirSync(path.join(root, ".ssh"));
     const created = await executeLocalBridgeCommand(root, "workspace.create_directory", { path: "projects/new-project" }) as any;
     assert.equal(created.created, true);
     assert.equal(created.verified, true);
