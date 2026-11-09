@@ -71,6 +71,8 @@ export async function executeLocalBridgeCommand(rootInput: string, command: stri
     const stat = fs.lstatSync(file);
     if (!stat.isFile() || stat.isSymbolicLink()) throw new Error("Only existing regular non-symlink files can be replaced.");
     if (stat.size > 100_000) throw new Error("Existing file exceeds the 100 KB write limit.");
+    const originalBytes = fs.readFileSync(file);
+    if (originalBytes.includes(0)) throw new Error("Binary files cannot be replaced through the local bridge.");
     const content = args.content;
     if (typeof content !== "string" || Buffer.byteLength(content, "utf8") > 100_000) throw new Error("Replacement content must be text no larger than 100 KB.");
     const temp = path.join(path.dirname(file), `.maya-write.${process.pid}.${randomUUID()}.tmp`);
