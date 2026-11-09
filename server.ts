@@ -1294,8 +1294,8 @@ async function startServer() {
   });
 
 
-  // Persistent Founder-scoped task control plane. Writes are restricted to exact-approved
-  // existing-file replacements; arbitrary shell and device-control actions remain blocked.
+  // Persistent Founder-scoped task control plane. Mutations are restricted to exact-approved
+  // workspace file writes and bounded local-device file/directory operations; shell and arbitrary device control remain blocked.
   app.get("/api/control-plane/tasks", async (req, res): Promise<any> => {
     const session = (req as any).authSession;
     const founderId = session?.user?.id;
