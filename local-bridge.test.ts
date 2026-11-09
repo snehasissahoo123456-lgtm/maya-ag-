@@ -199,6 +199,7 @@ test("local bridge search is bounded, literal and excludes sensitive, binary and
     fs.mkdirSync(path.join(root, "src"));
     fs.mkdirSync(path.join(root, ".ssh"));
     fs.writeFileSync(path.join(root, "src", "agent.ts"), "export function executeTask() { return true; }\nconst other = 1;");
+    fs.writeFileSync(path.join(root, "src", "config.ts"), 'const apiKey = "private-value-123";');
     fs.writeFileSync(path.join(root, "README.md"), "Maya local workspace\nTask worker documentation");
     fs.writeFileSync(path.join(root, ".env"), "GEMINI_API_KEY=private-token");
     fs.writeFileSync(path.join(root, ".ssh", "id_ed25519"), "private-key");
@@ -214,6 +215,11 @@ test("local bridge search is bounded, literal and excludes sensitive, binary and
     assert.equal(typeof result.filesScanned, "number");
     assert.equal(typeof result.directoriesScanned, "number");
     assert.equal(result.truncated, false);
+    const redacted = await executeLocalBridgeCommand(root, "workspace.search_files", { query: "apiKey" }) as any;
+    const credentialMatch = redacted.matches.find((item: any) => item.path === path.join("src", "config.ts"));
+    assert.ok(credentialMatch);
+    assert.equal(credentialMatch.preview.includes("private-value-123"), false);
+    assert.match(credentialMatch.preview, /\\[REDACTED\\]/);
     await assert.rejects(() => executeLocalBridgeCommand(root, "workspace.search_files", { query: "" }), /1–200 characters/i);
     await assert.rejects(() => executeLocalBridgeCommand(root, "workspace.search_files", { query: "x".repeat(201) }), /1–200 characters/i);
     await assert.rejects(() => executeLocalBridgeCommand(root, "workspace.search_files", { path: "../outside", query: "token" }), /escapes/i);
