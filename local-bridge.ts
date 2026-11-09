@@ -148,6 +148,34 @@ export async function executeLocalBridgeCommand(rootInput: string, command: stri
     }
     return entries;
   }
+  if (command === "workspace.list_directory") {
+    const directory = resolveAllowedPath(root, args.path || ".");
+    const stat = fs.lstatSync(directory);
+    if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error("Only workspace directories can be listed.");
+    const entries: Array<{ name: string; type: "file" | "directory" }> = [];
+    const directoryHandle = fs.opendirSync(directory);
+    let scanned = 0;
+    let truncated = false;
+    try {
+      while (scanned < 500 && entries.length < 100) {
+        const entry = directoryHandle.readSync();
+        if (!entry) break;
+        scanned++;
+        if (entry.isSymbolicLink() || isSensitive(path.join(directory, entry.name))) continue;
+        if (!entry.isFile() && !entry.isDirectory()) continue;
+        entries.push({ name: entry.name, type: entry.isDirectory() ? "directory" : "file" });
+      }
+      if (entries.length >= 100 || scanned >= 500) truncated = true;
+    } finally {
+      try { directoryHandle.closeSync(); } catch {}
+    }
+    return {
+      path: path.relative(root, directory) || ".",
+      entries,
+      count: entries.length,
+      truncated,
+    };
+  }
   if (command === "workspace.git_status") {
     const directory = resolveAllowedPath(root, args.path || ".");
     const stat = fs.lstatSync(directory);
