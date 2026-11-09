@@ -83,6 +83,46 @@ function resolveCreatablePath(root: string, relativePath: unknown): string {
   }
 }
 
+function resolveCreatableDirectoryPath(root: string, relativePath: unknown): string {
+  if (typeof relativePath !== "string" || !relativePath.trim() || relativePath.length > 1024 || path.isAbsolute(relativePath) || relativePath.includes("\\0")) {
+    throw new Error("A valid workspace-relative new-directory path is required.");
+  }
+  const segments = relativePath.split(/[\\/]+/);
+  if (segments.some(segment => !segment || segment === "." || segment === "..")) {
+    throw new Error("Directory paths must use explicit child names without dot segments.");
+  }
+  const realRoot = fs.realpathSync(root);
+  const normalized = relativePath.replace(/[\\/]+/g, path.sep);
+  const target = path.resolve(realRoot, normalized);
+  if (!isWithinRoot(realRoot, target) || target === realRoot) throw new Error("New-directory path escapes or equals the workspace root.");
+  const parent = path.dirname(target);
+  const relativeParent = path.relative(realRoot, parent);
+  let cursor = realRoot;
+  try {
+    for (const segment of relativeParent.split(path.sep).filter(Boolean)) {
+      cursor = path.join(cursor, segment);
+      const stat = fs.lstatSync(cursor);
+      if (stat.isSymbolicLink()) throw new Error("Symbolic links are blocked in the enrolled workspace.");
+      if (!stat.isDirectory()) throw new Error("New-directory parent must be an existing directory.");
+    }
+    const realParent = fs.realpathSync(parent);
+    if (!isWithinRoot(realRoot, realParent)) throw new Error("New-directory parent escapes the configured workspace root.");
+    const finalPath = path.join(realParent, path.basename(target));
+    if (isSensitive(finalPath)) throw new Error("Creation in sensitive workspace paths is blocked.");
+    try {
+      fs.lstatSync(finalPath);
+      throw new Error("Target directory already exists; create-directory never replaces.");
+    } catch (error) {
+      if (error instanceof Error && error.message.includes("already exists")) throw error;
+      if ((error as NodeJS.ErrnoException)?.code !== "ENOENT") throw error;
+    }
+    return finalPath;
+  } catch (error) {
+    if (error instanceof Error && ["Symbolic links", "escapes", "sensitive", "existing directory", "already exists"].some(marker => error.message.includes(marker))) throw error;
+    throw new Error("New-directory parent does not exist or cannot be resolved.");
+  }
+}
+
 export async function executeLocalBridgeCommand(rootInput: string, command: string, args: Record<string, unknown> = {}): Promise<unknown> {
   const root = fs.realpathSync(path.resolve(rootInput));
   if (command === "system.info") {
@@ -103,6 +143,16 @@ export async function executeLocalBridgeCommand(rootInput: string, command: stri
     if (!stat.isFile() || stat.isSymbolicLink()) throw new Error("Only regular non-symlink files can be read.");
     if (stat.size > 50_000) throw new Error("File exceeds the 50 KB read limit.");
     return { path: path.relative(root, file), content: fs.readFileSync(file, "utf8") };
+  }
+  if (command === "workspace.create_directory") {
+    const directory = resolveCreatableDirectoryPath(root, args.path);
+    fs.mkdirSync(directory, { mode: 0o755 });
+    const stat = fs.lstatSync(directory);
+    const realDirectory = fs.realpathSync(directory);
+    if (!stat.isDirectory() || stat.isSymbolicLink() || !isWithinRoot(root, realDirectory) || isSensitive(realDirectory)) {
+      throw new Error("Local directory creation could not be safely verified; inspect the target path before retrying.");
+    }
+    return { path: path.relative(root, realDirectory), created: true, verified: true };
   }
   if (command === "workspace.create_file") {
     const file = resolveCreatablePath(root, args.path);
