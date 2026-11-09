@@ -1367,12 +1367,12 @@ async function startServer() {
     if (!filePath || filePath.length > 1024) return res.status(400).json({ success: false, error: "A workspace-relative file path of 1–1024 characters is required." });
     const requiresFileContent = ["workspace.write_file", "device.workspace.write_file", "device.workspace.create_file"].includes(capability);
     if (requiresFileContent && (typeof content !== "string" || Buffer.byteLength(content, "utf8") > 100_000)) return res.status(400).json({ success: false, error: "File content must be text no larger than 100 KB." });
-    if (capability.startsWith("device.workspace.") && (!deviceId || deviceId.length > 128)) return res.status(400).json({ success: false, error: "A valid enrolled device ID is required for a local-device write." });
+    if (capability.startsWith("device.workspace.") && (!deviceId || deviceId.length > 128)) return res.status(400).json({ success: false, error: "A valid enrolled device ID is required for this local-device task." });
     try {
       if (capability.startsWith("device.workspace.")) {
         const device = (await deviceBridgeManager.list(founderId)).find(item => item.id === deviceId);
         if (!device) return res.status(404).json({ success: false, error: "Enrolled device not found for this Founder." });
-        if (!device.online) return res.status(409).json({ success: false, error: "The paired device must be online before creating a local write task." });
+        if (!device.online) return res.status(409).json({ success: false, error: "The paired device must be online before creating a local-device task." });
       }
       const scopes = capability === "workspace.write_file"
         ? ["workspace:read", "workspace:write"]
