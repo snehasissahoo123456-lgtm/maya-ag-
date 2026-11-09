@@ -33,10 +33,12 @@ test("local bridge permits only bounded replacement of an existing non-sensitive
   try {
     fs.writeFileSync(path.join(root, ".env"), "SECRET=value");
     fs.writeFileSync(path.join(root, "notes.txt"), "safe");
+    fs.writeFileSync(path.join(root, "binary.dat"), Buffer.from([0, 1, 2, 3]));
     await assert.rejects(() => executeLocalBridgeCommand(root, "workspace.read_file", { path: ".env" }), /sensitive/i);
     await assert.rejects(() => executeLocalBridgeCommand(root, "workspace.write_file", { path: ".env", content: "SECRET=changed" }), /sensitive/i);
     await assert.rejects(() => executeLocalBridgeCommand(root, "shell.exec", { command: "whoami" }), /allowlist/i);
     await assert.rejects(() => executeLocalBridgeCommand(root, "workspace.write_file", { path: "new-file.txt", content: "not allowed" }), /does not exist|resolve/i);
+    await assert.rejects(() => executeLocalBridgeCommand(root, "workspace.write_file", { path: "binary.dat", content: "text replacement" }), /binary files/i);
     const written = await executeLocalBridgeCommand(root, "workspace.write_file", { path: "notes.txt", content: "Founder-approved local replacement" }) as any;
     assert.equal(written.verified, true);
     assert.equal(written.path, "notes.txt");
