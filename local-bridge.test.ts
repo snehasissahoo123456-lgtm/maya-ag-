@@ -215,6 +215,9 @@ test("local bridge search is bounded, literal and excludes sensitive, binary and
     assert.equal(typeof result.filesScanned, "number");
     assert.equal(typeof result.directoriesScanned, "number");
     assert.equal(result.truncated, false);
+    fs.writeFileSync(path.join(root, "large.txt"), Buffer.alloc(256_001, 65));
+    const bounded = await executeLocalBridgeCommand(root, "workspace.search_files", { query: "not-present" }) as any;
+    assert.equal(bounded.truncated, true);
     const redacted = await executeLocalBridgeCommand(root, "workspace.search_files", { query: "apiKey" }) as any;
     const credentialMatch = redacted.matches.find((item: any) => item.path === path.join("src", "config.ts"));
     assert.ok(credentialMatch);
