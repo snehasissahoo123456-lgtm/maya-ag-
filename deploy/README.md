@@ -37,7 +37,7 @@ Workers are opt-in and disabled by default.
 - `MAYA_SCHEDULE_WORKER_ENABLED=true`: enqueues due one-time/hourly/24-hour/7-day read-only file jobs. It requires the task worker to be enabled.
 - `MAYA_PLAN_WORKER_ENABLED=true`: runs explicitly started Founder-approved goal plans. This worker currently requires file storage and one server instance; do not enable it with Supabase or multiple replicas.
 
-With Supabase storage, schedule jobs use database leases and the task worker uses task leases. The local device bridge registry and active WebSocket connection manager are still process-local/file-backed, so route a paired device's WebSocket and its device API requests to the same app instance (sticky routing) until the device registry and message relay are made distributed.
+With Supabase storage, schedule jobs use database leases and the task worker uses task leases. The local device bridge registry and active WebSocket connection manager are still process-local/file-backed. Route a paired device's WebSocket, device inventory/command APIs, device-write task creation, and the worker execution to the same app instance (sticky routing). Workers on instances without that device's active socket skip its queued write tasks rather than failing them. Use a single instance until the device registry and message relay are made distributed.
 
 ## Persistence and backup
 
