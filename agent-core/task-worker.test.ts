@@ -327,3 +327,24 @@ test("worker refuses local device write when the approved device or payload chan
   assert.equal(result.skipped, 1);
   assert.equal(executions, 0);
 });
+
+
+test("file-backed worker parks interrupted running tasks for manual recovery", async () => {
+  const { worker, repository } = setup();
+  const queued = createTask({ id: "worker-interrupted-1", founderId: "founder-primary", instruction: "Replace a file" });
+  const planning = transitionTask(queued, "planning");
+  const running = transitionTask(planning, "running");
+  await repository.put({
+    task: running,
+    capability: "workspace.read_file",
+    args: { path: "README.md" },
+    attempts: 1,
+    idempotencyKey: "worker-interrupted-1",
+  });
+  const result = await worker.runOnce();
+  assert.equal(result.executed, 0);
+  assert.equal(result.skipped, 1);
+  const saved = await repository.get("worker-interrupted-1");
+  assert.equal(saved?.task.status, "requires_recovery");
+  assert.match(saved?.task.lastError || "", /interrupted/i);
+});
