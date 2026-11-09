@@ -11,7 +11,7 @@ The current implementation is a prototype, not a production autonomous operator.
 ## Foundation work added
 - Persistent Founder session recovery and revocation using SHA-256 token hashes (single-instance file store; raw tokens are not persisted).
 - Durable bounded audit history with atomic file replacement and sensitive-field/content redaction (single-instance only).
-- Initial server-only Supabase conversation schema migration with owner immutability and adapter tests; live chat integration remains pending.
+- Initial server-only Supabase conversation schema migration with owner immutability and adapter tests; chat-message/chat-stream routes now persist Founder-scoped Gemini history, while live Supabase provisioning remains pending.
 - Target cloud + local architecture.
 - Security baseline and threat model.
 - Phased implementation roadmap.
