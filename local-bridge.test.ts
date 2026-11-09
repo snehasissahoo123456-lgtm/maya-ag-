@@ -191,3 +191,41 @@ test("local bridge returns bounded read-only Git status without diff contents", 
     await assert.rejects(() => executeLocalBridgeCommand(root, "shell.exec", { command: "whoami" }), /allowlist/i);
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
+
+
+test("local bridge search is bounded, literal and excludes sensitive, binary and symlink paths", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "maya-bridge-search-"));
+  try {
+    fs.mkdirSync(path.join(root, "src"));
+    fs.mkdirSync(path.join(root, ".ssh"));
+    fs.writeFileSync(path.join(root, "src", "agent.ts"), "export function executeTask() { return true; }\nconst other = 1;");
+    fs.writeFileSync(path.join(root, "README.md"), "Maya local workspace\nTask worker documentation");
+    fs.writeFileSync(path.join(root, ".env"), "GEMINI_API_KEY=private-token");
+    fs.writeFileSync(path.join(root, ".ssh", "id_ed25519"), "private-key");
+    fs.writeFileSync(path.join(root, "binary.dat"), Buffer.from([0, 1, 2, 3]));
+    const result = await executeLocalBridgeCommand(root, "workspace.search_files", {
+      path: ".", query: "EXECUTETASK", maxResults: 50,
+    }) as any;
+    assert.equal(result.query, "EXECUTETASK");
+    assert.ok(result.matches.some((item: any) => item.path === path.join("src", "agent.ts") && item.line === 1));
+    assert.equal(result.matches.some((item: any) => String(item.preview).includes("GEMINI_API_KEY")), false);
+    assert.equal(result.matches.some((item: any) => item.path.includes(".ssh")), false);
+    assert.equal(result.matches.some((item: any) => item.path === "binary.dat"), false);
+    assert.equal(typeof result.filesScanned, "number");
+    assert.equal(typeof result.directoriesScanned, "number");
+    assert.equal(result.truncated, false);
+    await assert.rejects(() => executeLocalBridgeCommand(root, "workspace.search_files", { query: "" }), /1–200 characters/i);
+    await assert.rejects(() => executeLocalBridgeCommand(root, "workspace.search_files", { query: "x".repeat(201) }), /1–200 characters/i);
+    await assert.rejects(() => executeLocalBridgeCommand(root, "workspace.search_files", { path: "../outside", query: "token" }), /escapes/i);
+    await assert.rejects(() => executeLocalBridgeCommand(root, "shell.exec", { command: "whoami" }), /allowlist/i);
+    if (process.platform !== "win32") {
+      const outside = fs.mkdtempSync(path.join(os.tmpdir(), "maya-search-outside-"));
+      try {
+        fs.writeFileSync(path.join(outside, "secret.txt"), "needle");
+        fs.symlinkSync(outside, path.join(root, "linked"), "dir");
+        const linked = await executeLocalBridgeCommand(root, "workspace.search_files", { query: "needle" }) as any;
+        assert.equal(linked.matches.some((item: any) => String(item.path).includes("linked")), false);
+      } finally { fs.rmSync(outside, { recursive: true, force: true }); }
+    }
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
