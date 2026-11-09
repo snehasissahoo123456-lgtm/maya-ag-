@@ -425,7 +425,7 @@ const taskOrchestrator = new TaskOrchestrator(
           throw error;
         }
         if (result?.verified !== true || result.moved !== true ||
-            typeof result.fromPath !== "string" || typeof result.toPath !== "string" ||
+            result.fromPath !== String(args.fromPath || "") || result.toPath !== String(args.toPath || "") ||
             typeof result.sha256 !== "string" || !/^[a-f0-9]{64}$/.test(result.sha256)) {
           throw new UncertainTaskExecutionError("Local device did not return valid move verification evidence; inspect both paths before retrying.");
         }
