@@ -133,7 +133,11 @@ export class MayaControlPlaneTasksWorkspace extends LitElement {
 
   private approvalFor(taskId: string, status?: string) {
     return this.approvals
-      .filter(item => item.taskId === taskId && (!status || item.status === status))
+      .filter(item =>
+        item.taskId === taskId &&
+        (!status || item.status === status) &&
+        !(status === "approved" && Date.parse(item.expiresAt) <= Date.now())
+      )
       .sort((a, b) => Date.parse(b.requestedAt) - Date.parse(a.requestedAt))[0];
   }
 
