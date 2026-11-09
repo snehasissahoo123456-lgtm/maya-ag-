@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { transitionTask } from "./task-lifecycle.ts";
 import type { CapabilityRegistry, AgentIdentity } from "./capability-registry.ts";
 import { digestAction, type ApprovalRepository } from "./approval-ledger.ts";
 import type { TaskEnvelope, TaskOrchestrator, TaskRepository } from "./task-orchestrator.ts";
@@ -36,6 +37,7 @@ export class TaskWorker {
   private stopped = true;
   private cycleActive = false;
   private readonly blockedTaskIds = new Set<string>();
+  private startupRecoveryDone = false;
   private status: TaskWorkerStatus = { enabled: false, running: false, executed: 0, skipped: 0, failed: 0 };
 
   constructor(
@@ -147,6 +149,18 @@ export class TaskWorker {
       } else {
         const envelopes = await this.repository.list(this.founderId);
         result.scanned = envelopes.length;
+        if (!this.startupRecoveryDone) {
+          for (const envelope of envelopes) {
+            if (envelope.task.founderId !== this.founderId || !["running", "verifying"].includes(envelope.task.status)) continue;
+            if (this.orchestrator.isExecuting(envelope.task.id)) continue;
+            envelope.task = transitionTask(envelope.task, "requires_recovery", {
+              error: "Task was interrupted by a previous worker process. Verify any side effects before creating a replacement task.",
+            });
+            await this.repository.put(envelope);
+            result.skipped++;
+          }
+          this.startupRecoveryDone = true;
+        }
         for (const envelope of envelopes) {
           if (envelope.task.founderId !== this.founderId || envelope.task.status !== "queued") continue;
           if (this.blockedTaskIds.has(envelope.task.id)) { result.skipped++; continue; }
