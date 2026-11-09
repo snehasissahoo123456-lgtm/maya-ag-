@@ -225,14 +225,14 @@ export class MayaControlPlaneTasksWorkspace extends LitElement {
         <section class="panel space-y-4">
           <div>
             <h3 class="font-medium text-white">Create a workspace task</h3>
-            <p class="muted mt-1">Reads are limited to non-sensitive text files up to 50 KB. Writes replace an existing non-sensitive file up to 100 KB; new files, directories, symlinks and shell commands are blocked.</p>
+            <p class="muted mt-1">Reads are limited to non-sensitive text files up to 50 KB. Writes replace an existing non-sensitive text file up to 100 KB; new files, directories, symlinks and shell commands are blocked.</p>
           </div>
           <div class="grid gap-3 md:grid-cols-2">
             <label class="space-y-1"><span class="muted">Task instruction</span><input .value=${this.instruction} @input=${(e: Event) => this.instruction = (e.target as HTMLInputElement).value} maxlength="1000" placeholder="Read the project overview"></label>
             <label class="space-y-1"><span class="muted">Capability</span><select .value=${this.capability} @change=${(e: Event) => this.capability = (e.target as HTMLSelectElement).value as any}>
               <option value="workspace.read_file">Read a workspace file</option>
-              <option value="workspace.write_file">Replace an existing server file (approval required)</option>
-              <option value="device.workspace.write_file">Replace an existing paired-PC file (approval required)</option>
+              <option value="workspace.write_file">Replace an existing server text file (approval required)</option>
+              <option value="device.workspace.write_file">Replace an existing paired-PC text file (approval required)</option>
             </select></label>
             ${this.capability === "device.workspace.write_file" ? html`
               <label class="space-y-1 md:col-span-2"><span class="muted">Paired PC (must be online)</span><select .value=${this.deviceId} @change=${(e: Event) => this.deviceId = (e.target as HTMLSelectElement).value}>
