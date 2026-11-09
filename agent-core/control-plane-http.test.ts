@@ -69,9 +69,16 @@ test("real HTTP control-plane routes enforce Founder auth and execute only the r
     const cookie = login.headers.get("set-cookie")?.split(";")[0];
     assert.ok(cookie, "Founder login should set an HttpOnly session cookie");
 
+    const csrfBlocked = await fetch(baseUrl + "/api/control-plane/tasks", {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie, origin: "https://attacker.invalid" },
+      body: JSON.stringify({ instruction: "This must be blocked", path: "README.md" }),
+    });
+    assert.equal(csrfBlocked.status, 403, "cross-origin cookie-authenticated mutations must be rejected");
+
     const created = await fetch(baseUrl + "/api/control-plane/tasks", {
       method: "POST",
-      headers: { "content-type": "application/json", cookie },
+      headers: { "content-type": "application/json", cookie, origin: baseUrl },
       body: JSON.stringify({ instruction: "Read the project README for verification", path: "README.md" }),
     });
     assert.equal(created.status, 201);
@@ -85,7 +92,7 @@ test("real HTTP control-plane routes enforce Founder auth and execute only the r
     assert.ok(listBody.tasks.some((item: any) => item.task.id === taskId));
 
     const executed = await fetch(baseUrl + `/api/control-plane/tasks/${encodeURIComponent(taskId)}/execute`, {
-      method: "POST", headers: { cookie },
+      method: "POST", headers: { cookie, origin: baseUrl },
     });
     assert.equal(executed.status, 200);
     const executedBody = await executed.json() as any;
@@ -94,7 +101,7 @@ test("real HTTP control-plane routes enforce Founder auth and execute only the r
     assert.equal(executedBody.result.path, "README.md");
 
     const repeated = await fetch(baseUrl + `/api/control-plane/tasks/${encodeURIComponent(taskId)}/execute`, {
-      method: "POST", headers: { cookie },
+      method: "POST", headers: { cookie, origin: baseUrl },
     });
     assert.equal(repeated.status, 409, "Completed tasks must not execute a second time");
   } catch (error) {
