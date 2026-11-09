@@ -207,8 +207,9 @@ taskCapabilityRegistry.register({
   requiresApproval: true,
   verification: "Ask the enrolled local bridge to atomically replace the existing file and return a verified SHA-256 digest.",
 });
-// Only read_file and exact-Founder-approved write_file are enabled. Shell, deploy,
-// account, payment and arbitrary device capabilities remain blocked.
+// Enabled task capabilities are safe server-workspace reads and exact-Founder-approved
+// replacement of existing server or paired-device files. Shell, deploy, payment and
+// arbitrary device-control capabilities remain blocked.
 const approvalRepository = createApprovalRepository();
 const taskOrchestrator = new TaskOrchestrator(
   taskRepository,
@@ -1203,8 +1204,8 @@ async function startServer() {
   });
 
 
-  // Persistent task control plane. The current adapter is single-instance and exposes
-  // one read-only capability; broader execution remains disabled until its controls exist.
+  // Persistent Founder-scoped task control plane. Writes are restricted to exact-approved
+  // existing-file replacements; arbitrary shell and device-control actions remain blocked.
   app.get("/api/control-plane/tasks", async (req, res): Promise<any> => {
     const session = (req as any).authSession;
     const founderId = session?.user?.id;
