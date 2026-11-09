@@ -274,8 +274,8 @@ const taskOrchestrator = new TaskOrchestrator(
         if (!stat.isFile() || stat.isSymbolicLink()) throw new Error("Only existing regular files can be replaced; symlinks and new files are blocked.");
         if (stat.size > 100_000) throw new Error("Existing file exceeds the 100 KB write limit.");
         const temp = path.join(path.dirname(file), `.maya-write.${process.pid}.${randomUUID()}.tmp`);
-        fs.writeFileSync(temp, content, { encoding: "utf8", mode: stat.mode & 0o777, flag: "wx" });
         try {
+          fs.writeFileSync(temp, content, { encoding: "utf8", mode: stat.mode & 0o777, flag: "wx" });
           if (signal.aborted) throw new Error("Task execution was cancelled before commit.");
           fs.renameSync(temp, file);
         } catch (error) {
