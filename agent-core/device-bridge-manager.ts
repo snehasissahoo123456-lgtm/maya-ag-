@@ -155,10 +155,10 @@ export class DeviceBridgeManager {
       this.pending.set(requestId, { deviceId: input.deviceId, resolve, reject, timer, sideEffecting: true });
       try {
         current.socket.send(JSON.stringify({ type: "command", requestId, command: "workspace.write_file", args }));
-      } catch (error) {
+      } catch {
         clearTimeout(timer);
         this.pending.delete(requestId);
-        reject(error instanceof Error ? error : new Error(String(error)));
+        reject(new DeviceCommandUncertainError("The local write command could not be confirmed as sent; inspect the target file before retrying."));
       }
     });
   }
