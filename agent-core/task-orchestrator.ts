@@ -15,6 +15,13 @@ export interface TaskRepository {
 export interface CapabilityRunner {
   run(input: { capability: string; args: Record<string, unknown>; timeoutMs: number; idempotencyKey: string; signal: AbortSignal }): Promise<{ result: unknown; evidence: VerificationEvidence }>;
 }
+
+export class UncertainTaskExecutionError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "UncertainTaskExecutionError";
+  }
+}
 export class TaskOrchestrator {
   private readonly executing = new Set<string>();
   constructor(private readonly repository: TaskRepository, private readonly capabilities: CapabilityRegistry, private readonly approvals: ApprovalRepository, private readonly runner: CapabilityRunner, private readonly audit?: AuditRepository) {}
@@ -111,7 +118,8 @@ export class TaskOrchestrator {
       return { task: envelope.task, result: output.result };
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
-      envelope.task = transitionTask(envelope.task, envelope.task.status === "verifying" ? "requires_recovery" : "failed", { error: reason });
+      const requiresRecovery = envelope.task.status === "verifying" || error instanceof UncertainTaskExecutionError;
+      envelope.task = transitionTask(envelope.task, requiresRecovery ? "requires_recovery" : "failed", { error: reason });
       await this.repository.put(envelope);
       if (envelope.task.status === "failed") {
         try { await this.recordAudit(actor, "task.execution_failed", envelope, { error: reason.slice(0, 500) }); } catch { /* preserve original execution error */ }
