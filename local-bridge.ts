@@ -238,7 +238,7 @@ export async function executeLocalBridgeCommand(rootInput: string, command: stri
                 path: path.relative(root, candidate),
                 line: index + 1,
                 preview: lines[index].trim().slice(0, 240)
-                  .replace(/((?:api[_-]?key|client[_-]?secret|password|passwd|secret|token|authorization|private[_-]?key)\s*[:=]\s*)(["']?)[^"',;\\s]+/gi, "$1[REDACTED]")
+                  .replace(/((?:api[_-]?key|client[_-]?secret|password|passwd|secret|token|authorization|private[_-]?key)\s*[:=]\s*)(["']?)[^"',;\s]+/gi, "$1[REDACTED]")
                   .replace(/\bBearer\s+[A-Za-z0-9._~+\/-]+=*/gi, "Bearer [REDACTED]"),
               });
               if (matches.length >= maxResults) {
