@@ -269,6 +269,13 @@ test("local bridge directory listing is bounded and excludes sensitive and symli
       assert.ok(entries.some(item => item.name === "README.md" && item.type === "file"));
       assert.equal(entries.some(item => item.name === ".env" || item.name === ".ssh"), false);
     }
+    const detailed = await executeLocalBridgeCommand(root, "workspace.list_directory", { path: "." }) as any;
+    assert.equal(detailed.path, ".");
+    assert.equal(detailed.count, detailed.entries.length);
+    assert.equal(detailed.truncated, false);
+    assert.ok(detailed.entries.some((item: any) => item.name === "README.md" && item.type === "file"));
+    assert.equal(detailed.entries.some((item: any) => item.name === ".env" || item.name === ".ssh" || item.name === "linked"), false);
     await assert.rejects(() => executeLocalBridgeCommand(root, "workspace.list", { path: "../outside" }), /escapes/i);
+    await assert.rejects(() => executeLocalBridgeCommand(root, "workspace.list_directory", { path: "../outside" }), /escapes/i);
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
