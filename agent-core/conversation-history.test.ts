@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { restoreGeminiHistory, storeGeminiHistory } from "./conversation-history.ts";
+import { normalizeIncomingGeminiHistory, restoreGeminiHistory, storeGeminiHistory } from "./conversation-history.ts";
 import type { ConversationMessage } from "./conversation-store.ts";
 
 test("stores Gemini user/model turns and restores SDK role names and function parts", () => {
@@ -29,4 +29,16 @@ test("stores Gemini user/model turns and restores SDK role names and function pa
 test("rejects invalid roles and oversized message parts", () => {
   assert.throws(() => storeGeminiHistory([{ role: "system", parts: [] }], [], "conversation-1"), /unsupported message role/);
   assert.throws(() => storeGeminiHistory([{ role: "user", parts: [{ text: "x".repeat(1_000_001) }] }], [], "conversation-1"), /storage limit/);
+});
+
+test("normalizes only valid user/model history supplied by the browser", () => {
+  assert.deepEqual(normalizeIncomingGeminiHistory([
+    { role: "user", parts: [{ text: "hi" }] },
+    { role: "assistant", parts: [{ text: "hello" }] },
+  ]), [
+    { role: "user", parts: [{ text: "hi" }] },
+    { role: "model", parts: [{ text: "hello" }] },
+  ]);
+  assert.throws(() => normalizeIncomingGeminiHistory([{ role: "system", parts: [] }]), /unsupported role/);
+  assert.throws(() => normalizeIncomingGeminiHistory([{ role: "user", parts: "bad" }]), /invalid or oversized/);
 });
