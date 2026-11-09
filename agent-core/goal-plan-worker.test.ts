@@ -20,6 +20,11 @@ const saveStep: GoalPlan["steps"][number] = {
   args: { content: "approved lesson" }, dependsOn: ["read_step"],
   expectedResult: "The memory note is saved", requiresFounderApproval: true,
 };
+const laterSaveStep: GoalPlan["steps"][number] = {
+  id: "later_save_step", title: "Save a later Founder-approved note", tool: "memory_save",
+  args: { content: "later approved lesson" }, dependsOn: ["save_step"],
+  expectedResult: "The later memory note is saved", requiresFounderApproval: true,
+};
 
 test("background worker executes explicitly started plans and pauses at an unapproved mutation", async () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "maya-plan-worker-"));
@@ -27,7 +32,7 @@ test("background worker executes explicitly started plans and pauses at an unapp
     const store = new GoalPlanStore(directory);
     const calls: string[] = [];
     const executor = new GoalPlanExecutor(store, async tool => { calls.push(tool); return { tool, ok: true }; });
-    const created = await store.create("founder-a", plan([readStep, saveStep]));
+    const created = await store.create("founder-a", plan([readStep, saveStep, laterSaveStep]));
     await executor.start("founder-a", created.id);
     const worker = new GoalPlanWorker(store, executor, "founder-a");
     const first = await worker.runOnce();
@@ -35,11 +40,20 @@ test("background worker executes explicitly started plans and pauses at an unapp
     assert.equal(first.awaitingApproval, 1);
     assert.deepEqual(calls, ["system_info"]);
     assert.equal((await store.get("founder-a", created.id))?.status, "awaiting_approval");
+    await assert.rejects(
+      () => executor.approveStep("founder-a", created.id, "later_save_step"),
+      /only the exact step currently awaiting Founder approval/i,
+    );
 
     await executor.approveStep("founder-a", created.id, "save_step");
     const second = await worker.runOnce();
     assert.equal(second.completed, 1);
     assert.deepEqual(calls, ["system_info", "memory_save"]);
+    assert.equal((await store.get("founder-a", created.id))?.status, "awaiting_approval");
+    await executor.approveStep("founder-a", created.id, "later_save_step");
+    const third = await worker.runOnce();
+    assert.equal(third.completed, 1);
+    assert.deepEqual(calls, ["system_info", "memory_save", "memory_save"]);
     assert.equal((await store.get("founder-a", created.id))?.status, "completed");
   } finally { fs.rmSync(directory, { recursive: true, force: true }); }
 });
