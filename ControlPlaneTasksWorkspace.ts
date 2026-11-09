@@ -10,7 +10,7 @@ interface ControlTask {
   capability: string;
   args: Record<string, unknown>;
 }
-interface ControlDevice { id: string; name: string; platform: string; online: boolean; }
+interface ControlDevice { id: string; name: string; platform: string; online: boolean; revokedAt?: string; }
 interface ControlApproval {
   id: string; taskId: string; capability: string; actionDigest: string;
   requestedAt: string; expiresAt: string;
@@ -237,7 +237,7 @@ export class MayaControlPlaneTasksWorkspace extends LitElement {
             ${this.capability === "device.workspace.write_file" ? html`
               <label class="space-y-1 md:col-span-2"><span class="muted">Paired PC (must be online)</span><select .value=${this.deviceId} @change=${(e: Event) => this.deviceId = (e.target as HTMLSelectElement).value}>
                 <option value="">Select a paired PC</option>
-                ${this.devices.map(device => html`<option value=${device.id} ?disabled=${!device.online}>${device.name} · ${device.online ? "online" : "offline"}</option>`)}
+                ${this.devices.map(device => html`<option value=${device.id} ?disabled=${!device.online || Boolean(device.revokedAt)}>${device.name} · ${device.revokedAt ? "revoked" : device.online ? "online" : "offline"}</option>`)}
               </select></label>
             ` : ""}
             <label class="space-y-1 md:col-span-2"><span class="muted">${this.capability === "device.workspace.write_file" ? "Device workspace-relative path" : "Workspace-relative path"}</span><input .value=${this.filePath} @input=${(e: Event) => this.filePath = (e.target as HTMLInputElement).value} maxlength="1024" placeholder="docs/status.md"></label>
@@ -258,7 +258,9 @@ export class MayaControlPlaneTasksWorkspace extends LitElement {
             const task = item.task;
             const pending = this.approvalFor(task.id, "pending");
             const approved = this.approvalFor(task.id, "approved");
-            const deviceOnline = !item.capability.startsWith("device.") || this.devices.some(device => device.id === String(item.args.deviceId || "") && device.online);
+            const taskDevice = this.devices.find(device => device.id === String(item.args.deviceId || ""));
+            const deviceRevoked = Boolean(taskDevice?.revokedAt);
+            const deviceOnline = !item.capability.startsWith("device.") || Boolean(taskDevice?.online && !deviceRevoked);
             const canExecute = task.status === "queued" && (!task.requiresApproval || Boolean(approved)) && !workerEnabled && deviceOnline;
             return html`
               <article class="panel space-y-3">
@@ -289,7 +291,7 @@ export class MayaControlPlaneTasksWorkspace extends LitElement {
                 ${approved ? html`<p class="muted text-emerald-300">Approved exact action · ${new Date(approved.expiresAt).toLocaleString()} expiry</p>` : ""}
                 ${task.requiresApproval && task.status === "queued" && !pending && !approved ? html`<button class="btn" ?disabled=${this.busyId === task.id} @click=${() => this.requestApproval(item)}>Request Founder approval</button>` : ""}
                 ${canExecute ? html`<button class="btn primary" ?disabled=${this.busyId === task.id} @click=${() => this.executeTask(item)}>${this.busyId === task.id ? "Executing…" : task.requiresApproval ? "Execute approved replacement" : "Execute read task"}</button>` : ""}
-                ${workerEnabled && task.status === "queued" ? html`<p class="muted">${item.capability.startsWith("device.") && !deviceOnline ? "Waiting for the paired PC to reconnect; this worker will skip the task until that device is online." : "The background worker will process this queued task. Approval-gated writes remain paused until you approve them."}</p>` : ""}
+                ${workerEnabled && task.status === "queued" ? html`<p class="muted">${item.capability.startsWith("device.") && deviceRevoked ? "This paired PC was revoked. This task cannot execute; pair a replacement PC and create a new task." : item.capability.startsWith("device.") && !deviceOnline ? "Waiting for the paired PC to reconnect; this worker will skip the task until that device is online." : "The background worker will process this queued task. Approval-gated writes remain paused until you approve them."}</p>` : ""}
                 ${task.status === "requires_recovery" ? html`<p class="text-xs text-amber-200">Execution outcome is uncertain. Verify the target file on the device before creating another write task; Maya will not replay this action automatically.</p>` : ""}
                 ${task.lastError ? html`<p class="text-xs text-rose-300">${task.lastError}</p>` : ""}
                 ${task.verificationEvidence?.length ? html`<div class="rounded-lg bg-slate-950/60 p-3"><div class="muted mb-1">Verification evidence</div>${task.verificationEvidence.map(evidence => html`<p class="text-[11px] text-emerald-300">${evidence.kind} · ${evidence.reference || "verified"} · ${new Date(evidence.observedAt).toLocaleString()}</p>`)}</div>` : ""}
