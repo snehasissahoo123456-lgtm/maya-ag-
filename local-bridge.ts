@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import { spawnSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import os from "node:os";
 import path from "node:path";
@@ -136,6 +137,39 @@ export async function executeLocalBridgeCommand(rootInput: string, command: stri
       .filter(entry => !entry.isSymbolicLink() && !isSensitive(path.join(directory, entry.name)))
       .slice(0, 100)
       .map(entry => ({ name: entry.name, type: entry.isDirectory() ? "directory" : "file" }));
+  }
+  if (command === "workspace.git_status") {
+    const directory = resolveAllowedPath(root, args.path || ".");
+    const stat = fs.lstatSync(directory);
+    if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error("Git status path must be a regular workspace directory.");
+    const processResult = spawnSync("git", [
+      "-c", "core.fsmonitor=false",
+      "-c", "core.pager=cat",
+      "status", "--porcelain=v1", "--branch", "--untracked-files=no", "--no-renames",
+    ], {
+      cwd: directory,
+      encoding: "utf8",
+      timeout: 5_000,
+      maxBuffer: 64 * 1024,
+      windowsHide: true,
+      env: { ...process.env, GIT_OPTIONAL_LOCKS: "0", GIT_TERMINAL_PROMPT: "0", GIT_PAGER: "cat" },
+    });
+    if (processResult.error) throw new Error("Git status could not run: " + processResult.error.message.slice(0, 200));
+    if (processResult.status !== 0) throw new Error("Git status failed: " + String(processResult.stderr || "Not a Git repository.").trim().slice(0, 300));
+    const lines = String(processResult.stdout || "").split(/\\r?\\n/).filter(Boolean);
+    const branch = lines.find(line => line.startsWith("## "))?.slice(3) || "unknown";
+    const changes = lines.filter(line => !line.startsWith("## ")).flatMap(line => {
+      const rawPath = line.slice(3).split(" -> ").pop() || "";
+      if (!rawPath || isSensitive(path.resolve(directory, rawPath))) return [];
+      return [{ status: line.slice(0, 2), path: rawPath.slice(0, 1024) }];
+    });
+    return {
+      repository: path.relative(root, directory) || ".",
+      branch,
+      changes: changes.slice(0, 200),
+      changeCount: changes.length,
+      truncated: changes.length > 200,
+    };
   }
   if (command === "workspace.read_file") {
     const file = resolveAllowedPath(root, args.path);
