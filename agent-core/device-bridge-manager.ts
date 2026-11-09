@@ -107,6 +107,36 @@ export class DeviceBridgeManager {
     return true;
   }
 
+
+  /**
+   * Trusted server-side path used only by the task capability runner after the
+   * TaskOrchestrator has consumed an exact Founder approval. This command is
+   * deliberately not added to executeCommand's public read-only allowlist.
+   */
+  async executeApprovedWrite(input: { deviceId: string; founderId: string; path: string; content: string }): Promise<unknown> {
+    if (!input.deviceId || input.deviceId.length > 128 || !input.founderId) throw new Error("A valid Founder-owned device is required.");
+    if (typeof input.path !== "string" || !input.path.trim() || input.path.length > 1024) throw new Error("A valid workspace-relative path is required.");
+    if (typeof input.content !== "string" || Buffer.byteLength(input.content, "utf8") > 100_000) throw new Error("Replacement content must be text no larger than 100 KB.");
+    const current = this.connected.get(input.deviceId);
+    if (!current || current.device.founderId !== input.founderId) throw new Error("Device is offline or not registered for this Founder.");
+    const requestId = randomUUID();
+    const args = { path: input.path, content: input.content };
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.pending.delete(requestId);
+        reject(new Error("Local device write command timed out."));
+      }, this.commandTimeoutMs);
+      this.pending.set(requestId, { deviceId: input.deviceId, resolve, reject, timer });
+      try {
+        current.socket.send(JSON.stringify({ type: "command", requestId, command: "workspace.write_file", args }));
+      } catch (error) {
+        clearTimeout(timer);
+        this.pending.delete(requestId);
+        reject(error instanceof Error ? error : new Error(String(error)));
+      }
+    });
+  }
+
   async executeCommand(input: { deviceId: string; founderId: string; command: string; args?: Record<string, unknown> }): Promise<unknown> {
     if (!ALLOWED_COMMANDS.has(input.command)) throw new Error("Device command is not in the read-only allowlist.");
     const args = input.args || {};
