@@ -62,6 +62,21 @@ function setup(run: (input: any) => Promise<any> = async () => ({
     requiresApproval: true,
     verification: "Read back and hash the written file.",
   });
+  registry.register({
+    name: "device.workspace.write_file",
+    description: "Replace an existing local device workspace file after Founder approval.",
+    risk: "high",
+    allowedRoles: ["founder", "worker"],
+    requiredScopes: ["device:write"],
+    arguments: {
+      deviceId: { type: "string", required: true, maxLength: 128 },
+      path: { type: "string", required: true, maxLength: 1024 },
+      content: { type: "string", required: true, maxLength: 100_000 },
+    },
+    timeoutMs: 5000,
+    requiresApproval: true,
+    verification: "Read back the local file and verify its SHA-256 digest.",
+  });
   const approvals = new ApprovalLedger();
   const orchestrator = new TaskOrchestrator(repository, registry, approvals, { run });
   const worker = new TaskWorker(repository, orchestrator, registry, { founderId: "founder-primary", pollIntervalMs: 1000 }, approvals);
@@ -261,4 +276,54 @@ test("worker never executes a write without a matching approval digest", async (
   assert.equal(result.skipped, 1);
   assert.equal(executions, 0);
   assert.equal((await repository.get("worker-write-unapproved"))?.task.status, "queued");
+});
+
+
+test("worker executes local device writes only after exact Founder approval", async () => {
+  let executedArgs: Record<string, unknown> | undefined;
+  const { orchestrator, worker, repository, approvals } = setup(async input => {
+    executedArgs = input.args;
+    return {
+      result: { verified: true, sha256: "c".repeat(64) },
+      evidence: { kind: "device-write-sha256", description: "Local device file replacement verified.", reference: "sha256:" + "c".repeat(64), observedAt: new Date().toISOString() },
+    };
+  });
+  const deviceFounder = { ...founder, scopes: ["device:write"] };
+  const args = { deviceId: "device-123", path: "reports/status.md", content: "Approved local PC content" };
+  await orchestrator.enqueue({
+    id: "worker-device-write-1", founderId: "founder-primary", instruction: "Replace a local PC report",
+    capability: "device.workspace.write_file", args, actor: deviceFounder,
+  });
+  const pending = await orchestrator.requestApproval("worker-device-write-1", deviceFounder);
+  await orchestrator.decideApproval({ approvalId: pending.approvalId, approved: true, actor: founder });
+  const result = await worker.runOnce();
+  assert.equal(result.executed, 1);
+  assert.deepEqual(executedArgs, args);
+  assert.equal((await repository.get("worker-device-write-1"))?.task.status, "completed");
+  assert.equal((await approvals.listForFounder("founder-primary")).find(item => item.id === pending.approvalId)?.status, "consumed");
+});
+
+test("worker refuses local device write when the approved device or payload changes", async () => {
+  let executions = 0;
+  const { orchestrator, worker, repository } = setup(async () => {
+    executions++;
+    return { result: {}, evidence: { kind: "device-write", description: "Should not run", observedAt: new Date().toISOString() } };
+  });
+  const deviceFounder = { ...founder, scopes: ["device:write"] };
+  await orchestrator.enqueue({
+    id: "worker-device-write-tamper", founderId: "founder-primary", instruction: "Replace a local PC report",
+    capability: "device.workspace.write_file",
+    args: { deviceId: "device-123", path: "reports/status.md", content: "Original approved payload" },
+    actor: deviceFounder,
+  });
+  const pending = await orchestrator.requestApproval("worker-device-write-tamper", deviceFounder);
+  await orchestrator.decideApproval({ approvalId: pending.approvalId, approved: true, actor: founder });
+  const envelope = await repository.get("worker-device-write-tamper");
+  assert.ok(envelope);
+  envelope.args.deviceId = "different-device";
+  await repository.put(envelope);
+  const result = await worker.runOnce();
+  assert.equal(result.executed, 0);
+  assert.equal(result.skipped, 1);
+  assert.equal(executions, 0);
 });
