@@ -45,8 +45,22 @@ export class TaskOrchestrator {
     if (!approval) throw new Error("Approval not found for this Founder.");
     const envelope = await this.requireTask(approval.taskId, input.actor.founderId);
     if (envelope.task.status !== "awaiting_approval") throw new Error("Task is no longer waiting for this approval.");
-    const decision = await this.approvals.decide({ approvalId: input.approvalId, founderId: input.actor.founderId, approved: input.approved });
-    if (decision.status === "expired") throw new Error("Approval request expired.");
+    let decision;
+    try {
+      decision = await this.approvals.decide({ approvalId: input.approvalId, founderId: input.actor.founderId, approved: input.approved });
+    } catch (error) {
+      if (!(error instanceof Error) || !/approval request expired/i.test(error.message)) throw error;
+      envelope.task = transitionTask(envelope.task, "queued");
+      await this.repository.put(envelope);
+      await this.recordAudit(input.actor, "task.approval_decided", envelope, { approvalId: approval.id, approved: false, expired: true });
+      throw new Error("Approval request expired; task returned to the queue. Request a new approval.");
+    }
+    if (decision.status === "expired") {
+      envelope.task = transitionTask(envelope.task, "queued");
+      await this.repository.put(envelope);
+      await this.recordAudit(input.actor, "task.approval_decided", envelope, { approvalId: approval.id, approved: false, expired: true });
+      throw new Error("Approval request expired; task returned to the queue. Request a new approval.");
+    }
     envelope.task = input.approved
       ? transitionTask(envelope.task, "queued")
       : transitionTask(envelope.task, "cancelled");
