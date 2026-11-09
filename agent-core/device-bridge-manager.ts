@@ -115,9 +115,14 @@ export class DeviceBridgeManager {
     socket.on("error", cleanup);
   }
 
+  isOnline(deviceId: string, founderId: string): boolean {
+    const current = this.connected.get(deviceId);
+    return Boolean(current && current.device.founderId === founderId);
+  }
+
   async list(founderId: string): Promise<Array<RegisteredDevice & { online: boolean }>> {
     const devices = await this.registry.list(founderId);
-    return devices.map(device => ({ ...device, online: this.connected.has(device.id) }));
+    return devices.map(device => ({ ...device, online: this.isOnline(device.id, founderId) }));
   }
 
   async revoke(deviceId: string, founderId: string): Promise<boolean> {
