@@ -26,7 +26,7 @@ export class MayaControlPlaneTasksWorkspace extends LitElement {
   @state() private worker: any = null;
   @state() private instruction = "";
   @state() private filePath = "README.md";
-  @state() private capability: "workspace.read_file" | "workspace.write_file" | "device.workspace.write_file" = "workspace.read_file";
+  @state() private capability: "workspace.read_file" | "workspace.write_file" | "device.workspace.write_file" | "device.workspace.create_file" = "workspace.read_file";
   @state() private content = "";
   @state() private busy = false;
   @state() private busyId = "";
@@ -92,7 +92,7 @@ export class MayaControlPlaneTasksWorkspace extends LitElement {
       this.message = "Enter the exact replacement content before creating a write task.";
       return;
     }
-    if (this.capability === "device.workspace.write_file" && !this.devices.some(device => device.id === this.deviceId && device.online)) {
+    if (this.capability.startsWith("device.workspace.") && !this.devices.some(device => device.id === this.deviceId && device.online)) {
       this.message = "Select an online paired device before creating a local write task.";
       return;
     }
@@ -107,7 +107,7 @@ export class MayaControlPlaneTasksWorkspace extends LitElement {
         path: this.filePath.trim(),
       };
       if (isWrite) body.content = this.content;
-      if (this.capability === "device.workspace.write_file") body.deviceId = this.deviceId;
+      if (this.capability.startsWith("device.workspace.")) body.deviceId = this.deviceId;
       const response = await this.request("/api/control-plane/tasks", { method: "POST", body: JSON.stringify(body) });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || "Task creation failed.");
@@ -214,7 +214,7 @@ export class MayaControlPlaneTasksWorkspace extends LitElement {
           <div>
             <p class="muted uppercase tracking-[0.18em] text-cyan-300">Founder control plane</p>
             <h2 class="text-xl font-semibold text-white mt-1">Verified task workspace</h2>
-            <p class="muted mt-1 max-w-3xl">Create bounded server or paired-PC workspace tasks. Every file replacement requires your approval for the exact device, path and content.</p>
+            <p class="muted mt-1 max-w-3xl">Create bounded server or paired-PC workspace tasks. Every file write or creation requires your approval for the exact device, path and content.</p>
           </div>
           <div class="flex items-center gap-2">
             <span class="rounded-full border px-2 py-1 text-xs ${workerEnabled ? "text-emerald-300 border-emerald-500/30" : "text-slate-300 border-slate-700"}">Worker ${workerEnabled ? "enabled" : "disabled"}</span>
@@ -225,7 +225,7 @@ export class MayaControlPlaneTasksWorkspace extends LitElement {
         <section class="panel space-y-4">
           <div>
             <h3 class="font-medium text-white">Create a workspace task</h3>
-            <p class="muted mt-1">Reads are limited to non-sensitive text files up to 50 KB. Writes replace an existing non-sensitive text file up to 100 KB; new files, directories, symlinks and shell commands are blocked.</p>
+            <p class="muted mt-1">Reads are limited to non-sensitive text files up to 50 KB. Writes replace existing text files or create new files in existing directories, up to 100 KB, after exact approval; directories, symlinks and shell commands remain blocked.</p>
           </div>
           <div class="grid gap-3 md:grid-cols-2">
             <label class="space-y-1"><span class="muted">Task instruction</span><input .value=${this.instruction} @input=${(e: Event) => this.instruction = (e.target as HTMLInputElement).value} maxlength="1000" placeholder="Read the project overview"></label>
@@ -233,6 +233,7 @@ export class MayaControlPlaneTasksWorkspace extends LitElement {
               <option value="workspace.read_file">Read a workspace file</option>
               <option value="workspace.write_file">Replace an existing server text file (approval required)</option>
               <option value="device.workspace.write_file">Replace an existing paired-PC text file (approval required)</option>
+              <option value="device.workspace.create_file">Create a new paired-PC text file (approval required)</option>
             </select></label>
             ${this.capability === "device.workspace.write_file" ? html`
               <label class="space-y-1 md:col-span-2"><span class="muted">Paired PC (must be online)</span><select .value=${this.deviceId} @change=${(e: Event) => this.deviceId = (e.target as HTMLSelectElement).value}>
@@ -240,14 +241,14 @@ export class MayaControlPlaneTasksWorkspace extends LitElement {
                 ${this.devices.map(device => html`<option value=${device.id} ?disabled=${!device.online || Boolean(device.revokedAt)}>${device.name} · ${device.revokedAt ? "revoked" : device.online ? "online" : "offline"}</option>`)}
               </select></label>
             ` : ""}
-            <label class="space-y-1 md:col-span-2"><span class="muted">${this.capability === "device.workspace.write_file" ? "Device workspace-relative path" : "Workspace-relative path"}</span><input .value=${this.filePath} @input=${(e: Event) => this.filePath = (e.target as HTMLInputElement).value} maxlength="1024" placeholder="docs/status.md"></label>
+            <label class="space-y-1 md:col-span-2"><span class="muted">${this.capability.startsWith("device.workspace.") ? "Device workspace-relative path" : "Workspace-relative path"}</span><input .value=${this.filePath} @input=${(e: Event) => this.filePath = (e.target as HTMLInputElement).value} maxlength="1024" placeholder="docs/status.md"></label>
             ${this.capability !== "workspace.read_file" ? html`
               <label class="space-y-1 md:col-span-2"><span class="muted">Exact replacement content (maximum 100 KB)</span><textarea .value=${this.content} @input=${(e: Event) => this.content = (e.target as HTMLTextAreaElement).value} maxlength="100000" placeholder="Paste the complete replacement file content…"></textarea></label>
             ` : ""}
           </div>
           <div class="flex flex-wrap items-center justify-between gap-3">
             <p class="muted">${this.capability !== "workspace.read_file" ? "Creating this task opens an approval request; it does not write the file." : "Read tasks do not modify files."}</p>
-            <button class="btn primary" ?disabled=${this.busy || !this.instruction.trim() || !this.filePath.trim() || (this.capability === "device.workspace.write_file" && !this.devices.some(device => device.id === this.deviceId && device.online))} @click=${() => this.createTask()}>${this.busy ? "Creating…" : "Create task"}</button>
+            <button class="btn primary" ?disabled=${this.busy || !this.instruction.trim() || !this.filePath.trim() || (this.capability.startsWith("device.workspace.") && !this.devices.some(device => device.id === this.deviceId && device.online))} @click=${() => this.createTask()}>${this.busy ? "Creating…" : "Create task"}</button>
           </div>
         </section>
 
