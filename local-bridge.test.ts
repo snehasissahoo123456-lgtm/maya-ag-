@@ -90,6 +90,7 @@ test("local bridge creates only one new directory under an existing non-sensitiv
     await assert.rejects(() => executeLocalBridgeCommand(root, "workspace.create_directory", { path: "missing/child" }), /parent does not exist/i);
     await assert.rejects(() => executeLocalBridgeCommand(root, "workspace.create_directory", { path: "../outside" }), /escapes|dot segments/i);
     await assert.rejects(() => executeLocalBridgeCommand(root, "workspace.create_directory", { path: "." }), /dot segments|equals/i);
+    await assert.rejects(() => executeLocalBridgeCommand(root, "workspace.create_directory", { path: "projects/\0bad" }), /valid workspace-relative/i);
     await assert.rejects(() => executeLocalBridgeCommand(root, "workspace.create_directory", { path: ".ssh/new-key-dir" }), /sensitive/i);
     if (process.platform !== "win32") {
       const outside = fs.mkdtempSync(path.join(os.tmpdir(), "maya-directory-outside-"));
