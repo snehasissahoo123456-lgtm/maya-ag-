@@ -15,9 +15,12 @@ function isWithinRoot(root: string, target: string): boolean {
 function isSensitive(target: string): boolean {
   const parts = target.split(path.sep).map(part => part.toLowerCase());
   const base = path.basename(target).toLowerCase();
-  return parts.some(part => [".git", "node_modules", "secrets", "credentials", ".maya"].includes(part)) ||
+  return parts.some(part => [".git", "node_modules", "secrets", "credentials", ".maya", ".ssh", ".aws", ".gnupg", ".kube", ".azure"].includes(part)) ||
     base === ".env" || base.startsWith(".env.") || base === ".npmrc" || base === ".netrc" ||
-    base === "id_rsa" || base.endsWith(".pem") || base.endsWith(".key") || base.endsWith(".p12") || base.endsWith(".pfx");
+    base === "id_rsa" || base === "id_ed25519" || base === "authorized_keys" || base === "known_hosts" ||
+    base.includes("credential") || base.includes("service-account") ||
+    base.endsWith(".pem") || base.endsWith(".key") || base.endsWith(".p8") || base.endsWith(".p12") ||
+    base.endsWith(".pfx") || base.endsWith(".jks") || base.endsWith(".keystore");
 }
 function resolveAllowedPath(root: string, relativePath: unknown): string {
   if (typeof relativePath !== "string" || relativePath.length > 1024) throw new Error("A valid relative path is required.");
