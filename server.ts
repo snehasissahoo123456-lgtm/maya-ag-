@@ -251,6 +251,21 @@ taskCapabilityRegistry.register({
   verification: "Ask the enrolled local bridge to create the new file exclusively and return a verified SHA-256 digest.",
 });
 taskCapabilityRegistry.register({
+  name: "device.workspace.move_file",
+  description: "Move one regular non-sensitive file within an enrolled local device workspace after exact Founder approval.",
+  risk: "high",
+  allowedRoles: ["founder", "worker"],
+  requiredScopes: ["device:write"],
+  arguments: {
+    deviceId: { type: "string", required: true, maxLength: 128 },
+    fromPath: { type: "string", required: true, maxLength: 1024 },
+    toPath: { type: "string", required: true, maxLength: 1024 },
+  },
+  timeoutMs: 30_000,
+  requiresApproval: true,
+  verification: "Move one regular non-sensitive file without overwriting the destination; verify destination bytes by SHA-256 before removing the source.",
+});
+taskCapabilityRegistry.register({
   name: "device.workspace.create_directory",
   description: "Create one new directory beneath an existing parent in an enrolled local device workspace after exact Founder approval.",
   risk: "high",
@@ -390,6 +405,36 @@ const taskOrchestrator = new TaskOrchestrator(
             kind: "device-workspace-directory-create",
             description: "The enrolled local device created and verified the exact Founder-approved directory.",
             reference: "path:" + result.path,
+            observedAt: new Date().toISOString(),
+          },
+        };
+      }
+      if (capability === "device.workspace.move_file") {
+        const manager = activeDeviceBridgeManager;
+        if (!manager) throw new Error("Local device bridge is not available.");
+        let result: { verified?: boolean; moved?: boolean; fromPath?: string; toPath?: string; sha256?: string };
+        try {
+          result = await manager.executeApprovedMoveFile({
+            deviceId: String(args.deviceId || ""),
+            founderId: "founder-primary",
+            fromPath: String(args.fromPath || ""),
+            toPath: String(args.toPath || ""),
+          }) as { verified?: boolean; moved?: boolean; fromPath?: string; toPath?: string; sha256?: string };
+        } catch (error) {
+          if (error instanceof DeviceCommandUncertainError) throw new UncertainTaskExecutionError(error.message);
+          throw error;
+        }
+        if (result?.verified !== true || result.moved !== true ||
+            typeof result.fromPath !== "string" || typeof result.toPath !== "string" ||
+            typeof result.sha256 !== "string" || !/^[a-f0-9]{64}$/.test(result.sha256)) {
+          throw new UncertainTaskExecutionError("Local device did not return valid move verification evidence; inspect both paths before retrying.");
+        }
+        return {
+          result,
+          evidence: {
+            kind: "device-workspace-file-move-sha256",
+            description: "The enrolled local device moved the exact Founder-approved file without overwriting the destination and verified its SHA-256 digest.",
+            reference: "sha256:" + result.sha256,
             observedAt: new Date().toISOString(),
           },
         };
@@ -1397,12 +1442,17 @@ async function startServer() {
     if (!founderId) return res.status(401).json({ success: false, error: "Verified Founder session required." });
     const instruction = typeof req.body?.instruction === "string" ? req.body.instruction.trim() : "";
     const capability = typeof req.body?.capability === "string" ? req.body.capability : "workspace.read_file";
-    const filePath = typeof req.body?.path === "string" ? req.body.path : "";
+    const isMoveFile = capability === "device.workspace.move_file";
+    const filePath = isMoveFile
+      ? (typeof req.body?.fromPath === "string" ? req.body.fromPath : "")
+      : (typeof req.body?.path === "string" ? req.body.path : "");
+    const destinationPath = typeof req.body?.toPath === "string" ? req.body.toPath : "";
     const deviceId = typeof req.body?.deviceId === "string" ? req.body.deviceId : "";
     const content = req.body?.content;
     if (!instruction || instruction.length > 1000) return res.status(400).json({ success: false, error: "Instruction must contain 1–1000 characters." });
-    if (!["workspace.read_file", "device.workspace.read_file", "device.workspace.git_status", "workspace.write_file", "device.workspace.write_file", "device.workspace.create_file", "device.workspace.create_directory"].includes(capability)) return res.status(400).json({ success: false, error: "Capability is not enabled for the task control plane." });
-    if (!filePath || filePath.length > 1024) return res.status(400).json({ success: false, error: "A workspace-relative file path of 1–1024 characters is required." });
+    if (!["workspace.read_file", "device.workspace.read_file", "device.workspace.git_status", "workspace.write_file", "device.workspace.write_file", "device.workspace.create_file", "device.workspace.create_directory", "device.workspace.move_file"].includes(capability)) return res.status(400).json({ success: false, error: "Capability is not enabled for the task control plane." });
+    if (!filePath || filePath.length > 1024) return res.status(400).json({ success: false, error: "A workspace-relative source path of 1–1024 characters is required." });
+    if (isMoveFile && (!destinationPath || destinationPath.length > 1024)) return res.status(400).json({ success: false, error: "A workspace-relative destination path of 1–1024 characters is required." });
     const requiresFileContent = ["workspace.write_file", "device.workspace.write_file", "device.workspace.create_file"].includes(capability);
     if (requiresFileContent && (typeof content !== "string" || Buffer.byteLength(content, "utf8") > 100_000)) return res.status(400).json({ success: false, error: "File content must be text no larger than 100 KB." });
     if (capability.startsWith("device.workspace.") && (!deviceId || deviceId.length > 128)) return res.status(400).json({ success: false, error: "A valid enrolled device ID is required for this local-device task." });
@@ -1417,13 +1467,15 @@ async function startServer() {
         : ["device.workspace.read_file", "device.workspace.git_status"].includes(capability) ? ["device:read"]
           : capability.startsWith("device.workspace.") ? ["device:write"] : ["workspace:read"];
       const actor = { id: founderId, founderId, role: "founder" as const, scopes };
-      const args = capability === "workspace.write_file"
-        ? { path: filePath, content }
-        : ["device.workspace.read_file", "device.workspace.git_status", "device.workspace.create_directory"].includes(capability)
-          ? { deviceId, path: filePath }
-          : capability.startsWith("device.workspace.")
-            ? { deviceId, path: filePath, content }
-            : { path: filePath };
+      const args = isMoveFile
+        ? { deviceId, fromPath: filePath, toPath: destinationPath }
+        : capability === "workspace.write_file"
+          ? { path: filePath, content }
+          : ["device.workspace.read_file", "device.workspace.git_status", "device.workspace.create_directory"].includes(capability)
+            ? { deviceId, path: filePath }
+            : capability.startsWith("device.workspace.")
+              ? { deviceId, path: filePath, content }
+              : { path: filePath };
       const envelope = await taskOrchestrator.enqueue({
         id: "task-" + randomTaskId(),
         founderId,
