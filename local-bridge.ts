@@ -209,8 +209,8 @@ export async function executeLocalBridgeCommand(rootInput: string, command: stri
       }
       fs.unlinkSync(source);
       return {
-        fromPath: path.relative(root, source),
-        toPath: path.relative(root, destination),
+        fromPath: String(args.fromPath),
+        toPath: String(args.toPath),
         moved: true,
         verified: true,
         bytes: destinationBytes.length,
