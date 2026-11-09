@@ -147,6 +147,12 @@ test("real HTTP control-plane routes enforce Founder auth and execute only the r
     assert.equal(commandResponse.status, 200);
     assert.deepEqual((await commandResponse.json() as any).result, { platform: "linux", verified: true });
 
+    const directWriteBypass = await fetch(baseUrl + `/api/devices/${pairedMessage.device.id}/commands`, {
+      method: "POST", headers: { "content-type": "application/json", cookie },
+      body: JSON.stringify({ command: "workspace.write_file", args: { path: "README.md", content: "bypass approval" } }),
+    });
+    assert.equal(directWriteBypass.status, 400, "Direct device command API must not bypass task-bound Founder approval");
+
     const revokedDevice = await fetch(baseUrl + `/api/devices/${pairedMessage.device.id}`, { method: "DELETE", headers: { cookie } });
     assert.equal(revokedDevice.status, 200);
     deviceSocket.close();
