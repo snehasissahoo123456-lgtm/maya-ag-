@@ -13,16 +13,19 @@ test("persists audit events across restarts and redacts secret fields", () => {
     store.append({ id: "event-1", action: "founder-login", params: {
       email: "founder@example.invalid",
       password: "must-not-persist",
+      content: "private document contents must not be retained",
       nested: { access_token: "also-secret", safe: "visible" },
     } });
     const disk = fs.readFileSync(file, "utf8");
     assert.equal(disk.includes("must-not-persist"), false);
     assert.equal(disk.includes("also-secret"), false);
+    assert.equal(disk.includes("private document contents must not be retained"), false);
     assert.match(disk, /\[REDACTED\]/);
     const restarted = new FileAuditLogStore<{ id: string; action: string; params: Record<string, unknown> }>(file);
     const entries = restarted.list();
     assert.equal(entries.length, 1);
     assert.equal(entries[0].params.password, "[REDACTED]");
+    assert.equal(entries[0].params.content, "[REDACTED]");
     assert.deepEqual(entries[0].params.nested, { access_token: "[REDACTED]", safe: "visible" });
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
