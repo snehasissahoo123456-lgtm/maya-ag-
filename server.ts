@@ -370,7 +370,7 @@ const taskOrchestrator = new TaskOrchestrator(
         }) as { path?: unknown; entries?: Array<{ name?: unknown; type?: unknown }>; count?: unknown; truncated?: unknown };
         if (result?.path !== String(args.path || ".") || !Array.isArray(result.entries) ||
             result.entries.length > 100 || result.count !== result.entries.length ||
-            typeof result.truncated !== "boolean" || result.entries.some(entry =>
+            typeof result.truncated !== "boolean" || result.entries.some((entry: { name?: unknown; type?: unknown }) =>
               !entry || typeof entry.name !== "string" || entry.name.length > 255 ||
               !["file", "directory"].includes(entry.type))) {
           throw new Error("Local device returned an invalid directory listing.");
