@@ -1,7 +1,7 @@
 # Maya Implementation Roadmap
 
 Branch: maya/persistent-founder-sessions
-Status: Foundation is merged. Persistent single-instance Founder session storage is implemented on this branch and awaits CI verification. No Android APK or production deployment is claimed.
+Status: Foundation is merged. Persistent single-instance Founder session storage is implemented on the session branch. A follow-on branch adds CSRF/origin checks for cookie-authenticated mutations and requires its own CI verification. No Android APK or production deployment is claimed.
 
 ## Phase 0 — Baseline and contracts
 - [x] Replace the legacy sign-in mockup with a focused Founder password screen backed by the server-issued HttpOnly session cookie; hide unconfigured Google/SMS paths and remove misleading security claims.
@@ -14,8 +14,9 @@ Status: Foundation is merged. Persistent single-instance Founder session storage
 
 ## Phase 1 — Make the existing server safe
 - [x] Persist Founder sessions as SHA-256 token hashes with atomic file replacement, restrictive permissions, expiry validation, and persisted revocation (single-instance only; not a distributed session database).
-- Integrate verified Google OAuth/SMS identity providers, secure session issuance, HttpOnly cookie lifecycle, CSRF/origin controls, and revocation.
-- Complete route/tool authorization mapping and add security acceptance tests.
+- [x] Secure Founder password session issuance, HttpOnly cookie lifecycle, persisted revocation, and same-origin checks for cookie-authenticated state-changing API requests (single-instance sessions; configure MAYA_ALLOWED_ORIGINS behind reverse proxies).
+- Integrate verified Google OAuth/SMS identity providers and complete session rotation/revocation policy.
+- Complete route/tool authorization mapping and add comprehensive security acceptance tests.
 - [x] Add a single-instance file-backed task repository for the new control plane, with serialized writes, corrupt-store fail-closed behavior, interrupted-task recovery, and rollback when durable writes fail. This is not a multi-instance database.
 - [x] Persist the exact-action approval ledger to a single-instance file store and expose authenticated Founder request/decision endpoints. No high-risk capability is enabled.
 - [x] Implement one read-only workspace-file execution adapter with path containment, secret-file blocking, size limit, and SHA-256 evidence.
