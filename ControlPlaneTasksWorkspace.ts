@@ -100,7 +100,7 @@ export class MayaControlPlaneTasksWorkspace extends LitElement {
       return;
     }
     if (this.capability.startsWith("device.workspace.") && !this.devices.some(device => device.id === this.deviceId && device.online)) {
-      this.message = "Select an online paired device before creating a local write task.";
+      this.message = "Select an online paired device before creating a local task.";
       return;
     }
     this.busy = true;
