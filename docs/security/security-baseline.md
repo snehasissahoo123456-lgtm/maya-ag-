@@ -20,7 +20,7 @@ Treat model output, repository content, web pages, files, plugin responses, and 
 - Remove seeded Founder sessions, hard-coded tokens, demo OTPs, and OTP disclosure in API responses.
 - Verify Google OAuth ID tokens server-side against issuer, audience, expiry, and nonce/state.
 - Use cryptographically secure random values for session/device credentials; store only hashes where applicable.
-- Add expiry, rotation, logout/revocation, rate limits, and transport-appropriate CSRF/origin protections.
+- Add expiry, rotation, logout/revocation, rate limits, and transport-appropriate CSRF/origin protections. The current development branch persists Founder sessions as token hashes in a single-instance local store; cookie-authenticated state-changing API requests reject missing or cross-origin Origin/Referer values. Reverse-proxy deployments should configure MAYA_ALLOWED_ORIGINS explicitly.
 - A phone number alone or client-supplied email/name must never establish Founder identity.
 
 ### Authorization
@@ -54,7 +54,7 @@ Treat model output, repository content, web pages, files, plugin responses, and 
 - Provide device revocation, emergency stop, backups, and documented kiosk recovery.
 
 ## Initial release blockers from the repository review
-The seeded session, browser-asserted Google login, demo OTP disclosure, and universal test OTP have been removed. REST routes now default-deny without a verified session; the WebSocket relay requires a session cookie. No OAuth verifier, SMS provider, or cookie-issuing session flow exists yet, so sign-in and protected APIs remain deliberately unavailable. File reads/listings are contained to the realpath-resolved server workspace. Simulated task completion and fabricated test/deploy/notification/search success responses have been removed or replaced with explicit unsupported errors. Durable storage, a server-side approval ledger, a complete route/tool policy review, and real adapters remain release blockers.
+The seeded session, browser-asserted Google login, demo OTP disclosure, and universal test OTP have been removed. Founder password login issues an HttpOnly SameSite cookie and persists only SHA-256 session-token hashes in a single-instance local store. REST routes default-deny without a verified session; the WebSocket relay requires a session cookie. Cookie-authenticated state-changing API requests reject missing or cross-origin Origin/Referer values, with MAYA_ALLOWED_ORIGINS available for reverse-proxy deployments. No verified Google OAuth verifier or SMS provider is configured. File reads/listings are contained to the realpath-resolved server workspace. Simulated task completion and fabricated test/deploy/notification/search success responses have been removed or replaced with explicit unsupported errors. Durable audit storage, a shared transactional database, complete route/tool policy review, comprehensive security acceptance testing, and real device/external-service adapters remain release blockers.
 
 ## Security acceptance tests
 1. Unauthenticated requests cannot read or mutate Founder data.
