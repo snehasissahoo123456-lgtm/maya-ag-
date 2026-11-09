@@ -107,3 +107,110 @@ test("opt-in server worker automatically completes only the safe read-only queue
     fs.rmSync(dataDir, { recursive: true, force: true });
   }
 });
+
+
+test("real HTTP worker replaces an existing workspace file only after exact Founder approval", async () => {
+  const port = await unusedPort();
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "maya-approved-write-http-data-"));
+  const workspaceDir = fs.mkdtempSync(path.join(process.cwd(), ".maya-approved-write-test-"));
+  const targetPath = path.join(workspaceDir, "report.md");
+  fs.writeFileSync(targetPath, "Original file contents", "utf8");
+  const relativePath = path.relative(process.cwd(), targetPath);
+  const password = "test-founder-password-2026-approved-write";
+  const child = spawn(process.execPath, ["--import", "tsx", "server.ts"], {
+    cwd: process.cwd(),
+    env: {
+      ...process.env,
+      NODE_ENV: "production",
+      PORT: String(port),
+      MAYA_DATA_DIR: dataDir,
+      MAYA_FOUNDER_EMAIL: "write-founder@example.invalid",
+      MAYA_FOUNDER_PASSWORD: password,
+      MAYA_TASK_WORKER_ENABLED: "true",
+      MAYA_TASK_WORKER_POLL_MS: "1000",
+      MAYA_SCHEDULE_WORKER_ENABLED: "false",
+      MAYA_PLAN_WORKER_ENABLED: "false",
+      GEMINI_API_KEY: "",
+      API_KEY: "",
+    },
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  let logs = "";
+  child.stdout?.on("data", chunk => { logs += chunk.toString(); });
+  child.stderr?.on("data", chunk => { logs += chunk.toString(); });
+  const baseUrl = `http://127.0.0.1:${port}`;
+
+  try {
+    await waitForServer(baseUrl, child);
+    const login = await fetch(baseUrl + "/api/auth/founder-login", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ email: "write-founder@example.invalid", password }),
+    });
+    assert.equal(login.status, 200);
+    const cookie = login.headers.get("set-cookie")?.split(";")[0];
+    assert.ok(cookie);
+
+    const replacement = "Founder-approved replacement contents";
+    const created = await fetch(baseUrl + "/api/control-plane/tasks", {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie },
+      body: JSON.stringify({
+        instruction: "Replace the report after explicit approval",
+        capability: "workspace.write_file",
+        path: relativePath,
+        content: replacement,
+      }),
+    });
+    assert.equal(created.status, 201);
+    const createdData = await created.json() as any;
+    const taskId = createdData.task.id;
+    assert.equal(createdData.task.requiresApproval, true);
+    assert.equal(fs.readFileSync(targetPath, "utf8"), "Original file contents");
+
+    const approvalRequest = await fetch(baseUrl + `/api/control-plane/tasks/${encodeURIComponent(taskId)}/request-approval`, {
+      method: "POST", headers: { cookie },
+    });
+    assert.equal(approvalRequest.status, 200);
+    const approvalData = await approvalRequest.json() as any;
+
+    const pendingTasks = await fetch(baseUrl + "/api/control-plane/tasks", { headers: { cookie } });
+    const pendingData = await pendingTasks.json() as any;
+    assert.equal(pendingData.tasks.find((item: any) => item.task.id === taskId)?.task.status, "awaiting_approval");
+    assert.equal(fs.readFileSync(targetPath, "utf8"), "Original file contents");
+
+    const decision = await fetch(baseUrl + `/api/control-plane/approvals/${encodeURIComponent(approvalData.approvalId)}/decision`, {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie },
+      body: JSON.stringify({ approved: true }),
+    });
+    assert.equal(decision.status, 200);
+
+    const deadline = Date.now() + 12_000;
+    let finished: any = null;
+    while (Date.now() < deadline) {
+      const response = await fetch(baseUrl + "/api/control-plane/tasks", { headers: { cookie } });
+      assert.equal(response.status, 200);
+      const data = await response.json() as any;
+      finished = data.tasks.find((item: any) => item.task.id === taskId);
+      if (finished?.task.status === "completed" || finished?.task.status === "failed") break;
+      await new Promise(resolve => setTimeout(resolve, 150));
+    }
+    assert.equal(finished?.task.status, "completed", `Approved write did not complete. Server output:\n${logs}`);
+    assert.equal(fs.readFileSync(targetPath, "utf8"), replacement);
+    assert.match(finished.task.verificationEvidence[0].reference, /^sha256:[a-f0-9]{64}$/);
+    const approvals = await (await fetch(baseUrl + "/api/control-plane/approvals", { headers: { cookie } })).json() as any;
+    assert.equal(approvals.approvals.find((item: any) => item.id === approvalData.approvalId)?.status, "consumed");
+  } catch (error) {
+    throw new Error(`${error instanceof Error ? error.message : String(error)}\nServer output:\n${logs}`);
+  } finally {
+    child.kill("SIGTERM");
+    await new Promise<void>(resolve => {
+      if (child.exitCode !== null) return resolve();
+      const timer = setTimeout(() => { child.kill("SIGKILL"); resolve(); }, 3000);
+      child.once("exit", () => { clearTimeout(timer); resolve(); });
+    });
+    fs.rmSync(dataDir, { recursive: true, force: true });
+    fs.rmSync(workspaceDir, { recursive: true, force: true });
+  }
+});
