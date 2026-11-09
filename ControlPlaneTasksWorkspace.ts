@@ -113,7 +113,9 @@ export class MayaControlPlaneTasksWorkspace extends LitElement {
   }
 
   private approvalFor(taskId: string, status?: string) {
-    return this.approvals.find(item => item.taskId === taskId && (!status || item.status === status));
+    return this.approvals
+      .filter(item => item.taskId === taskId && (!status || item.status === status))
+      .sort((a, b) => Date.parse(b.requestedAt) - Date.parse(a.requestedAt))[0];
   }
 
   private async decideApproval(approval: ControlApproval, approved: boolean) {
