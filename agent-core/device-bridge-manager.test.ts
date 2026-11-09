@@ -84,6 +84,43 @@ test("approved local file replacement uses a separate server-only command path",
 });
 
 
+
+test("approved local file move uses a separate server-only command path", async () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "maya-device-approved-move-"));
+  try {
+    const registry = new FileDeviceRegistry(directory);
+    const manager = new DeviceBridgeManager(registry);
+    const pairing = await manager.createPairing("founder-a");
+    const socket = new FakeSocket();
+    manager.accept(socket as any);
+    socket.receive({ type: "pair", code: pairing.code, device: { name: "Test PC", platform: "linux", architecture: "x64", runtimeVersion: "test" } });
+    await new Promise(resolve => setTimeout(resolve, 10));
+    const paired = socket.sent.find(item => item.type === "paired");
+    assert.ok(paired?.token);
+    await assert.rejects(() => manager.executeCommand({
+      deviceId: paired.device.id, founderId: "founder-a", command: "workspace.move_file",
+      args: { fromPath: "inbox/a.md", toPath: "archive/a.md" },
+    }), /read-only allowlist/i);
+    const movePromise = manager.executeApprovedMoveFile({
+      deviceId: paired.device.id, founderId: "founder-a",
+      fromPath: "inbox/a.md", toPath: "archive/a.md",
+    });
+    await new Promise(resolve => setTimeout(resolve, 0));
+    const command = socket.sent.find(item => item.type === "command" && item.command === "workspace.move_file");
+    assert.ok(command?.requestId);
+    assert.deepEqual(command.args, { fromPath: "inbox/a.md", toPath: "archive/a.md" });
+    socket.receive({ type: "command_result", requestId: command.requestId, success: true, result: {
+      moved: true, verified: true, fromPath: "inbox/a.md", toPath: "archive/a.md", sha256: "b".repeat(64),
+    } });
+    assert.deepEqual(await movePromise, {
+      moved: true, verified: true, fromPath: "inbox/a.md", toPath: "archive/a.md", sha256: "b".repeat(64),
+    });
+    await assert.rejects(() => manager.executeApprovedMoveFile({
+      deviceId: paired.device.id, founderId: "founder-b", fromPath: "a.md", toPath: "b.md",
+    }), /not registered/i);
+  } finally { fs.rmSync(directory, { recursive: true, force: true }); }
+});
+
 test("disconnect during a local write reports an uncertain side effect", async () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "maya-device-write-disconnect-"));
   try {
