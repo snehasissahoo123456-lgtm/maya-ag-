@@ -1250,6 +1250,7 @@ async function startServer() {
       if (capability === "device.workspace.write_file") {
         const device = (await deviceBridgeManager.list(founderId)).find(item => item.id === deviceId);
         if (!device) return res.status(404).json({ success: false, error: "Enrolled device not found for this Founder." });
+        if (!device.online) return res.status(409).json({ success: false, error: "The paired device must be online before creating a local write task." });
       }
       const scopes = capability === "workspace.write_file"
         ? ["workspace:read", "workspace:write"]
