@@ -19,9 +19,10 @@ Status: Foundation is merged. Persistent single-instance Founder session storage
 - Complete route/tool authorization mapping and add comprehensive security acceptance tests.
 - [x] Add a single-instance file-backed task repository for the new control plane, with serialized writes, corrupt-store fail-closed behavior, interrupted-task recovery, and rollback when durable writes fail. This is not a multi-instance database.
 - [x] Persist the exact-action approval ledger to a single-instance file store and expose authenticated Founder request/decision endpoints. No high-risk capability is enabled.
+- [x] Persist bounded audit history to a single-instance file store with atomic writes and sensitive-field/content redaction; shared transactional audit storage remains future work.
 - [x] Implement one read-only workspace-file execution adapter with path containment, secret-file blocking, size limit, and SHA-256 evidence.
 - Extend workspace containment to every future file and command adapter; unrestricted shell execution remains disabled.
-Exit gate: partial evidence exists for the task API and its read-only capability. Still required: comprehensive route/tool authorization tests, CSRF/origin protection, durable audit storage, and security acceptance testing. Session persistence is local and single-instance; production multi-instance deployment still needs a transactional shared store. No general-purpose worker or privileged action is enabled.
+Exit gate: partial evidence exists for the task API and its read-only capability. Still required: comprehensive route/tool authorization tests, shared transactional storage, and security acceptance testing. Session persistence is local and single-instance; production multi-instance deployment still needs a transactional shared store. No general-purpose worker or privileged action is enabled.
 
 ## Phase 2 — Cloud control plane
 - Device registry and device-bound credentials.
