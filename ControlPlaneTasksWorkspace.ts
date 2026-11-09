@@ -310,7 +310,7 @@ export class MayaControlPlaneTasksWorkspace extends LitElement {
                 ${pending ? html`
                   <div class="rounded-xl border border-amber-500/25 bg-amber-500/5 p-3 space-y-2">
                     <div class="flex flex-wrap justify-between gap-2"><span class="text-xs text-amber-200">Founder approval required</span><span class="muted">Expires ${new Date(pending.expiresAt).toLocaleString()}</span></div>
-                    <p class="muted">Approval is bound to the exact path, capability and payload digest. Any argument change invalidates it.</p>
+                    <p class="muted">Approval is bound to the exact capability, device, paths and payload digest. Any argument change invalidates it.</p>
                     <div class="flex flex-wrap gap-2">
                       <button class="btn approve" ?disabled=${this.busyId === pending.id} @click=${() => this.decideApproval(pending, true)}>Approve exact action</button>
                       <button class="btn reject" ?disabled=${this.busyId === pending.id} @click=${() => this.decideApproval(pending, false)}>Reject</button>
@@ -319,7 +319,7 @@ export class MayaControlPlaneTasksWorkspace extends LitElement {
                 ` : ""}
                 ${approved ? html`<p class="muted text-emerald-300">Approved exact action · ${new Date(approved.expiresAt).toLocaleString()} expiry</p>` : ""}
                 ${task.requiresApproval && task.status === "queued" && !pending && !approved ? html`<button class="btn" ?disabled=${this.busyId === task.id} @click=${() => this.requestApproval(item)}>Request Founder approval</button>` : ""}
-                ${canExecute ? html`<button class="btn primary" ?disabled=${this.busyId === task.id} @click=${() => this.executeTask(item)}>${this.busyId === task.id ? "Executing…" : task.requiresApproval ? "Execute approved replacement" : "Execute read task"}</button>` : ""}
+                ${canExecute ? html`<button class="btn primary" ?disabled=${this.busyId === task.id} @click=${() => this.executeTask(item)}>${this.busyId === task.id ? "Executing…" : task.requiresApproval ? (item.capability === "device.workspace.move_file" ? "Execute approved move" : "Execute approved action") : "Execute read task"}</button>` : ""}
                 ${workerEnabled && task.status === "queued" ? html`<p class="muted">${item.capability.startsWith("device.") && deviceRevoked ? "This paired PC was revoked. This task cannot execute; pair a replacement PC and create a new task." : item.capability.startsWith("device.") && !deviceOnline ? "Waiting for the paired PC to reconnect; this worker will skip the task until that device is online." : "The background worker will process this queued task. Approval-gated writes remain paused until you approve them."}</p>` : ""}
                 ${task.status === "requires_recovery" ? html`<p class="text-xs text-amber-200">Execution outcome is uncertain. Verify the target file on its host before creating another write task; Maya will not replay this action automatically.</p>` : ""}
                 ${task.lastError ? html`<p class="text-xs text-rose-300">${task.lastError}</p>` : ""}
