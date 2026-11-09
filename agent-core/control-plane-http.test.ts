@@ -89,6 +89,15 @@ test("real HTTP control-plane routes enforce Founder auth and execute only the r
     });
     assert.equal(logoutCsrfBlocked.status, 403, "cross-origin logout requests must be rejected");
 
+    const offlineChat = await fetch(baseUrl + "/api/chat-message", {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie, origin: baseUrl },
+      body: JSON.stringify({ message: "verify chat session id" }),
+    });
+    assert.equal(offlineChat.status, 200);
+    const offlineChatBody = await offlineChat.json() as any;
+    assert.match(offlineChatBody.sessionId, /^conversation-[a-f0-9]+$/);
+
     const created = await fetch(baseUrl + "/api/control-plane/tasks", {
       method: "POST",
       headers: { "content-type": "application/json", cookie, origin: baseUrl },
