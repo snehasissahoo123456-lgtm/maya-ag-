@@ -9,6 +9,7 @@ interface ControlTask {
   };
   capability: string;
   args: Record<string, unknown>;
+  result?: unknown;
 }
 interface ControlDevice { id: string; name: string; platform: string; online: boolean; revokedAt?: string; }
 interface ControlApproval {
@@ -281,7 +282,7 @@ export class MayaControlPlaneTasksWorkspace extends LitElement {
                   </div>
                   <span class="rounded-full border px-2 py-1 text-[10px] uppercase ${this.statusClass(task.status)}">${task.status.replaceAll("_", " ")}</span>
                 </div>
-                ${item.capability !== "workspace.read_file" ? html`
+                ${requiresFileContent(item.capability) ? html`
                   <details class="rounded-xl border border-amber-500/20 bg-amber-500/5 p-3">
                     <summary class="cursor-pointer text-xs text-amber-200">Review exact replacement content before approval</summary>
                     <pre class="mt-3 text-slate-200">${String(item.args.content || "")}</pre>
@@ -303,13 +304,19 @@ export class MayaControlPlaneTasksWorkspace extends LitElement {
                 ${workerEnabled && task.status === "queued" ? html`<p class="muted">${item.capability.startsWith("device.") && deviceRevoked ? "This paired PC was revoked. This task cannot execute; pair a replacement PC and create a new task." : item.capability.startsWith("device.") && !deviceOnline ? "Waiting for the paired PC to reconnect; this worker will skip the task until that device is online." : "The background worker will process this queued task. Approval-gated writes remain paused until you approve them."}</p>` : ""}
                 ${task.status === "requires_recovery" ? html`<p class="text-xs text-amber-200">Execution outcome is uncertain. Verify the target file on its host before creating another write task; Maya will not replay this action automatically.</p>` : ""}
                 ${task.lastError ? html`<p class="text-xs text-rose-300">${task.lastError}</p>` : ""}
+                ${item.result !== undefined ? html`
+                  <details class="rounded-xl border border-cyan-500/20 bg-cyan-500/5 p-3">
+                    <summary class="cursor-pointer text-xs text-cyan-200">View verified execution result</summary>
+                    <pre class="mt-3 text-slate-200">${JSON.stringify(item.result, null, 2)}</pre>
+                  </details>
+                ` : ""}
                 ${task.verificationEvidence?.length ? html`<div class="rounded-lg bg-slate-950/60 p-3"><div class="muted mb-1">Verification evidence</div>${task.verificationEvidence.map(evidence => html`<p class="text-[11px] text-emerald-300">${evidence.kind} · ${evidence.reference || "verified"} · ${new Date(evidence.observedAt).toLocaleString()}</p>`)}</div>` : ""}
               </article>
             `;
           }) : html`<div class="panel muted">No control-plane tasks yet. Create a bounded read or approval-gated write above.</div>`}
         </section>
         ${this.lastResult ? html`<section class="panel"><h3 class="muted uppercase tracking-wide mb-2">Last execution result</h3><pre>${this.lastResult}</pre></section>` : ""}
-        <p class="muted text-amber-200/80">Safety boundary: local PC file replacement is routed through the enrolled bridge only after exact Founder approval. It can replace an existing non-sensitive file; it cannot create/delete files, execute shell commands, browse authenticated sessions, publish externally or control the desktop.</p>
+        <p class="muted text-amber-200/80">Safety boundary: local PC reads use the read-only bridge; file replacement, file creation and one-level directory creation require exact Founder approval. No file deletion, shell execution, authenticated browser access, external publishing or arbitrary desktop control is enabled.</p>
       </div>
     `;
   }
