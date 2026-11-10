@@ -55,4 +55,35 @@ begin
 end;
 $$;
 
+insert into public.maya_conversations (id, founder_id, title, messages)
+values (
+  'legacy-backfill-unsupported-role',
+  'founder-migration-test',
+  'Unsupported role fixture',
+  '[{"role":"tool","content":"must not be silently reclassified"}]'::jsonb
+);
+
+do $
+declare
+  rejected boolean := false;
+begin
+  begin
+    perform public.maya_backfill_legacy_conversations();
+  exception when others then
+    if sqlerrm not like '%unsupported role%' then raise; end if;
+    rejected := true;
+  end;
+  if not rejected then raise exception 'Unsupported legacy role was not rejected'; end if;
+  if exists (
+    select 1 from public.maya_conversation_messages
+    where conversation_id = 'legacy-backfill-unsupported-role'
+  ) then raise exception 'Unsupported legacy message was partially imported'; end if;
+  if exists (
+    select 1 from public.maya_conversations
+    where id = 'legacy-backfill-unsupported-role'
+      and legacy_messages_backfilled_at is not null
+  ) then raise exception 'Unsupported legacy conversation was incorrectly marked complete'; end if;
+end;
+$;
+
 rollback;
