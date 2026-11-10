@@ -136,3 +136,34 @@ test("emits a redacted denial event when policy rejects a specialist tool", asyn
   assert.equal(events[0].errorCode, "policy_denied");
   assert.equal("args" in events[0], false);
 });
+
+test("waits for durable audit acknowledgement before returning specialist tool results", async () => {
+  const order: string[] = [];
+  const executor = new SpecialistToolExecutor(
+    registry(),
+    async () => { order.push("handler"); return { content: "safe" }; },
+    32_000,
+    async event => {
+      order.push("audit-start");
+      await Promise.resolve();
+      assert.equal(event.actorRole, "developer");
+      order.push("audit-committed");
+    },
+  );
+  const result = await executor.execute("developer", "founder-1", "workspace.read_file", { path: "README.md" });
+  assert.deepEqual(result, { content: "safe" });
+  assert.deepEqual(order, ["handler", "audit-start", "audit-committed"]);
+});
+
+test("fails closed when specialist audit persistence cannot be acknowledged", async () => {
+  const executor = new SpecialistToolExecutor(
+    registry(),
+    async () => ({ content: "safe" }),
+    32_000,
+    async () => { throw new Error("durable audit unavailable"); },
+  );
+  await assert.rejects(
+    executor.execute("developer", "founder-1", "workspace.read_file", { path: "README.md" }),
+    /durable audit unavailable/,
+  );
+});
