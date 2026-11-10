@@ -20,16 +20,34 @@ test("validates dispatches and rejects Founder, CEO recursion, duplicates and ov
   assert.throws(() => validateCEODispatchPlan({ ...dispatch, assignments: Array.from({ length: 5 }, (_, i) => ({ agentId: ["research","finance","developer","operations","content"][i], task: "x" })) }, "Review"), /1 and 4/);
 });
 
-test("runs assigned specialists sequentially and synthesizes their findings", async () => {
-  const order: string[] = [];
+test("runs assigned specialists concurrently and synthesizes findings in dispatch order", async () => {
+  let active = 0;
+  let maxActive = 0;
+  let started = 0;
+  let synthesisStarted = false;
+  let release!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
   const orchestrator = new CEOOrchestrator({
     plan: async () => JSON.stringify(dispatch),
-    synthesize: async ({ findings }) => { order.push("synthesis"); return findings.map(f => f.output).join("\n"); },
+    synthesize: async ({ findings }) => {
+      synthesisStarted = true;
+      assert.deepEqual(findings.map(f => f.agentId), ["research", "finance"]);
+      return findings.map(f => f.output).join("\n");
+    },
   }, {
-    run: async ({ agentId }) => { order.push(agentId); return result(agentId); },
+    run: async ({ agentId }) => {
+      active++;
+      maxActive = Math.max(maxActive, active);
+      started++;
+      if (started === 2) release();
+      await gate;
+      active--;
+      assert.equal(synthesisStarted, false);
+      return result(agentId);
+    },
   });
   const output = await orchestrator.run({ objective: "Review the launch plan" });
-  assert.deepEqual(order, ["research", "finance", "synthesis"]);
+  assert.equal(maxActive, 2, "specialist work should overlap instead of running sequentially");
   assert.equal(output.findings.length, 2);
   assert.equal(output.executionMode, "multi_specialist_reasoning_only");
 });
