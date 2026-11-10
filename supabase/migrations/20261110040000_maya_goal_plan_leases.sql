@@ -35,8 +35,8 @@ begin
       and status = 'running'
       and (lease_expires_at is null or lease_expires_at <= now())
     order by updated_at asc
-    for update skip locked
-    limit 1;
+    limit 1
+    for update skip locked;
 
   if not found then return; end if;
 
