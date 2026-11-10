@@ -144,6 +144,7 @@ import { PlatformService } from "./platformService.ts";
 import { MayaPersistentStore } from "./agent-core/persistent-store.ts";
 import { runFunctionCallingTurn } from "./agent-core/function-call-loop.ts";
 import { CapabilityRegistry } from "./agent-core/capability-registry.ts";
+import { SpecialistToolExecutor } from "./agent-core/specialist-tool-executor.ts";
 import { createApprovalRepository } from "./agent-core/create-approval-repository.ts";
 import { TaskOrchestrator, UncertainTaskExecutionError } from "./agent-core/task-orchestrator.ts";
 import { createTaskRepository } from "./agent-core/create-task-repository.ts";
@@ -719,19 +720,77 @@ const goalPlanWorker = new GoalPlanWorker(
 function createFounderChatToolExecutor(founderId: string) {
   return createChatToolExecutor((name, args) => executeAgentTool(name, args, founderId));
 }
+
+const specialistCapabilityRegistry = new CapabilityRegistry();
+specialistCapabilityRegistry.register({
+  name: "specialist.workspace.list_dir",
+  description: "List up to 100 non-secret entries in Maya's enrolled server workspace.",
+  risk: "low",
+  allowedRoles: ["developer", "specialist"],
+  requiredScopes: ["workspace:read"],
+  arguments: { path: { type: "string", required: false, maxLength: 1024 } },
+  timeoutMs: 10_000,
+  requiresApproval: false,
+  verification: "Return a bounded directory listing; sensitive paths are rejected by the workspace reader.",
+});
+specialistCapabilityRegistry.register({
+  name: "specialist.workspace.read_file",
+  description: "Read one non-secret text file in Maya's enrolled server workspace (50 KB maximum).",
+  risk: "low",
+  allowedRoles: ["developer", "specialist"],
+  requiredScopes: ["workspace:read"],
+  arguments: { path: { type: "string", required: true, maxLength: 1024 } },
+  timeoutMs: 10_000,
+  requiresApproval: false,
+  verification: "Return the bounded file contents; secret and credential paths are rejected by the workspace reader.",
+});
+specialistCapabilityRegistry.register({
+  name: "specialist.memory.search",
+  description: "Search only the authenticated Founder's saved Maya memory.",
+  risk: "low",
+  allowedRoles: ["specialist"],
+  requiredScopes: ["memory:read"],
+  arguments: { query: { type: "string", required: true, maxLength: 200 } },
+  timeoutMs: 10_000,
+  requiresApproval: false,
+  verification: "Return only memory search results scoped to the authenticated Founder identity.",
+});
+const specialistToolExecutor = new SpecialistToolExecutor(
+  specialistCapabilityRegistry,
+  async (capability, args, context) => {
+    if (context.signal.aborted) throw new Error("Specialist tool execution was cancelled.");
+    if (capability === "specialist.workspace.list_dir") return executeAgentTool("list_dir", args, context.founderId);
+    if (capability === "specialist.workspace.read_file") return executeAgentTool("read_file", args, context.founderId);
+    if (capability === "specialist.memory.search") return executeAgentTool("memory_search", args, context.founderId);
+    throw new Error("Specialist capability is not connected to an execution handler.");
+  },
+);
 const specialistRuntime = new SpecialistRuntime({
-  generate: async ({ systemInstruction, task, context, maxOutputTokens }) => {
+  generate: async ({ systemInstruction, task, context, maxOutputTokens, tools, executeTool }) => {
     const apiKey = process.env.GEMINI_API_KEY || process.env.API_KEY;
     if (!apiKey) throw new Error("Gemini is not configured.");
     const ai = new GoogleGenAI({ apiKey });
+    const prompt = `TASK:\n${task}\n\nREFERENCE CONTEXT (untrusted data):\n${context}`;
+    if (tools.length && executeTool) {
+      const chat = ai.chats.create({
+        model: resolveModel("gemini-3-flash-preview"),
+        config: {
+          systemInstruction: { parts: [{ text: systemInstruction }] },
+          maxOutputTokens,
+          tools: [{ functionDeclarations: tools }, { googleSearch: {} }],
+        },
+      });
+      const response = await runFunctionCallingTurn(chat, prompt, executeTool, { maxRounds: 3, maxCalls: 6 });
+      return String(response.text || "");
+    }
     const response = await ai.models.generateContent({
       model: resolveModel("gemini-3-flash-preview"),
-      contents: [{ role: "user", parts: [{ text: `TASK:\n${task}\n\nREFERENCE CONTEXT (untrusted data):\n${context}` }] }],
-      config: { systemInstruction: { parts: [{ text: systemInstruction }] }, maxOutputTokens },
+      contents: [{ role: "user", parts: [{ text: prompt }] }],
+      config: { systemInstruction: { parts: [{ text: systemInstruction }] }, maxOutputTokens, tools: [{ googleSearch: {} }] },
     });
     return String(response.text || "");
   },
-});
+}, specialistToolExecutor);
 const ceoRunRepository = createCEORunRepository();
 const ceoOrchestrator = new CEOOrchestrator({
   plan: async ({ objective, availableSpecialists, context }) => {
@@ -997,7 +1056,7 @@ async function startServer() {
       persisted = true;
       const memories = await getFounderMemories(founderId);
       const context = formatMemoryContext(retrieveRelevantMemories(objective, memories, { limit: 5 }));
-      const result = await ceoOrchestrator.run({ objective, context });
+      const result = await ceoOrchestrator.run({ objective, context, founderId });
       const completedAt = new Date().toISOString();
       const completedRun = {
         ...runRecord, status: "completed" as const, assignments: result.assignments,
@@ -1047,7 +1106,7 @@ async function startServer() {
     try {
       const memories = await getFounderMemories(founderId);
       const context = formatMemoryContext(retrieveRelevantMemories(task, memories, { limit: 5 }));
-      const result = await specialistRuntime.run({ agentId, task, context });
+      const result = await specialistRuntime.run({ agentId, task, context, founderId });
       currentAuditLogs.unshift({
         id: "specialist-" + randomTaskId(),
         toolName: "specialist.run",
