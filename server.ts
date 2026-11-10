@@ -163,6 +163,8 @@ import { CEOOrchestrator } from "./agent-core/ceo-orchestrator.ts";
 import { createCEORunRepository } from "./agent-core/create-ceo-run-repository.ts";
 import { createScheduledJobRepository } from "./agent-core/create-scheduled-job-repository.ts";
 import { ScheduleWorker } from "./agent-core/schedule-worker.ts";
+import { DeveloperProposalService } from "./agent-core/developer-proposals.ts";
+import { replaceWorkspaceFile } from "./agent-core/workspace-file-writer.ts";
 
 const conversationStore = createConversationRepository();
 const taskRepository = createTaskRepository();
@@ -240,11 +242,12 @@ taskCapabilityRegistry.register({
   name: "workspace.write_file",
   description: "Atomically replace the contents of an existing non-sensitive workspace file.",
   risk: "high",
-  allowedRoles: ["founder", "worker"],
+  allowedRoles: ["founder", "worker", "developer"],
   requiredScopes: ["workspace:write"],
   arguments: {
     path: { type: "string", required: true, maxLength: 1024 },
     content: { type: "string", required: true, maxLength: 100_000 },
+    expectedSha256: { type: "string", required: false, maxLength: 64 },
   },
   timeoutMs: 15_000,
   requiresApproval: true,
@@ -551,31 +554,18 @@ const taskOrchestrator = new TaskOrchestrator(
         };
       }
       if (capability === "workspace.write_file") {
-        const file = resolveWritableWorkspacePath(args.path);
-        if (isSensitiveWorkspacePath(file)) throw new Error("Writing secrets and credential files is blocked.");
         const content = args.content;
         if (typeof content !== "string" || content.length > 100_000) throw new Error("File content must be text no larger than 100 KB.");
-        const stat = fs.lstatSync(file);
-        if (!stat.isFile() || stat.isSymbolicLink()) throw new Error("Only existing regular files can be replaced; symlinks and new files are blocked.");
-        if (stat.size > 100_000) throw new Error("Existing file exceeds the 100 KB write limit.");
-        const temp = path.join(path.dirname(file), `.maya-write.${process.pid}.${randomUUID()}.tmp`);
-        try {
-          fs.writeFileSync(temp, content, { encoding: "utf8", mode: stat.mode & 0o777, flag: "wx" });
-          if (signal.aborted) throw new Error("Task execution was cancelled before commit.");
-          fs.renameSync(temp, file);
-        } catch (error) {
-          try { fs.rmSync(temp, { force: true }); } catch {}
-          throw error;
-        }
-        const verified = fs.readFileSync(file, "utf8");
-        if (verified !== content) throw new Error("Write verification failed; file content differs from the approved payload.");
-        const digest = createHash("sha256").update(verified, "utf8").digest("hex");
+        const expectedSha256 = typeof args.expectedSha256 === "string" ? args.expectedSha256 : undefined;
+        const result = replaceWorkspaceFile(process.cwd(), String(args.path || ""), content, expectedSha256, signal);
         return {
-          result: { path: path.relative(process.cwd(), file), bytes: Buffer.byteLength(verified, "utf8"), sha256: digest, verified: true },
+          result,
           evidence: {
             kind: "workspace-file-write-sha256",
-            description: "Atomically replaced an existing workspace file after Founder approval and verified the written bytes.",
-            reference: "sha256:" + digest,
+            description: expectedSha256
+              ? "Atomically replaced the exact file version read by the Developer and approved by the Founder; the resulting bytes were verified."
+              : "Atomically replaced an existing workspace file after Founder approval and verified the written bytes.",
+            reference: "sha256:" + result.sha256,
             observedAt: new Date().toISOString(),
           },
         };
@@ -660,7 +650,8 @@ async function executeAgentTool(name: string, args: Record<string, unknown>, fou
     const stat = fs.statSync(file);
     if (!stat.isFile()) throw new Error("Only regular text files can be read.");
     if (stat.size > 50000) throw new Error("File exceeds the 50 KB agent read limit.");
-    return { path: path.relative(process.cwd(), file), content: fs.readFileSync(file, "utf8") };
+    const content = fs.readFileSync(file, "utf8");
+    return { path: path.relative(process.cwd(), file), content, bytes: Buffer.byteLength(content, "utf8"), sha256: createHash("sha256").update(content, "utf8").digest("hex") };
   }
   if (name === "system_info") {
     return { node: process.version, platform: process.platform, architecture: process.arch, uptimeSeconds: Math.floor(process.uptime()), memory: process.memoryUsage() };
@@ -721,6 +712,7 @@ function createFounderChatToolExecutor(founderId: string) {
   return createChatToolExecutor((name, args) => executeAgentTool(name, args, founderId));
 }
 
+const developerProposalService = new DeveloperProposalService(taskOrchestrator);
 const specialistCapabilityRegistry = new CapabilityRegistry();
 specialistCapabilityRegistry.register({
   name: "specialist.workspace.list_dir",
@@ -745,6 +737,22 @@ specialistCapabilityRegistry.register({
   verification: "Return the bounded file contents; secret and credential paths are rejected by the workspace reader.",
 });
 specialistCapabilityRegistry.register({
+  name: "developer.propose_file_change",
+  description: "Queue a proposed replacement for an existing non-secret workspace file. This creates a Founder-approval task only; it never writes the file.",
+  risk: "low",
+  allowedRoles: ["developer"],
+  requiredScopes: ["workspace:write"],
+  arguments: {
+    path: { type: "string", required: true, maxLength: 1024 },
+    expectedSha256: { type: "string", required: true, maxLength: 64 },
+    content: { type: "string", required: true, maxLength: 100_000 },
+    instruction: { type: "string", required: true, maxLength: 1000 },
+  },
+  timeoutMs: 15_000,
+  requiresApproval: false,
+  verification: "Create a queued high-risk workspace.write_file task bound to the exact file SHA-256 and payload; a Founder must approve it before execution.",
+});
+specialistCapabilityRegistry.register({
   name: "specialist.memory.search",
   description: "Search only the authenticated Founder's saved Maya memory.",
   risk: "low",
@@ -762,6 +770,7 @@ const specialistToolExecutor = new SpecialistToolExecutor(
     if (capability === "specialist.workspace.list_dir") return executeAgentTool("list_dir", args, context.founderId);
     if (capability === "specialist.workspace.read_file") return executeAgentTool("read_file", args, context.founderId);
     if (capability === "specialist.memory.search") return executeAgentTool("memory_search", args, context.founderId);
+    if (capability === "developer.propose_file_change") return developerProposalService.proposeFileChange({ founderId: context.founderId, path: String(args.path || ""), expectedSha256: String(args.expectedSha256 || ""), content: typeof args.content === "string" ? args.content : "", instruction: String(args.instruction || "") });
     throw new Error("Specialist capability is not connected to an execution handler.");
   },
   32_000,
