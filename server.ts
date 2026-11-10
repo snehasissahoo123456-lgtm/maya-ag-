@@ -953,9 +953,6 @@ const platformService = new PlatformService();
 
 const watcherService = new WatcherService({
   getTestSuites: () => currentTestSuites,
-  onTestSuitesUpdated: (suites) => {
-    currentTestSuites = suites;
-  },
   onAuditLog: (record) => {
     currentAuditLogs.unshift(record);
   },
