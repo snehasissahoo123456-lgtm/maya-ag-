@@ -48,3 +48,18 @@ test("Developer proposal refuses a stale read before creating an approval task",
   }), /file changed after it was read/i);
   assert.equal(enqueued, false);
 });
+
+test("Developer validation proposal creates a high-risk task that requires Founder approval", async () => {
+  let enqueued: any;
+  const service = new DeveloperProposalService({
+    enqueue: async (input: any) => {
+      enqueued = input;
+      return { capability: input.capability, task: { id: input.id, status: "queued", requiresApproval: true } } as any;
+    },
+  } as any, () => digest);
+  const receipt = await service.proposeValidation("founder-1");
+  assert.equal(receipt.capability, "workspace.run_validation");
+  assert.equal(receipt.requiresFounderApproval, true);
+  assert.equal(enqueued.actor.role, "developer");
+  assert.deepEqual(enqueued.args, {});
+});
