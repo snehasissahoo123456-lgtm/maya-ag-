@@ -6,7 +6,7 @@ import express from "express";
 import http from "http";
 import path from "path";
 import fs from "fs";
-import { execSync } from "child_process";
+
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI } from "@google/genai";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
@@ -1486,25 +1486,28 @@ async function startServer() {
     });
   });
 
-  app.post("/api/action-engine/tests/run", (_req, res) => {
-    const command = "bun run lint && bun run test && bun run build";
+  app.post("/api/action-engine/tests/run", async (req, res) => {
+    const founderId = (req as any).authSession?.user?.id;
+    if (!founderId) return res.status(401).json({ success: false, error: "Verified Founder session required." });
     try {
-      const output = execSync(command, {
-        cwd: process.cwd(),
-        encoding: "utf-8",
-        stdio: "pipe",
-        timeout: 180000,
+      const envelope = await taskOrchestrator.enqueue({
+        id: "validation-" + randomUUID(),
+        founderId,
+        instruction: "Run the fixed lint, test and production build validation suite in the Maya server workspace.",
+        capability: "workspace.run_validation",
+        args: {},
+        actor: { id: founderId, founderId, role: "founder", scopes: ["tests:run"] },
       });
-      return res.json({ success: true, verified: true, command, output });
-    } catch (error: any) {
-      return res.status(500).json({
-        success: false,
-        verified: false,
-        command,
-        exitCode: typeof error.status === "number" ? error.status : 1,
-        stdout: String(error.stdout || ""),
-        stderr: String(error.stderr || error.message || "Validation command failed."),
+      return res.status(202).json({
+        success: true,
+        queued: true,
+        executed: false,
+        requiresFounderApproval: envelope.task.requiresApproval,
+        task: envelope.task,
+        message: "Validation is queued. Request and approve the exact task in the Developer workspace before execution.",
       });
+    } catch (error) {
+      return res.status(400).json({ success: false, error: error instanceof Error ? error.message : "Validation task could not be queued." });
     }
   });
 
