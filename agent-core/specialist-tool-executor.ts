@@ -124,4 +124,4 @@ export class SpecialistToolExecutor {
   private emit(event: SpecialistToolExecutionEvent): void {
     try { this.onExecution?.(event); } catch { /* Audit observers must not change capability outcomes. */ }
   }
-
+}
