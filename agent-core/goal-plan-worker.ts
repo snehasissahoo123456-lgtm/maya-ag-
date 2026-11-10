@@ -90,7 +90,8 @@ export class GoalPlanWorker {
                 this.status = { ...this.status, lastError: "Goal-plan lease was lost; no further steps will be started." };
               }
             } catch (error) {
-              this.status = { ...this.status, lastError: "Goal-plan lease renewal failed: " + (error instanceof Error ? error.message : String(error)) };
+              leaseLost = true;
+              this.status = { ...this.status, lastError: "Goal-plan lease renewal failed; execution will stop after the current tool returns: " + (error instanceof Error ? error.message : String(error)) };
             } finally {
               renewalInFlight = false;
             }
