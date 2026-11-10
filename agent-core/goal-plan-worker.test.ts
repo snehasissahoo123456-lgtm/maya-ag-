@@ -178,3 +178,34 @@ test("two independent workers cannot claim and execute the same running plan", a
     assert.equal((await store.get("founder-a", created.id))?.status, "completed");
   } finally { fs.rmSync(directory, { recursive: true, force: true }); }
 });
+
+test("database-backed worker renews its lease while a long-running step is executing", async () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "maya-plan-heartbeat-"));
+  try {
+    const store = new GoalPlanStore(directory);
+    const created = await store.create("founder-a", plan([readStep]));
+    await store.save("founder-a", { ...created, status: "running" });
+    let claimed = false;
+    let renewals = 0;
+    const repository = {
+      create: store.create.bind(store), list: store.list.bind(store), get: store.get.bind(store), save: store.save.bind(store),
+      claimNext: async (founderId: string) => {
+        if (claimed) return undefined;
+        const current = await store.get(founderId, created.id);
+        if (!current || current.status !== "running") return undefined;
+        claimed = true;
+        return current;
+      },
+      renewClaim: async () => { renewals++; return true; },
+      releaseClaim: async () => { claimed = false; },
+    };
+    const executor = new GoalPlanExecutor(store, async () => {
+      await new Promise(resolve => setTimeout(resolve, 1_900));
+      return { ok: true };
+    });
+    const worker = new GoalPlanWorker(repository, executor, "founder-a", 3000, 5, "heartbeat-worker", 5_000);
+    const result = await worker.runOnce();
+    assert.equal(result.completed, 1);
+    assert.ok(renewals >= 1, "the worker should renew the 5-second lease during the running tool call");
+  } finally { fs.rmSync(directory, { recursive: true, force: true }); }
+});
