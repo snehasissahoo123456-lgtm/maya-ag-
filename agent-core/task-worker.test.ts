@@ -163,6 +163,36 @@ test("worker executes only queued low-risk workspace read tasks using its scoped
   assert.equal(saved?.task.verificationEvidence.length, 1);
 });
 
+test("file-backed worker respects maxTasksPerCycle and leaves excess queued tasks for the next cycle", async () => {
+  const { orchestrator, repository, registry, approvals } = setup();
+  const worker = new TaskWorker(repository, orchestrator, registry, {
+    founderId: "founder-primary",
+    maxTasksPerCycle: 1,
+  }, approvals);
+
+  for (const id of ["worker-batch-1", "worker-batch-2", "worker-batch-3"]) {
+    await orchestrator.enqueue({
+      id,
+      founderId: "founder-primary",
+      instruction: "Read README",
+      capability: "workspace.read_file",
+      args: { path: "README.md" },
+      actor: founder,
+    });
+  }
+
+  const firstCycle = await worker.runOnce();
+  assert.deepEqual(firstCycle, { scanned: 1, executed: 1, skipped: 0, failed: 0 });
+  assert.equal((await repository.get("worker-batch-1"))?.task.status, "completed");
+  assert.equal((await repository.get("worker-batch-2"))?.task.status, "queued");
+  assert.equal((await repository.get("worker-batch-3"))?.task.status, "queued");
+
+  const secondCycle = await worker.runOnce();
+  assert.deepEqual(secondCycle, { scanned: 1, executed: 1, skipped: 0, failed: 0 });
+  assert.equal((await repository.get("worker-batch-2"))?.task.status, "completed");
+  assert.equal((await repository.get("worker-batch-3"))?.task.status, "queued");
+});
+
 test("worker skips high-risk actions and tasks requiring Founder approval", async () => {
   const { orchestrator, worker, repository } = setup();
   await orchestrator.enqueue({

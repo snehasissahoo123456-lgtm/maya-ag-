@@ -178,9 +178,13 @@ export class TaskWorker {
         const recovered = await this.recoverInterrupted();
         result.skipped += recovered;
         const envelopes = await this.repository.list(this.founderId);
-        result.scanned = envelopes.length;
-        for (const envelope of envelopes) {
-          if (envelope.task.founderId !== this.founderId || envelope.task.status !== "queued") continue;
+        // Match the leased-repository path: one polling cycle must never process
+        // more than maxTasksPerCycle eligible queued tasks.
+        const queued = envelopes.filter(envelope =>
+          envelope.task.founderId === this.founderId && envelope.task.status === "queued"
+        );
+        for (const envelope of queued.slice(0, this.maxTasksPerCycle)) {
+          result.scanned++;
           if (this.blockedTaskIds.has(envelope.task.id)) { result.skipped++; continue; }
           try {
             const outcome = await this.executeAllowed(envelope);
