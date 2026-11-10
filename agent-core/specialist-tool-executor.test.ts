@@ -128,7 +128,7 @@ test("emits a redacted denial event when policy rejects a specialist tool", asyn
     registry(),
     async () => "should not execute",
     32_000,
-    event => events.push(event as unknown as Record<string, unknown>),
+    event => { events.push(event as unknown as Record<string, unknown>); },
   );
   await assert.rejects(executor.execute("developer", "founder-1", "workspace.write_file", { path: "private.txt" }), /low-risk/);
   assert.equal(events.length, 1);
