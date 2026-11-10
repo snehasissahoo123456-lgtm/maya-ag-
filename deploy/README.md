@@ -13,9 +13,11 @@ This is a deployment template, not a deployment that has already been run. It bu
 
 1. Copy `.env.example` to `.env`.
 2. Set a strong, unique `MAYA_FOUNDER_PASSWORD` and the Founder email.
-3. Set `GEMINI_API_KEY` on the host only if using Gemini. Do not commit `.env`.
-4. For Supabase, apply the repository migrations in timestamp order, review RLS/service-role grants, then set `MAYA_STORAGE_DRIVER=supabase`, `SUPABASE_URL`, and `SUPABASE_SERVICE_ROLE_KEY`.
-5. Start with workers disabled. Verify login, health, task persistence and backups before enabling background work.
+3. If TLS terminates at a reverse proxy, set `MAYA_ALLOWED_ORIGINS` to the exact public origin (for example `https://maya.example.com`). Do not use a wildcard.
+4. Set `GEMINI_API_KEY` on the host only if using Gemini. Do not commit `.env`.
+5. For Supabase, apply the repository migrations in timestamp order, review RLS/service-role grants, then set `MAYA_STORAGE_DRIVER=supabase`, `SUPABASE_URL`, and `SUPABASE_SERVICE_ROLE_KEY`.
+6. Start with workers disabled. Verify login, health, task persistence and backups before enabling background work.
+
 
 ## Build and run
 

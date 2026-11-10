@@ -710,7 +710,7 @@ const goalPlanStore = createGoalPlanRepository();
 const goalPlanExecutor = new GoalPlanExecutor(goalPlanStore, executeAgentTool);
 const goalPlanWorkerEnabled = process.env.MAYA_PLAN_WORKER_ENABLED === "true";
 if (goalPlanWorkerEnabled && (process.env.MAYA_STORAGE_DRIVER || "file").toLowerCase() !== "file") {
-  throw new Error("MAYA_PLAN_WORKER_ENABLED requires single-instance file storage until distributed goal-plan leases are implemented.");
+  throw new Error("MAYA_PLAN_WORKER_ENABLED currently requires single-instance file storage. Supabase lease primitives exist, but activation remains blocked until lease renewal and live multi-instance validation are complete.");
 }
 const goalPlanWorker = new GoalPlanWorker(
   goalPlanStore, goalPlanExecutor, "founder-primary",
@@ -887,7 +887,7 @@ function randomTaskId(): string {
   return randomBytes(8).toString("hex");
 }
 
-const authService = new AuthService();
+const authService = new AuthService(path.join(process.env.MAYA_DATA_DIR || path.resolve(process.cwd(), "..", "maya-data"), "sessions.json"));
 const platformService = new PlatformService();
 
 const watcherService = new WatcherService({
@@ -935,6 +935,39 @@ function handlePersonaCommands(rawMsg: string): string | null {
   return null;
 }
 
+function isAllowedRequestOrigin(req: any): boolean {
+  const rawOrigin = typeof req.headers.origin === "string" && req.headers.origin
+    ? req.headers.origin
+    : typeof req.headers.referer === "string" ? req.headers.referer : "";
+  if (!rawOrigin || rawOrigin === "null") return false;
+
+  let sourceOrigin: string;
+  try {
+    const parsed = new URL(rawOrigin);
+    if (parsed.protocol !== "https:" && parsed.protocol !== "http:") return false;
+    sourceOrigin = parsed.origin;
+  } catch {
+    return false;
+  }
+
+  const configuredOrigins = (process.env.MAYA_ALLOWED_ORIGINS || "")
+    .split(",")
+    .map(value => value.trim())
+    .filter(Boolean)
+    .flatMap(value => {
+      try { return [new URL(value).origin]; } catch { return []; }
+    });
+  const requestHost = typeof req.get === "function" ? req.get("host") : req.headers.host;
+  const forwardedProtocol = typeof req.headers["x-forwarded-proto"] === "string"
+    ? req.headers["x-forwarded-proto"].split(",")[0].trim()
+    : "";
+  const requestProtocol = typeof req.protocol === "string" && req.protocol
+    ? req.protocol
+    : forwardedProtocol || (req.socket?.encrypted ? "https" : "http");
+  const requestOrigin = requestHost ? `${requestProtocol}://${requestHost}` : "";
+  return sourceOrigin === requestOrigin || configuredOrigins.includes(sourceOrigin);
+}
+
 async function startServer() {
   await ceoRunRepository.recoverInterrupted();
   const app = express();
@@ -969,10 +1002,18 @@ async function startServer() {
     "/auth/logout",
   ]);
   app.use("/api", (req, res, next) => {
-    if (publicApiPaths.has(req.path)) return next();
     const authorization = req.headers.authorization || "";
     const bearer = authorization.match(/^Bearer\s+(.+)$/i)?.[1];
     const cookieToken = (req.headers.cookie || "").split(";").map((part) => part.trim()).find((part) => part.startsWith("maya_session="))?.slice("maya_session=".length);
+    const mutatingMethod = ["POST", "PUT", "PATCH", "DELETE"].includes(req.method);
+
+    // Cookie-authenticated state changes must originate from this deployment or an explicitly trusted origin.
+    // Non-browser clients should use an explicit bearer credential instead.
+    if (!bearer && cookieToken && mutatingMethod && !isAllowedRequestOrigin(req)) {
+      return res.status(403).json({ success: false, error: "Cross-origin request blocked. Send a valid same-origin Origin or Referer header." });
+    }
+    if (publicApiPaths.has(req.path)) return next();
+
     const session = authService.validateSession(bearer || cookieToken);
     if (!session) {
       return res.status(401).json({ success: false, error: "Authentication required. No verified session is active." });
@@ -2357,6 +2398,7 @@ MULTILINGUAL & RAPID REACTION:
   const wss = new WebSocketServer({
     noServer: true,
     verifyClient: (info, done) => {
+      if (!isAllowedRequestOrigin(info.req)) return done(false, 403, "Cross-origin WebSocket blocked");
       const cookies = info.req.headers.cookie || "";
       const raw = cookies.split(";").map((part) => part.trim()).find((part) => part.startsWith("maya_session="));
       const token = raw ? decodeURIComponent(raw.slice("maya_session=".length)) : undefined;
@@ -2369,6 +2411,11 @@ MULTILINGUAL & RAPID REACTION:
     let pathname = "";
     try { pathname = new URL(request.url || "/", "http://localhost").pathname; }
     catch { socket.destroy(); return; }
+    if (request.headers.origin && !isAllowedRequestOrigin(request)) {
+      socket.write("HTTP/1.1 403 Forbidden\r\n\r\n");
+      socket.destroy();
+      return;
+    }
     if (pathname === "/api/device-bridge") {
       deviceWss.handleUpgrade(request, socket, head, (webSocket) => deviceWss.emit("connection", webSocket, request));
       return;

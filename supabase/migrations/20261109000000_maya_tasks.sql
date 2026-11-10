@@ -17,9 +17,11 @@ revoke all on public.maya_tasks from anon, authenticated;
 grant all on public.maya_tasks to service_role;
 
 create or replace function public.maya_save_task(p_task_id text, p_founder_id text, p_envelope jsonb)
-returns setof public.maya_tasks
+returns public.maya_tasks
 language plpgsql security definer set search_path = public
 as $$
+declare
+  saved public.maya_tasks;
 begin
   if p_task_id is null or length(p_task_id) < 1 or length(p_task_id) > 128 then raise exception 'Invalid task ID'; end if;
   if p_founder_id is null or length(p_founder_id) < 1 or length(p_founder_id) > 256 then raise exception 'Invalid Founder ID'; end if;
@@ -27,12 +29,13 @@ begin
     or p_envelope->'task'->>'founderId' is distinct from p_founder_id then
     raise exception 'Task envelope identity does not match requested owner';
   end if;
-  return query
-    insert into public.maya_tasks (id, founder_id, envelope, created_at, updated_at)
+  insert into public.maya_tasks (id, founder_id, envelope, created_at, updated_at)
     values (p_task_id, p_founder_id, p_envelope, now(), now())
     on conflict (id) do update set envelope = excluded.envelope, updated_at = now()
     where public.maya_tasks.founder_id = excluded.founder_id
-    returning *;
+    returning * into saved;
+  if not found then raise exception 'Task ID is already owned by another Founder or write was not applied'; end if;
+  return saved;
 end;
 $$;
 revoke all on function public.maya_save_task(text, text, jsonb) from public, anon, authenticated;

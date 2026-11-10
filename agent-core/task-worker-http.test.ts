@@ -34,12 +34,19 @@ async function waitForWsMessage(socket: WebSocket, type: string, timeoutMs = 10_
   });
 }
 
+
+async function sameOriginFetch(input: string, init: RequestInit = {}): Promise<Response> {
+  const headers = new Headers(init.headers);
+  if (headers.has("cookie") && !headers.has("origin")) headers.set("origin", new URL(input).origin);
+  return fetch(input, { ...init, headers });
+}
+
 async function waitForServer(baseUrl: string, child: ChildProcess): Promise<void> {
   const deadline = Date.now() + 20_000;
   while (Date.now() < deadline) {
     if (child.exitCode !== null) throw new Error(`Maya test server exited early (code ${child.exitCode}).`);
     try {
-      const response = await fetch(baseUrl + "/api/health");
+      const response = await sameOriginFetch(baseUrl + "/api/health");
       if (response.ok) return;
     } catch {}
     await new Promise(resolve => setTimeout(resolve, 150));
@@ -74,10 +81,10 @@ test("opt-in server worker automatically completes only the safe read-only queue
 
   try {
     await waitForServer(baseUrl, child);
-    const health = await (await fetch(baseUrl + "/api/health")).json() as any;
+    const health = await (await sameOriginFetch(baseUrl + "/api/health")).json() as any;
     assert.equal(health.taskWorker.enabled, true);
 
-    const login = await fetch(baseUrl + "/api/auth/founder-login", {
+    const login = await sameOriginFetch(baseUrl + "/api/auth/founder-login", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ email: "worker-founder@example.invalid", password }),
@@ -86,7 +93,7 @@ test("opt-in server worker automatically completes only the safe read-only queue
     const cookie = login.headers.get("set-cookie")?.split(";")[0];
     assert.ok(cookie);
 
-    const created = await fetch(baseUrl + "/api/control-plane/tasks", {
+    const created = await sameOriginFetch(baseUrl + "/api/control-plane/tasks", {
       method: "POST",
       headers: { "content-type": "application/json", cookie },
       body: JSON.stringify({ instruction: "Worker should read README", path: "README.md" }),
@@ -99,7 +106,7 @@ test("opt-in server worker automatically completes only the safe read-only queue
     const deadline = Date.now() + 12_000;
     let finished: any = null;
     while (Date.now() < deadline) {
-      const response = await fetch(baseUrl + "/api/control-plane/tasks", { headers: { cookie } });
+      const response = await sameOriginFetch(baseUrl + "/api/control-plane/tasks", { headers: { cookie } });
       assert.equal(response.status, 200);
       const data = await response.json() as any;
       finished = data.tasks.find((item: any) => item.task.id === taskId);
@@ -157,7 +164,7 @@ test("real HTTP worker replaces an existing workspace file only after exact Foun
 
   try {
     await waitForServer(baseUrl, child);
-    const login = await fetch(baseUrl + "/api/auth/founder-login", {
+    const login = await sameOriginFetch(baseUrl + "/api/auth/founder-login", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ email: "write-founder@example.invalid", password }),
@@ -167,7 +174,7 @@ test("real HTTP worker replaces an existing workspace file only after exact Foun
     assert.ok(cookie);
 
     const replacement = "Founder-approved replacement contents";
-    const created = await fetch(baseUrl + "/api/control-plane/tasks", {
+    const created = await sameOriginFetch(baseUrl + "/api/control-plane/tasks", {
       method: "POST",
       headers: { "content-type": "application/json", cookie },
       body: JSON.stringify({
@@ -183,18 +190,18 @@ test("real HTTP worker replaces an existing workspace file only after exact Foun
     assert.equal(createdData.task.requiresApproval, true);
     assert.equal(fs.readFileSync(targetPath, "utf8"), "Original file contents");
 
-    const approvalRequest = await fetch(baseUrl + `/api/control-plane/tasks/${encodeURIComponent(taskId)}/request-approval`, {
+    const approvalRequest = await sameOriginFetch(baseUrl + `/api/control-plane/tasks/${encodeURIComponent(taskId)}/request-approval`, {
       method: "POST", headers: { cookie },
     });
     assert.equal(approvalRequest.status, 200);
     const approvalData = await approvalRequest.json() as any;
 
-    const pendingTasks = await fetch(baseUrl + "/api/control-plane/tasks", { headers: { cookie } });
+    const pendingTasks = await sameOriginFetch(baseUrl + "/api/control-plane/tasks", { headers: { cookie } });
     const pendingData = await pendingTasks.json() as any;
     assert.equal(pendingData.tasks.find((item: any) => item.task.id === taskId)?.task.status, "awaiting_approval");
     assert.equal(fs.readFileSync(targetPath, "utf8"), "Original file contents");
 
-    const decision = await fetch(baseUrl + `/api/control-plane/approvals/${encodeURIComponent(approvalData.approvalId)}/decision`, {
+    const decision = await sameOriginFetch(baseUrl + `/api/control-plane/approvals/${encodeURIComponent(approvalData.approvalId)}/decision`, {
       method: "POST",
       headers: { "content-type": "application/json", cookie },
       body: JSON.stringify({ approved: true }),
@@ -204,7 +211,7 @@ test("real HTTP worker replaces an existing workspace file only after exact Foun
     const deadline = Date.now() + 12_000;
     let finished: any = null;
     while (Date.now() < deadline) {
-      const response = await fetch(baseUrl + "/api/control-plane/tasks", { headers: { cookie } });
+      const response = await sameOriginFetch(baseUrl + "/api/control-plane/tasks", { headers: { cookie } });
       assert.equal(response.status, 200);
       const data = await response.json() as any;
       finished = data.tasks.find((item: any) => item.task.id === taskId);
@@ -214,7 +221,7 @@ test("real HTTP worker replaces an existing workspace file only after exact Foun
     assert.equal(finished?.task.status, "completed", `Approved write did not complete. Server output:\n${logs}`);
     assert.equal(fs.readFileSync(targetPath, "utf8"), replacement);
     assert.match(finished.task.verificationEvidence[0].reference, /^sha256:[a-f0-9]{64}$/);
-    const approvals = await (await fetch(baseUrl + "/api/control-plane/approvals", { headers: { cookie } })).json() as any;
+    const approvals = await (await sameOriginFetch(baseUrl + "/api/control-plane/approvals", { headers: { cookie } })).json() as any;
     assert.equal(approvals.approvals.find((item: any) => item.id === approvalData.approvalId)?.status, "consumed");
 
 
@@ -270,7 +277,7 @@ test("real HTTP worker writes to an enrolled local PC only after exact Founder a
 
   try {
     await waitForServer(baseUrl, child);
-    const login = await fetch(baseUrl + "/api/auth/founder-login", {
+    const login = await sameOriginFetch(baseUrl + "/api/auth/founder-login", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ email: "device-write-founder@example.invalid", password }),
@@ -279,7 +286,7 @@ test("real HTTP worker writes to an enrolled local PC only after exact Founder a
     const cookie = login.headers.get("set-cookie")?.split(";")[0];
     assert.ok(cookie);
 
-    const pairing = await fetch(baseUrl + "/api/devices/pairing", { method: "POST", headers: { cookie } });
+    const pairing = await sameOriginFetch(baseUrl + "/api/devices/pairing", { method: "POST", headers: { cookie } });
     assert.equal(pairing.status, 201);
     const pairingData = await pairing.json() as any;
     socket = new WebSocket(`ws://127.0.0.1:${port}/api/device-bridge`);
@@ -308,7 +315,7 @@ test("real HTTP worker writes to an enrolled local PC only after exact Founder a
       }
     });
 
-    const readTaskResponse = await fetch(baseUrl + "/api/control-plane/tasks", {
+    const readTaskResponse = await sameOriginFetch(baseUrl + "/api/control-plane/tasks", {
       method: "POST",
       headers: { "content-type": "application/json", cookie },
       body: JSON.stringify({
@@ -325,7 +332,7 @@ test("real HTTP worker writes to an enrolled local PC only after exact Founder a
     const readDeadline = Date.now() + 12_000;
     let readFinished: any = null;
     while (Date.now() < readDeadline) {
-      const response = await fetch(baseUrl + "/api/control-plane/tasks", { headers: { cookie } });
+      const response = await sameOriginFetch(baseUrl + "/api/control-plane/tasks", { headers: { cookie } });
       const data = await response.json() as any;
       readFinished = data.tasks.find((item: any) => item.task.id === readTaskId);
       if (readFinished?.task.status === "completed" || readFinished?.task.status === "failed") break;
@@ -336,7 +343,7 @@ test("real HTTP worker writes to an enrolled local PC only after exact Founder a
     assert.equal(readFinished.result.content, "Original local PC contents");
     assert.match(readFinished.task.verificationEvidence[0].reference, /^sha256:[a-f0-9]{64}$/);
 
-    const gitTaskResponse = await fetch(baseUrl + "/api/control-plane/tasks", {
+    const gitTaskResponse = await sameOriginFetch(baseUrl + "/api/control-plane/tasks", {
       method: "POST",
       headers: { "content-type": "application/json", cookie },
       body: JSON.stringify({
@@ -353,7 +360,7 @@ test("real HTTP worker writes to an enrolled local PC only after exact Founder a
     const gitDeadline = Date.now() + 12_000;
     let gitFinished: any = null;
     while (Date.now() < gitDeadline) {
-      const response = await fetch(baseUrl + "/api/control-plane/tasks", { headers: { cookie } });
+      const response = await sameOriginFetch(baseUrl + "/api/control-plane/tasks", { headers: { cookie } });
       const data = await response.json() as any;
       gitFinished = data.tasks.find((item: any) => item.task.id === gitTaskId);
       if (gitFinished?.task.status === "completed" || gitFinished?.task.status === "failed") break;
@@ -366,7 +373,7 @@ test("real HTTP worker writes to an enrolled local PC only after exact Founder a
     assert.match(gitFinished.task.verificationEvidence[0].reference, /^sha256:[a-f0-9]{64}$/);
 
     const replacement = "Founder-approved local device replacement";
-    const created = await fetch(baseUrl + "/api/control-plane/tasks", {
+    const created = await sameOriginFetch(baseUrl + "/api/control-plane/tasks", {
       method: "POST",
       headers: { "content-type": "application/json", cookie },
       body: JSON.stringify({
@@ -381,12 +388,12 @@ test("real HTTP worker writes to an enrolled local PC only after exact Founder a
     const taskId = (await created.json() as any).task.id;
     assert.equal(fs.readFileSync(targetPath, "utf8"), "Original local PC contents");
 
-    const approvalRequest = await fetch(baseUrl + `/api/control-plane/tasks/${encodeURIComponent(taskId)}/request-approval`, {
+    const approvalRequest = await sameOriginFetch(baseUrl + `/api/control-plane/tasks/${encodeURIComponent(taskId)}/request-approval`, {
       method: "POST", headers: { cookie },
     });
     assert.equal(approvalRequest.status, 200);
     const approvalData = await approvalRequest.json() as any;
-    const decision = await fetch(baseUrl + `/api/control-plane/approvals/${encodeURIComponent(approvalData.approvalId)}/decision`, {
+    const decision = await sameOriginFetch(baseUrl + `/api/control-plane/approvals/${encodeURIComponent(approvalData.approvalId)}/decision`, {
       method: "POST",
       headers: { "content-type": "application/json", cookie },
       body: JSON.stringify({ approved: true }),
@@ -396,7 +403,7 @@ test("real HTTP worker writes to an enrolled local PC only after exact Founder a
     const deadline = Date.now() + 12_000;
     let finished: any = null;
     while (Date.now() < deadline) {
-      const response = await fetch(baseUrl + "/api/control-plane/tasks", { headers: { cookie } });
+      const response = await sameOriginFetch(baseUrl + "/api/control-plane/tasks", { headers: { cookie } });
       const data = await response.json() as any;
       finished = data.tasks.find((item: any) => item.task.id === taskId);
       if (finished?.task.status === "completed" || finished?.task.status === "failed") break;
@@ -405,11 +412,11 @@ test("real HTTP worker writes to an enrolled local PC only after exact Founder a
     assert.equal(finished?.task.status, "completed", `Approved device write did not complete. Server output:\n${logs}`);
     assert.equal(fs.readFileSync(targetPath, "utf8"), replacement);
     assert.match(finished.task.verificationEvidence[0].reference, /^sha256:[a-f0-9]{64}$/);
-    const approvals = await (await fetch(baseUrl + "/api/control-plane/approvals", { headers: { cookie } })).json() as any;
+    const approvals = await (await sameOriginFetch(baseUrl + "/api/control-plane/approvals", { headers: { cookie } })).json() as any;
     assert.equal(approvals.approvals.find((item: any) => item.id === approvalData.approvalId)?.status, "consumed");
 
     fs.mkdirSync(path.join(deviceWorkspace, "projects"));
-    const directoryTaskResponse = await fetch(baseUrl + "/api/control-plane/tasks", {
+    const directoryTaskResponse = await sameOriginFetch(baseUrl + "/api/control-plane/tasks", {
       method: "POST",
       headers: { "content-type": "application/json", cookie },
       body: JSON.stringify({
@@ -422,12 +429,12 @@ test("real HTTP worker writes to an enrolled local PC only after exact Founder a
     assert.equal(directoryTaskResponse.status, 201, `Directory task creation failed. Server output:\n${logs}`);
     const directoryTaskId = (await directoryTaskResponse.json() as any).task.id;
     assert.equal(fs.existsSync(path.join(deviceWorkspace, "projects", "new-project")), false);
-    const directoryApprovalRequest = await fetch(baseUrl + `/api/control-plane/tasks/${encodeURIComponent(directoryTaskId)}/request-approval`, {
+    const directoryApprovalRequest = await sameOriginFetch(baseUrl + `/api/control-plane/tasks/${encodeURIComponent(directoryTaskId)}/request-approval`, {
       method: "POST", headers: { cookie },
     });
     assert.equal(directoryApprovalRequest.status, 200);
     const directoryApproval = await directoryApprovalRequest.json() as any;
-    const directoryDecision = await fetch(baseUrl + `/api/control-plane/approvals/${encodeURIComponent(directoryApproval.approvalId)}/decision`, {
+    const directoryDecision = await sameOriginFetch(baseUrl + `/api/control-plane/approvals/${encodeURIComponent(directoryApproval.approvalId)}/decision`, {
       method: "POST",
       headers: { "content-type": "application/json", cookie },
       body: JSON.stringify({ approved: true }),
@@ -436,7 +443,7 @@ test("real HTTP worker writes to an enrolled local PC only after exact Founder a
     const directoryDeadline = Date.now() + 12_000;
     let directoryTask: any = null;
     while (Date.now() < directoryDeadline) {
-      const response = await fetch(baseUrl + "/api/control-plane/tasks", { headers: { cookie } });
+      const response = await sameOriginFetch(baseUrl + "/api/control-plane/tasks", { headers: { cookie } });
       const data = await response.json() as any;
       directoryTask = data.tasks.find((item: any) => item.task.id === directoryTaskId);
       if (directoryTask?.task.status === "completed" || directoryTask?.task.status === "failed") break;
@@ -446,11 +453,11 @@ test("real HTTP worker writes to an enrolled local PC only after exact Founder a
     assert.equal(fs.statSync(path.join(deviceWorkspace, "projects", "new-project")).isDirectory(), true);
     assert.equal(directoryTask.capability, "device.workspace.create_directory");
     assert.equal(directoryTask.task.verificationEvidence[0].kind, "device-workspace-directory-create");
-    const directoryApprovals = await (await fetch(baseUrl + "/api/control-plane/approvals", { headers: { cookie } })).json() as any;
+    const directoryApprovals = await (await sameOriginFetch(baseUrl + "/api/control-plane/approvals", { headers: { cookie } })).json() as any;
     assert.equal(directoryApprovals.approvals.find((item: any) => item.id === directoryApproval.approvalId)?.status, "consumed");
 
     const createContent = "Founder-approved new local PC file";
-    const createTaskResponse = await fetch(baseUrl + "/api/control-plane/tasks", {
+    const createTaskResponse = await sameOriginFetch(baseUrl + "/api/control-plane/tasks", {
       method: "POST",
       headers: { "content-type": "application/json", cookie },
       body: JSON.stringify({
@@ -464,12 +471,12 @@ test("real HTTP worker writes to an enrolled local PC only after exact Founder a
     assert.equal(createTaskResponse.status, 201, `Device create task creation failed. Server output:\n${logs}`);
     const createTaskId = (await createTaskResponse.json() as any).task.id;
     assert.equal(fs.existsSync(path.join(deviceWorkspace, "created-report.md")), false);
-    const createApprovalRequest = await fetch(baseUrl + `/api/control-plane/tasks/${encodeURIComponent(createTaskId)}/request-approval`, {
+    const createApprovalRequest = await sameOriginFetch(baseUrl + `/api/control-plane/tasks/${encodeURIComponent(createTaskId)}/request-approval`, {
       method: "POST", headers: { cookie },
     });
     assert.equal(createApprovalRequest.status, 200);
     const createApproval = await createApprovalRequest.json() as any;
-    const createDecision = await fetch(baseUrl + `/api/control-plane/approvals/${encodeURIComponent(createApproval.approvalId)}/decision`, {
+    const createDecision = await sameOriginFetch(baseUrl + `/api/control-plane/approvals/${encodeURIComponent(createApproval.approvalId)}/decision`, {
       method: "POST",
       headers: { "content-type": "application/json", cookie },
       body: JSON.stringify({ approved: true }),
@@ -478,7 +485,7 @@ test("real HTTP worker writes to an enrolled local PC only after exact Founder a
     const createDeadline = Date.now() + 12_000;
     let createdTask: any = null;
     while (Date.now() < createDeadline) {
-      const response = await fetch(baseUrl + "/api/control-plane/tasks", { headers: { cookie } });
+      const response = await sameOriginFetch(baseUrl + "/api/control-plane/tasks", { headers: { cookie } });
       const data = await response.json() as any;
       createdTask = data.tasks.find((item: any) => item.task.id === createTaskId);
       if (createdTask?.task.status === "completed" || createdTask?.task.status === "failed") break;
@@ -487,7 +494,7 @@ test("real HTTP worker writes to an enrolled local PC only after exact Founder a
     assert.equal(createdTask?.task.status, "completed", `Approved device create did not complete. Server output:\n${logs}`);
     assert.equal(fs.readFileSync(path.join(deviceWorkspace, "created-report.md"), "utf8"), createContent);
     assert.match(createdTask.task.verificationEvidence[0].reference, /^sha256:[a-f0-9]{64}$/);
-    const createApprovals = await (await fetch(baseUrl + "/api/control-plane/approvals", { headers: { cookie } })).json() as any;
+    const createApprovals = await (await sameOriginFetch(baseUrl + "/api/control-plane/approvals", { headers: { cookie } })).json() as any;
     assert.equal(createApprovals.approvals.find((item: any) => item.id === createApproval.approvalId)?.status, "consumed");
   } catch (error) {
     throw new Error(`${error instanceof Error ? error.message : String(error)}\nServer output:\n${logs}`);
