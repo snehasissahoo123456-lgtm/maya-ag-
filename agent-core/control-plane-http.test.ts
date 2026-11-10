@@ -33,6 +33,28 @@ function waitForWsMessage(socket: WebSocket, type: string): Promise<any> {
   });
 }
 
+
+async function expectWebSocketRejection(url: string, headers: Record<string, string>, expectedStatus: number): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    let settled = false;
+    const socket = new WebSocket(url, { headers });
+    socket.once("unexpected-response", (_request, response) => {
+      settled = true;
+      assert.equal(response.statusCode, expectedStatus);
+      socket.terminate();
+      resolve();
+    });
+    socket.once("open", () => {
+      if (settled) return;
+      socket.close();
+      reject(new Error(`Expected WebSocket handshake to be rejected with HTTP ${expectedStatus}`));
+    });
+    socket.once("error", error => {
+      if (!settled) reject(error);
+    });
+  });
+}
+
 async function waitForServer(baseUrl: string, child: ChildProcess): Promise<void> {
   const deadline = Date.now() + 20_000;
   let lastError: unknown;
@@ -95,6 +117,20 @@ test("real HTTP control-plane routes enforce Founder auth and execute only the r
     assert.equal(login.status, 200);
     const cookie = login.headers.get("set-cookie")?.split(";")[0];
     assert.ok(cookie, "Founder login should set an HttpOnly session cookie");
+
+    await expectWebSocketRejection(`ws://127.0.0.1:${port}/api/live-ws`, { origin: baseUrl }, 401);
+    await expectWebSocketRejection(`ws://127.0.0.1:${port}/api/live-ws`, {
+      origin: "https://attacker.invalid",
+      cookie: cookie!,
+    }, 403);
+    const authenticatedLiveSocket = new WebSocket(`ws://127.0.0.1:${port}/api/live-ws`, {
+      headers: { origin: baseUrl, cookie: cookie! },
+    });
+    await new Promise<void>((resolve, reject) => {
+      authenticatedLiveSocket.once("open", () => resolve());
+      authenticatedLiveSocket.once("error", reject);
+    });
+    authenticatedLiveSocket.close();
     const crossOriginMutation = await fetch(baseUrl + "/api/action-engine/memory", {
       method: "POST",
       headers: { "content-type": "application/json", cookie: cookie!, origin: "https://attacker.invalid" },

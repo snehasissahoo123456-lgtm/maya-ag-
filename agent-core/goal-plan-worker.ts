@@ -17,7 +17,7 @@ export interface GoalPlanWorkerStatus {
 /**
  * Single-process background runner for explicitly started Founder plans.
  * Interrupted in-flight steps are parked as failed for review; they are never replayed.
- * Do not enable alongside multiple server instances until distributed plan leases exist.
+ * Database-backed workers renew their Founder-scoped lease while a plan executes.
  */
 export class GoalPlanWorker {
   private timer?: ReturnType<typeof setTimeout>;
@@ -71,13 +71,33 @@ export class GoalPlanWorker {
     const result = { scanned: 0, resumed: 0, completed: 0, awaitingApproval: 0, recovered: 0, failed: 0 };
     this.status = { ...this.status, lastCycleAt: new Date().toISOString(), lastError: undefined };
     try {
-      if (this.repository.claimNext && this.repository.releaseClaim) {
+      if (this.repository.claimNext && this.repository.releaseClaim && this.repository.renewClaim) {
         // Database-backed repositories use atomic row-lock claims so multiple server
         // instances cannot execute the same goal plan concurrently.
         for (let index = 0; index < this.maxPlansPerCycle; index++) {
           const plan = await this.repository.claimNext(this.founderId, this.workerId, this.leaseMs);
           if (!plan) break;
           result.scanned++;
+          let leaseLost = false;
+          let renewalInFlight = false;
+          const renew = async () => {
+            if (leaseLost || renewalInFlight) return;
+            renewalInFlight = true;
+            try {
+              const renewed = await this.repository.renewClaim!(this.founderId, plan.id, this.workerId, this.leaseMs);
+              if (!renewed) {
+                leaseLost = true;
+                this.status = { ...this.status, lastError: "Goal-plan lease was lost; no further steps will be started." };
+              }
+            } catch (error) {
+              leaseLost = true;
+              this.status = { ...this.status, lastError: "Goal-plan lease renewal failed; execution will stop after the current tool returns: " + (error instanceof Error ? error.message : String(error)) };
+            } finally {
+              renewalInFlight = false;
+            }
+          };
+          const heartbeat = setInterval(() => { void renew(); }, Math.max(1_000, Math.floor(this.leaseMs / 3)));
+          heartbeat.unref?.();
           try {
             const interrupted = plan.plan.steps.find(step => plan.stepStates[step.id]?.status === "running");
             if (interrupted) {
@@ -90,14 +110,18 @@ export class GoalPlanWorker {
               continue;
             }
             result.resumed++;
-            const updated = await this.executor.execute(this.founderId, plan.id);
+            const assertLease = async () => {
+              if (leaseLost) throw new Error("Goal-plan lease was lost; execution stopped before the next step.");
+            };
+            const updated = await this.executor.execute(this.founderId, plan.id, assertLease);
             if (updated.status === "completed") result.completed++;
             else if (updated.status === "awaiting_approval") result.awaitingApproval++;
           } catch (error) {
             result.failed++;
             this.status = { ...this.status, lastError: error instanceof Error ? error.message : String(error) };
           } finally {
-            await this.repository.releaseClaim(this.founderId, plan.id, this.workerId);
+            clearInterval(heartbeat);
+            if (!leaseLost) await this.repository.releaseClaim(this.founderId, plan.id, this.workerId);
           }
         }
       } else {

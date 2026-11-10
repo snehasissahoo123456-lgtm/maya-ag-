@@ -72,3 +72,18 @@ test("releases only the exact Founder and worker goal-plan lease", async () => {
   assert.match(url, /rpc\/maya_release_goal_plan_claim$/);
   assert.deepEqual(body, { p_plan_id: "plan-1", p_founder_id: "founder-1", p_worker_id: "worker-1" });
 });
+
+test("renews only the exact unexpired Founder and worker lease", async () => {
+  let url = "";
+  let body: any;
+  const store = new SupabaseGoalPlanStore("https://project.supabase.co", "service-secret", async (input, init) => {
+    url = String(input);
+    body = JSON.parse(String(init?.body));
+    return new Response(JSON.stringify([{ ...row(), status: "running" }]), { status: 200 });
+  });
+  assert.equal(await store.renewClaim("founder-1", "plan-1", "worker-1", 45_000), true);
+  assert.ok(url.endsWith("rpc/maya_renew_goal_plan_claim"));
+  assert.deepEqual(body, { p_plan_id: "plan-1", p_founder_id: "founder-1", p_worker_id: "worker-1", p_lease_ms: 45_000 });
+  const lost = new SupabaseGoalPlanStore("https://project.supabase.co", "service-secret", async () => new Response("[]", { status: 200 }));
+  assert.equal(await lost.renewClaim("founder-1", "plan-1", "worker-1", 45_000), false);
+});

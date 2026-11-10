@@ -8,4 +8,5 @@ export interface GoalPlanRepository {
   save(founderId: string, plan: StoredGoalPlan): Promise<void>;
   claimNext?(founderId: string, workerId: string, leaseMs: number): Promise<StoredGoalPlan | undefined>;
   releaseClaim?(founderId: string, planId: string, workerId: string): Promise<void>;
+  renewClaim?(founderId: string, planId: string, workerId: string, leaseMs: number): Promise<boolean>;
 }

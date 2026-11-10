@@ -46,7 +46,7 @@ export class GoalPlanExecutor {
     return await this.requirePlan(founderId, planId);
   }
 
-  async execute(founderId: string, planId: string): Promise<StoredGoalPlan> {
+  async execute(founderId: string, planId: string, beforeStep?: () => Promise<void>): Promise<StoredGoalPlan> {
     if (this.executing.has(planId)) throw new Error("Plan execution is already in progress.");
     this.executing.add(planId);
     try {
@@ -57,6 +57,7 @@ export class GoalPlanExecutor {
       await this.store.save(founderId, plan);
 
       for (const step of plan.plan.steps) {
+        await beforeStep?.();
         plan = await this.requirePlan(founderId, planId);
         const state = plan.stepStates[step.id];
         if (state.status === "completed") continue;
@@ -71,8 +72,20 @@ export class GoalPlanExecutor {
         state.status = "running";
         delete state.error;
         await this.store.save(founderId, plan);
+        let result: unknown;
         try {
-          const result = await this.executeTool(step.tool, step.args);
+          result = await this.executeTool(step.tool, step.args);
+        } catch (error) {
+          state.status = "failed";
+          state.error = (error instanceof Error ? error.message : String(error)).slice(0, 1000);
+          plan.status = "failed";
+          await this.store.save(founderId, plan);
+          return this.requirePlan(founderId, planId);
+        }
+        // Lease checks are deliberately outside the tool-error handler. If a worker
+        // loses its claim, it must not persist stale plan state over a new lease owner.
+        await beforeStep?.();
+        try {
           const serialized = JSON.stringify(result) ?? "null";
           if (serialized.length > 50000) throw new Error("Tool result exceeds the 50 KB plan result limit.");
           state.result = result;
@@ -87,6 +100,7 @@ export class GoalPlanExecutor {
           return this.requirePlan(founderId, planId);
         }
       }
+      await beforeStep?.();
       plan = await this.requirePlan(founderId, planId);
       plan.status = "completed";
       await this.store.save(founderId, plan);

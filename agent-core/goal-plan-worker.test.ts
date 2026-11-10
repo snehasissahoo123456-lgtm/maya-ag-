@@ -124,6 +124,13 @@ test("database-backed worker uses atomic claims and releases every claimed plan"
         assert.equal(workerId, "worker-test");
         releases.push(planId);
       },
+      renewClaim: async (founderId: string, planId: string, workerId: string, leaseMs: number) => {
+        assert.equal(founderId, "founder-a");
+        assert.equal(planId, created.id);
+        assert.equal(workerId, "worker-test");
+        assert.equal(leaseMs, 30_000);
+        return true;
+      },
     };
     const executor = new GoalPlanExecutor(store, async () => ({ ok: true }));
     const worker = new GoalPlanWorker(repository, executor, "founder-a", 3000, 5, "worker-test", 30_000);
@@ -131,5 +138,111 @@ test("database-backed worker uses atomic claims and releases every claimed plan"
     assert.equal(result.completed, 1);
     assert.deepEqual(claims, [created.id]);
     assert.deepEqual(releases, [created.id]);
+  } finally { fs.rmSync(directory, { recursive: true, force: true }); }
+});
+
+test("two independent workers cannot claim and execute the same running plan", async () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "maya-plan-two-workers-"));
+  try {
+    const store = new GoalPlanStore(directory);
+    const created = await store.create("founder-a", plan([readStep]));
+    await store.save("founder-a", { ...created, status: "running" });
+    let claimed = false;
+    let executions = 0;
+    let concurrentExecutions = 0;
+    let maxConcurrentExecutions = 0;
+    const repository = {
+      create: store.create.bind(store), list: store.list.bind(store), get: store.get.bind(store), save: store.save.bind(store),
+      claimNext: async (founderId: string) => {
+        if (founderId !== "founder-a" || claimed) return undefined;
+        const current = await store.get(founderId, created.id);
+        if (!current || current.status !== "running") return undefined;
+        claimed = true;
+        return current;
+      },
+      renewClaim: async () => true,
+      releaseClaim: async () => { claimed = false; },
+    };
+    const executor = new GoalPlanExecutor(store, async () => {
+      executions++;
+      concurrentExecutions++;
+      maxConcurrentExecutions = Math.max(maxConcurrentExecutions, concurrentExecutions);
+      await new Promise(resolve => setTimeout(resolve, 30));
+      concurrentExecutions--;
+      return { ok: true };
+    });
+    const first = new GoalPlanWorker(repository, executor, "founder-a", 3000, 5, "worker-one", 30_000);
+    const second = new GoalPlanWorker(repository, executor, "founder-a", 3000, 5, "worker-two", 30_000);
+    const results = await Promise.all([first.runOnce(), second.runOnce()]);
+    assert.equal(results.reduce((sum, item) => sum + item.completed, 0), 1);
+    assert.equal(executions, 1);
+    assert.equal(maxConcurrentExecutions, 1);
+    assert.equal((await store.get("founder-a", created.id))?.status, "completed");
+  } finally { fs.rmSync(directory, { recursive: true, force: true }); }
+});
+
+test("database-backed worker renews its lease while a long-running step is executing", async () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "maya-plan-heartbeat-"));
+  try {
+    const store = new GoalPlanStore(directory);
+    const created = await store.create("founder-a", plan([readStep]));
+    await store.save("founder-a", { ...created, status: "running" });
+    let claimed = false;
+    let renewals = 0;
+    const repository = {
+      create: store.create.bind(store), list: store.list.bind(store), get: store.get.bind(store), save: store.save.bind(store),
+      claimNext: async (founderId: string) => {
+        if (claimed) return undefined;
+        const current = await store.get(founderId, created.id);
+        if (!current || current.status !== "running") return undefined;
+        claimed = true;
+        return current;
+      },
+      renewClaim: async () => { renewals++; return true; },
+      releaseClaim: async () => { claimed = false; },
+    };
+    const executor = new GoalPlanExecutor(store, async () => {
+      await new Promise(resolve => setTimeout(resolve, 1_900));
+      return { ok: true };
+    });
+    const worker = new GoalPlanWorker(repository, executor, "founder-a", 3000, 5, "heartbeat-worker", 5_000);
+    const result = await worker.runOnce();
+    assert.equal(result.completed, 1);
+    assert.ok(renewals >= 1, "the worker should renew the 5-second lease during the running tool call");
+  } finally { fs.rmSync(directory, { recursive: true, force: true }); }
+});
+
+test("worker stops before the next step and does not write stale state after lease loss", async () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "maya-plan-lease-lost-"));
+  try {
+    const store = new GoalPlanStore(directory);
+    const secondStep = { ...readStep, id: "second_read", title: "Second read", dependsOn: ["read_step"] };
+    const created = await store.create("founder-a", plan([readStep, secondStep]));
+    await store.save("founder-a", { ...created, status: "running" });
+    let claimed = false;
+    const calls: string[] = [];
+    const repository = {
+      create: store.create.bind(store), list: store.list.bind(store), get: store.get.bind(store), save: store.save.bind(store),
+      claimNext: async (founderId: string) => {
+        if (claimed) return undefined;
+        claimed = true;
+        return store.get(founderId, created.id);
+      },
+      renewClaim: async () => false,
+      releaseClaim: async () => { throw new Error("A worker that lost its lease must not release a successor's claim."); },
+    };
+    const executor = new GoalPlanExecutor(store, async tool => {
+      calls.push(tool);
+      await new Promise(resolve => setTimeout(resolve, 1_900));
+      return { ok: true };
+    });
+    const worker = new GoalPlanWorker(repository, executor, "founder-a", 3000, 5, "lease-lost-worker", 5_000);
+    const result = await worker.runOnce();
+    assert.equal(result.failed, 1);
+    assert.deepEqual(calls, ["system_info"]);
+    const persisted = await store.get("founder-a", created.id);
+    assert.equal(persisted?.status, "running");
+    assert.equal(persisted?.stepStates.read_step.status, "running");
+    assert.equal(persisted?.stepStates.second_read.status, "queued");
   } finally { fs.rmSync(directory, { recursive: true, force: true }); }
 });
