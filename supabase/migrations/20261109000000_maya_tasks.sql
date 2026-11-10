@@ -19,7 +19,7 @@ grant all on public.maya_tasks to service_role;
 create or replace function public.maya_save_task(p_task_id text, p_founder_id text, p_envelope jsonb)
 returns public.maya_tasks
 language plpgsql security definer set search_path = public
-as $
+as $$
 declare
   saved public.maya_tasks;
 begin
