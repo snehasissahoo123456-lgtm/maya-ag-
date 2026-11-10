@@ -63,7 +63,7 @@ values (
   '[{"role":"tool","content":"must not be silently reclassified"}]'::jsonb
 );
 
-do $
+do $unsupported$
 declare
   rejected boolean := false;
 begin
@@ -84,6 +84,6 @@ begin
       and legacy_messages_backfilled_at is not null
   ) then raise exception 'Unsupported legacy conversation was incorrectly marked complete'; end if;
 end;
-$;
+$unsupported$;
 
 rollback;
