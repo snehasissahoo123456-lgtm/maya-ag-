@@ -4,7 +4,10 @@ export type MayaAuditEventType =
   | "task.approval_decided"
   | "task.execution_started"
   | "task.execution_verified"
-  | "task.execution_failed";
+  | "task.execution_failed"
+  | "specialist.tool_succeeded"
+  | "specialist.tool_denied"
+  | "specialist.tool_failed";
 
 export interface MayaAuditEvent {
   id: string;
