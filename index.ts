@@ -755,13 +755,14 @@ You can use this cockpit to inspect the current development status and configure
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ suiteId }),
       });
-      if (res.ok) {
-        const data = await res.json();
-        this.testSuites = data.suites || this.testSuites;
-        const passed = data.summary?.passed ?? 0;
-        const total = data.summary?.total ?? 0;
-        this.lastTestNotification = `✅ Test suite verified: ${passed}/${total} assertions passed clean in ${data.summary?.durationMs ?? 0}ms.`;
+      const data = await res.json();
+      if (!res.ok || !data.success) throw new Error(data.error || "Validation could not be queued.");
+      if (data.queued) {
+        this.lastTestNotification = "Validation queued. It has not run. Open the Developer department to request and approve the exact task.";
+        this.activeTab = "developer";
         await this.fetchServerState();
+      } else {
+        this.lastTestNotification = "Unexpected validation response; no test result was accepted.";
       }
     } catch (err: any) {
       console.warn('Test execution error:', err);
