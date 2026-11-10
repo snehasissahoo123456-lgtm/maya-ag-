@@ -50,6 +50,19 @@ export class SupabaseGoalPlanStore implements GoalPlanRepository {
     if (rows.length !== 1 || rows[0].founder_id !== founderId) throw new Error("Supabase returned an invalid goal-plan lease owner.");
     return this.map(rows[0]);
   }
+  async renewClaim(founderId: string, planId: string, workerId: string, leaseMs: number): Promise<boolean> {
+    if (!founderId || !planId || !workerId) throw new Error("Founder, plan and worker identity are required to renew a goal-plan lease.");
+    const boundedLease = Math.max(5_000, Math.min(Math.floor(leaseMs), 300_000));
+    const rows = await this.request<PlanRow[]>("rpc/maya_renew_goal_plan_claim", {
+      method: "POST",
+      body: JSON.stringify({ p_plan_id: planId, p_founder_id: founderId, p_worker_id: workerId, p_lease_ms: boundedLease }),
+    });
+    if (!Array.isArray(rows) || rows.length === 0) return false;
+    if (rows.length !== 1 || rows[0].id !== planId || rows[0].founder_id !== founderId) {
+      throw new Error("Supabase returned an invalid goal-plan lease renewal owner.");
+    }
+    return true;
+  }
   async releaseClaim(founderId: string, planId: string, workerId: string): Promise<void> {
     const rows = await this.request<Array<{ id: string; founder_id: string }>>("rpc/maya_release_goal_plan_claim", {
       method: "POST",

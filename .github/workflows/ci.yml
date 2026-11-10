@@ -17,7 +17,21 @@ jobs:
   validate:
     name: Typecheck, tests, production build and container
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 35
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_DB: maya_ci
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: maya-ci-password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d maya_ci"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -50,6 +64,23 @@ jobs:
           if ($installer -notmatch "-LogonType Interactive" -or $installer -notmatch "-RunLevel Limited") {
             throw "Bridge startup must use an interactive, limited-privilege current-user task."
           }
+      - name: Apply Supabase migrations to disposable PostgreSQL
+        env:
+          PGPASSWORD: maya-ci-password
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes postgresql-client
+          psql --host 127.0.0.1 --username postgres --dbname maya_ci --set ON_ERROR_STOP=1 <<'SQL'
+          create schema if not exists extensions;
+          create role anon nologin;
+          create role authenticated nologin;
+          create role service_role nologin bypassrls;
+          SQL
+          for migration in supabase/migrations/*.sql; do
+            echo "Applying $migration"
+            psql --host 127.0.0.1 --username postgres --dbname maya_ci --set ON_ERROR_STOP=1 --file "$migration"
+          done
+          psql --host 127.0.0.1 --username postgres --dbname maya_ci --set ON_ERROR_STOP=1 --file supabase/tests/conversation_backfill.sql
       - name: Unit and integration tests
         run: bun run test
       - name: Production build
