@@ -174,14 +174,19 @@ export class WatcherService {
       this.fsWatcher = fs.watch(process.cwd(), { recursive: true }, (eventType, filename) => {
         if (!this.watcherActive || !filename) return;
         const cleanPath = String(filename).replace(/\\/g, "/");
+        const lowerPath = cleanPath.toLowerCase();
+        const segments = lowerPath.split("/");
+        const base = segments[segments.length - 1] || "";
         const ignored = [
           "dist/", "node_modules/", ".git/", ".aistudio/", ".temp/",
-          ".maya-data/", "coverage/", ".next/", ".vite/",
+          ".maya-data/", "coverage/", ".next/", ".vite/", ".ssh/", ".aws/",
+          "secrets/", "credentials/",
         ];
-        if (ignored.some(prefix => cleanPath.startsWith(prefix)) ||
-            cleanPath.endsWith(".map") || cleanPath.endsWith(".log") ||
-            cleanPath === "bun.lock" || cleanPath.includes(".DS_Store") ||
-            cleanPath.endsWith("~") || cleanPath.endsWith(".tmp")) return;
+        if (ignored.some(prefix => lowerPath.startsWith(prefix) || lowerPath.includes("/" + prefix)) ||
+            base === ".env" || base.startsWith(".env.") || base === ".npmrc" || base === ".netrc" ||
+            base.endsWith(".pem") || base.endsWith(".key") || base.endsWith(".p12") || base.endsWith(".pfx") ||
+            cleanPath.endsWith(".map") || cleanPath.endsWith(".log") || cleanPath === "bun.lock" ||
+            cleanPath.includes(".DS_Store") || cleanPath.endsWith("~") || cleanPath.endsWith(".tmp")) return;
         this.recordFileChange(cleanPath, eventType);
       });
       this.fsWatcher.on("error", error => {
