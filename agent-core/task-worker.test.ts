@@ -620,3 +620,22 @@ test("worker executes fixed repository validation only after exact Founder appro
   assert.equal((await repository.get("worker-validation-1"))?.task.status, "completed");
   assert.equal((await approvals.listForFounder("founder-primary")).find(item => item.id === pending.approvalId)?.status, "consumed");
 });
+
+test("worker never runs repository validation while its Founder approval is missing", async () => {
+  let executed = false;
+  const { orchestrator, worker, repository } = setup(async () => {
+    executed = true;
+    return { result: { passed: true }, evidence: { kind: "validation", description: "passed", reference: "sha256:" + "f".repeat(64), observedAt: new Date().toISOString() } };
+  });
+  const validationFounder = { ...founder, scopes: ["tests:run"] };
+  await orchestrator.enqueue({
+    id: "worker-validation-unapproved", founderId: "founder-primary",
+    instruction: "Run fixed lint, test and build suite.",
+    capability: "workspace.run_validation", args: {}, actor: validationFounder,
+  });
+  const result = await worker.runOnce();
+  assert.equal(result.executed, 0);
+  assert.equal(result.skipped, 1);
+  assert.equal(executed, false);
+  assert.equal((await repository.get("worker-validation-unapproved"))?.task.status, "queued");
+});
