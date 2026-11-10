@@ -81,6 +81,7 @@ jobs:
             psql --host 127.0.0.1 --username postgres --dbname maya_ci --set ON_ERROR_STOP=1 --file "$migration"
           done
           psql --host 127.0.0.1 --username postgres --dbname maya_ci --set ON_ERROR_STOP=1 --file supabase/tests/conversation_backfill.sql
+          bash supabase/tests/goal_plan_lease_concurrency.sh
       - name: Unit and integration tests
         run: bun run test
       - name: Production build
