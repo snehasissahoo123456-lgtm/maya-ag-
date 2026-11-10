@@ -1,6 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { SpecialistRuntime, listRunnableSpecialists } from "./specialist-runtime.ts";
+import { CapabilityRegistry } from "./capability-registry.ts";
+import { SpecialistToolExecutor } from "./specialist-tool-executor.ts";
 
 test("runs a named specialist with bounded identity and no tool permissions", async () => {
   let prompt = "";
@@ -9,7 +11,7 @@ test("runs a named specialist with bounded identity and no tool permissions", as
   assert.equal(result.agentId, "research");
   assert.equal(result.executionMode, "reasoning_only");
   assert.match(prompt, /no tools, browser, filesystem, shell/i);
-  assert.match(prompt, /Do not claim to have executed actions/i);
+  assert.match(prompt, /Never claim to have executed actions/i);
 });
 
 test("lists runnable roles but excludes Founder identity", () => {
@@ -31,4 +33,45 @@ test("rejects empty and oversized model output", async () => {
   await assert.rejects(empty.run({ agentId: "finance", task: "Review the budget." }), /empty result/);
   const large = new SpecialistRuntime({ generate: async () => "x".repeat(16001) });
   await assert.rejects(large.run({ agentId: "finance", task: "Review the budget." }), /16 KB/);
+});
+
+test("passes only manifest-scoped read-only tools into the specialist model adapter", async () => {
+  const registry = new CapabilityRegistry();
+  registry.register({
+    name: "specialist.workspace.read_file",
+    description: "Read one safe workspace file.",
+    risk: "low",
+    allowedRoles: ["developer"],
+    requiredScopes: ["workspace:read"],
+    arguments: { path: { type: "string", required: true, maxLength: 100 } },
+    timeoutMs: 1000,
+    requiresApproval: false,
+    verification: "Read bounded file content.",
+  });
+  registry.register({
+    name: "specialist.workspace.write_file",
+    description: "Write a file.",
+    risk: "high",
+    allowedRoles: ["developer"],
+    requiredScopes: ["workspace:write"],
+    arguments: { path: { type: "string", required: true, maxLength: 100 } },
+    timeoutMs: 1000,
+    requiresApproval: true,
+    verification: "Verify file.",
+  });
+  let seenTools: string[] = [];
+  let executed: unknown;
+  const toolExecutor = new SpecialistToolExecutor(registry, async (name, args) => ({ name, args, content: "safe" }));
+  const runtime = new SpecialistRuntime({
+    generate: async input => {
+      seenTools = input.tools.map(tool => tool.name);
+      assert.ok(input.executeTool);
+      executed = await input.executeTool("specialist.workspace.read_file", { path: "README.md" });
+      return "Reviewed README using the read-only workspace capability.";
+    },
+  }, toolExecutor);
+  const result = await runtime.run({ agentId: "developer", founderId: "founder-7", task: "Inspect the README." });
+  assert.deepEqual(seenTools, ["specialist.workspace.read_file"]);
+  assert.deepEqual(executed, { name: "specialist.workspace.read_file", args: { path: "README.md" }, content: "safe" });
+  assert.equal(result.executionMode, "bounded_read_only_tools");
 });

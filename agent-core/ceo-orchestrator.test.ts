@@ -35,7 +35,8 @@ test("runs assigned specialists concurrently and synthesizes findings in dispatc
       return findings.map(f => f.output).join("\n");
     },
   }, {
-    run: async ({ agentId }) => {
+    run: async ({ agentId, founderId }) => {
+      assert.equal(founderId, "founder-42");
       active++;
       maxActive = Math.max(maxActive, active);
       started++;
@@ -46,7 +47,7 @@ test("runs assigned specialists concurrently and synthesizes findings in dispatc
       return result(agentId);
     },
   });
-  const output = await orchestrator.run({ objective: "Review the launch plan" });
+  const output = await orchestrator.run({ objective: "Review the launch plan", founderId: "founder-42" });
   assert.equal(maxActive, 2, "specialist work should overlap instead of running sequentially");
   assert.equal(output.findings.length, 2);
   assert.equal(output.executionMode, "multi_specialist_reasoning_only");
