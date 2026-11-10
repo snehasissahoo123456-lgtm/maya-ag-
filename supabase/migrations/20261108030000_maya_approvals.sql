@@ -100,4 +100,4 @@ $$;
 revoke all on function public.maya_decide_approval(text, text, boolean, timestamptz) from public, anon, authenticated;
 revoke all on function public.maya_consume_approval(text, text, text, text, text, timestamptz) from public, anon, authenticated;
 grant execute on function public.maya_decide_approval(text, text, boolean, timestamptz) to service_role;
-grant execute on function public.maya_consume_approval(text, text, text, text, char, timestamptz) to service_role;
+grant execute on function public.maya_consume_approval(text, text, text, text, text, timestamptz) to service_role;
