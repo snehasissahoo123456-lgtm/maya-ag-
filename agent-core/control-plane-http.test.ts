@@ -309,6 +309,17 @@ test("real HTTP control-plane routes enforce Founder auth and execute only the r
       method: "POST", headers: { cookie },
     });
     assert.equal(repeated.status, 409, "Completed tasks must not execute a second time");
+
+    const validationQueued = await sameOriginFetch(baseUrl + "/api/action-engine/tests/run", {
+      method: "POST", headers: { "content-type": "application/json", cookie }, body: JSON.stringify({ suiteId: "all" }),
+    });
+    assert.equal(validationQueued.status, 202, "The legacy test route must queue rather than execute commands directly");
+    const validationBody = await validationQueued.json() as any;
+    assert.equal(validationBody.queued, true);
+    assert.equal(validationBody.executed, false);
+    assert.equal(validationBody.requiresFounderApproval, true);
+    assert.equal(validationBody.task.status, "queued");
+    assert.equal(validationBody.task.capability, "workspace.run_validation");
   } catch (error) {
     throw new Error(`${error instanceof Error ? error.message : String(error)}\nServer output:\n${logs}`);
   } finally {
