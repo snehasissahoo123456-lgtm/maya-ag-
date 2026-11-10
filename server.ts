@@ -1523,9 +1523,28 @@ async function startServer() {
   });
 
   app.post("/api/action-engine/watcher/trigger", async (req, res) => {
-    const file = req.body?.file || "manual-trigger";
-    const result = await watcherService.runDiagnostics(file);
-    res.json({ success: result.success, ...result });
+    const founderId = (req as any).authSession?.user?.id;
+    if (!founderId) return res.status(401).json({ success: false, error: "Verified Founder session required." });
+    const file = typeof req.body?.file === "string" ? req.body.file.slice(0, 1024) : "manual-trigger";
+    try {
+      const envelope = await taskOrchestrator.enqueue({
+        id: "validation-" + randomUUID(),
+        founderId,
+        instruction: "Run the fixed lint, test and production build validation suite. Trigger source: " + file,
+        capability: "workspace.run_validation",
+        args: {},
+        actor: { id: founderId, founderId, role: "founder", scopes: ["tests:run"] },
+      });
+      watcherService.recordValidationRequested(envelope.task.id, file);
+      return res.status(202).json({
+        success: true, queued: true, executed: false,
+        requiresFounderApproval: envelope.task.requiresApproval,
+        task: envelope.task,
+        status: watcherService.getStatus(),
+      });
+    } catch (error) {
+      return res.status(400).json({ success: false, error: error instanceof Error ? error.message : "Validation could not be queued." });
+    }
   });
 
   app.post("/api/action-engine/watcher/toggle", (req, res) => {
