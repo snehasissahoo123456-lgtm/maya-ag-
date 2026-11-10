@@ -3378,11 +3378,11 @@ Status: Ready to build upon Founder "go ahead".`;
                 <span class="material-symbols-outlined text-indigo-400 text-2xl">verified</span>
                 <h2 class="text-xl font-bold text-white tracking-tight">Full Diagnostic Test Suite & Verification</h2>
                 <span class="px-2.5 py-0.5 rounded-full text-xs font-bold font-mono bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
-                  ${healthIndex}% HEALTH
+                  ${hasValidationResults ? healthIndex + '% HEALTH' : 'NO RUN RECORDED'}
                 </span>
               </div>
               <p class="text-slate-400 text-xs mt-1">
-                Zero-Hallucination verification across TypeScript, Vite, API endpoints, Master Tools, and Maya Part 14 persona.
+                Validation evidence appears only after an approved task completes the fixed lint, test and production build suite.
               </p>
             </div>
 
@@ -3443,22 +3443,22 @@ Status: Ready to build upon Founder "go ahead".`;
           <div class="grid grid-cols-2 sm:grid-cols-5 gap-3 mt-4 pt-4 border-t border-slate-800/80">
             <div class="bg-slate-950/60 border border-slate-800/80 rounded-xl p-3">
               <span class="text-[11px] text-slate-400 uppercase tracking-wider font-semibold block">Total Assertions</span>
-              <span class="text-2xl font-bold font-mono text-white mt-1 block">${total}</span>
+              <span class="text-2xl font-bold font-mono text-white mt-1 block">${hasValidationResults ? total : '—'}</span>
             </div>
 
             <div class="bg-slate-950/60 border border-emerald-900/40 rounded-xl p-3">
-              <span class="text-[11px] text-emerald-400 uppercase tracking-wider font-semibold block">Passed (100%)</span>
-              <span class="text-2xl font-bold font-mono text-emerald-400 mt-1 block">${passed}</span>
+              <span class="text-[11px] text-emerald-400 uppercase tracking-wider font-semibold block">Passed</span>
+              <span class="text-2xl font-bold font-mono text-emerald-400 mt-1 block">${hasValidationResults ? passed : '—'}</span>
             </div>
 
             <div class="bg-slate-950/60 border border-amber-900/40 rounded-xl p-3">
               <span class="text-[11px] text-amber-400 uppercase tracking-wider font-semibold block">Warnings</span>
-              <span class="text-2xl font-bold font-mono text-amber-400 mt-1 block">${warnings}</span>
+              <span class="text-2xl font-bold font-mono text-amber-400 mt-1 block">${hasValidationResults ? warnings : '—'}</span>
             </div>
 
             <div class="bg-slate-950/60 border border-rose-900/40 rounded-xl p-3">
               <span class="text-[11px] text-rose-400 uppercase tracking-wider font-semibold block">Failed</span>
-              <span class="text-2xl font-bold font-mono text-rose-400 mt-1 block">${failed}</span>
+              <span class="text-2xl font-bold font-mono text-rose-400 mt-1 block">${hasValidationResults ? failed : '—'}</span>
             </div>
 
             <div class="bg-slate-950/60 border border-indigo-900/40 rounded-xl p-3 col-span-2 sm:col-span-1">
@@ -3665,7 +3665,7 @@ Status: Ready to build upon Founder "go ahead".`;
 
         <!-- TEST SUITES ACCORDION CARDS -->
         <div class="space-y-4">
-          ${this.testSuites.map((suite) => {
+          ${this.testSuites.length === 0 ? html`<div class="rounded-2xl border border-slate-800 bg-slate-900/50 p-6 text-center"><p class="text-sm font-semibold text-slate-200">No verified suite results yet</p><p class="text-xs text-slate-500 mt-2">Queue the fixed validation suite, request Founder approval and execute it from the Developer department. Suite-level results will appear here only when a real diagnostic source provides them.</p></div>` : this.testSuites.map((suite) => {
             const filteredAssertions =
               this.testSeverityFilter === 'ALL'
                 ? suite.assertions
@@ -4219,10 +4219,7 @@ Status: Ready to build upon Founder "go ahead".`;
 
             <div class="bg-slate-950/60 border border-indigo-900/40 rounded-xl p-3">
               <span class="text-[11px] text-indigo-400 uppercase tracking-wider font-semibold block">Test Sheet Suite 6</span>
-              <span class="text-xs font-semibold text-emerald-400 mt-2 block flex items-center gap-1">
-                <span class="material-symbols-outlined text-sm">verified</span>
-                6 / 6 Assertions Passed
-              </span>
+              <span class="text-xs font-semibold text-slate-400 mt-2 block">No validation run recorded</span>
             </div>
           </div>
         </div>
