@@ -11,7 +11,7 @@ test("runs a named specialist with bounded identity and no tool permissions", as
   assert.equal(result.agentId, "research");
   assert.equal(result.executionMode, "reasoning_only");
   assert.match(prompt, /no tools, browser, filesystem, shell/i);
-  assert.match(prompt, /Do not claim to have executed actions/i);
+  assert.match(prompt, /Never claim to have executed actions/i);
 });
 
 test("lists runnable roles but excludes Founder identity", () => {
