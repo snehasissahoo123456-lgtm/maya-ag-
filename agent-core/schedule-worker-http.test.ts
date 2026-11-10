@@ -15,6 +15,13 @@ async function unusedPort(): Promise<number> {
   await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
   return port;
 }
+
+async function sameOriginFetch(input: string, init: RequestInit = {}): Promise<Response> {
+  const headers = new Headers(init.headers);
+  if (headers.has("cookie") && !headers.has("origin")) headers.set("origin", new URL(input).origin);
+  return fetch(input, { ...init, headers });
+}
+
 async function waitForServer(url: string, child: ChildProcess) {
   const deadline = Date.now() + 20_000;
   while (Date.now() < deadline) {
@@ -46,7 +53,7 @@ test("live schedule worker enqueues and TaskWorker completes a read-only file ta
   const baseUrl = `http://127.0.0.1:${port}`;
   try {
     await waitForServer(baseUrl, child);
-    const login = await fetch(baseUrl + "/api/auth/founder-login", {
+    const login = await sameOriginFetch(baseUrl + "/api/auth/founder-login", {
       method: "POST", headers: { "content-type": "application/json" },
       body: JSON.stringify({ email: "scheduler-test@example.invalid", password }),
     });
@@ -54,7 +61,7 @@ test("live schedule worker enqueues and TaskWorker completes a read-only file ta
     const cookie = login.headers.get("set-cookie")?.split(";")[0];
     assert.ok(cookie);
 
-    const created = await fetch(baseUrl + "/api/schedules", {
+    const created = await sameOriginFetch(baseUrl + "/api/schedules", {
       method: "POST", headers: { "content-type": "application/json", cookie },
       body: JSON.stringify({ title: "Automated README check", path: "README.md", runAt: new Date(Date.now() - 1000).toISOString(), intervalMs: null }),
     });
@@ -67,8 +74,8 @@ test("live schedule worker enqueues and TaskWorker completes a read-only file ta
     let schedule: any;
     while (Date.now() < deadline) {
       const [tasksResponse, schedulesResponse] = await Promise.all([
-        fetch(baseUrl + "/api/control-plane/tasks", { headers: { cookie } }),
-        fetch(baseUrl + `/api/schedules/${scheduleId}`, { headers: { cookie } }),
+        sameOriginFetch(baseUrl + "/api/control-plane/tasks", { headers: { cookie } }),
+        sameOriginFetch(baseUrl + `/api/schedules/${scheduleId}`, { headers: { cookie } }),
       ]);
       const tasksBody = await tasksResponse.json() as any;
       const scheduleBody = await schedulesResponse.json() as any;
