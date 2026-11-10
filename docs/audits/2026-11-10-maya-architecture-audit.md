@@ -15,7 +15,7 @@ It is **not yet a fully autonomous multi-department operator and is not release-
 ## Repository integration and pull requests
 
 - PRs #36 and #37 are merged into `main`; they provide the persistent-session, audit, CSRF and conversation-history foundation.
-- PRs #34–#45 are merged into a stacked development branch chain, not into `main`.
+- PRs #34, #35 and #38–#45 are merged into stacked development branches, not into `main`.
 - PRs #2–#33 remain open as 32 stacked draft pull requests. They are not part of the default branch.
 - GitHub compare reported the final development head 72 commits behind `main`. The development stack therefore cannot be treated as a safe release candidate until the histories and overlapping server/database files are reconciled.
 - PR #43, #44 and #45 passed their latest full CI runs. The latest PR #44 run completed successfully. PR #45's typecheck, PowerShell validation, tests, production build, Compose validation and production image all passed.
