@@ -155,8 +155,10 @@ test("two independent workers cannot claim and execute the same running plan", a
       create: store.create.bind(store), list: store.list.bind(store), get: store.get.bind(store), save: store.save.bind(store),
       claimNext: async (founderId: string) => {
         if (founderId !== "founder-a" || claimed) return undefined;
+        const current = await store.get(founderId, created.id);
+        if (!current || current.status !== "running") return undefined;
         claimed = true;
-        return store.get(founderId, created.id);
+        return current;
       },
       renewClaim: async () => true,
       releaseClaim: async () => { claimed = false; },
