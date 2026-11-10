@@ -175,6 +175,18 @@ test("real HTTP worker replaces an existing workspace file only after exact Foun
     assert.ok(cookie);
 
     const replacement = "Founder-approved replacement contents";
+    const missingHash = await sameOriginFetch(baseUrl + "/api/control-plane/tasks", {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie },
+      body: JSON.stringify({
+        instruction: "Attempt a replacement without a file version digest",
+        capability: "workspace.write_file",
+        path: relativePath,
+        content: replacement,
+      }),
+    });
+    assert.equal(missingHash.status, 400, "Workspace replacements must include the exact prior-file SHA-256");
+
     const created = await sameOriginFetch(baseUrl + "/api/control-plane/tasks", {
       method: "POST",
       headers: { "content-type": "application/json", cookie },
