@@ -54,7 +54,7 @@ const TERMINAL_STATUSES = new Set<TaskStatus>(["completed", "cancelled"]);
 const ALLOWED_TRANSITIONS: Record<TaskStatus, readonly TaskStatus[]> = {
   queued: ["planning", "cancelled"],
   planning: ["awaiting_approval", "running", "failed", "paused", "cancelled"],
-  awaiting_approval: ["running", "paused", "cancelled"],
+  awaiting_approval: ["queued", "running", "paused", "cancelled"],
   running: ["verifying", "failed", "paused", "requires_recovery", "cancelled"],
   verifying: ["completed", "failed", "paused", "requires_recovery"],
   completed: [],

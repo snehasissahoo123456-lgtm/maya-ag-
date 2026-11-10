@@ -4,32 +4,57 @@ on:
   push:
     branches:
       - main
-      - 'maya/**'
+      - "maya/**"
   pull_request:
     branches:
       - main
-      - 'maya/**'
+      - "maya/**"
 
 permissions:
   contents: read
 
 jobs:
   validate:
-    name: Typecheck, tests and production build
+    name: Typecheck, tests, production build and container
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
     steps:
       - name: Checkout
         uses: actions/checkout@v4
       - name: Install Bun
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version: latest
+          bun-version: 1.4.4
       - name: Install locked dependencies
         run: bun install --frozen-lockfile
       - name: Typecheck
         run: bun run lint
-      - name: Unit tests
+      - name: Validate Windows bridge PowerShell scripts
+        shell: pwsh
+        run: |
+          $files = @(
+            "scripts/Start-Maya-Bridge.ps1",
+            "scripts/Install-Maya-Bridge-Startup.ps1",
+            "scripts/Uninstall-Maya-Bridge-Startup.ps1"
+          )
+          foreach ($file in $files) {
+            $tokens = $null
+            $parseErrors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $PWD $file), [ref]$tokens, [ref]$parseErrors) | Out-Null
+            if ($parseErrors.Count -gt 0) {
+              $parseErrors | ForEach-Object { Write-Error ($file + ": " + $_.Message) }
+              exit 1
+            }
+          }
+          $installer = Get-Content -Raw "scripts/Install-Maya-Bridge-Startup.ps1"
+          if ($installer -notmatch "-LogonType Interactive" -or $installer -notmatch "-RunLevel Limited") {
+            throw "Bridge startup must use an interactive, limited-privilege current-user task."
+          }
+      - name: Unit and integration tests
         run: bun run test
       - name: Production build
         run: bun run build
+      - name: Validate Compose configuration
+        run: docker compose config --quiet
+      - name: Build production container image
+        run: docker build --pull --tag maya-agent:ci .

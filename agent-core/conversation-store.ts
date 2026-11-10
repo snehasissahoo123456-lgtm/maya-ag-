@@ -1,136 +1,107 @@
-import { randomBytes } from "node:crypto";
+import type { ConversationRepository } from "./conversation-repository.ts";
 import fs from "node:fs";
 import path from "node:path";
+import { randomUUID } from "node:crypto";
 
+export type ConversationRole = "user" | "model";
 export interface ConversationMessage {
   id: string;
-  role: "system" | "user" | "assistant";
-  content: string;
+  role: ConversationRole;
+  text: string;
   createdAt: string;
-  parts?: Array<Record<string, unknown>>;
 }
 export interface ConversationRecord {
   id: string;
+  messageCount?: number;
   founderId: string;
   title: string;
-  messages: ConversationMessage[];
   createdAt: string;
   updatedAt: string;
+  messages: ConversationMessage[];
 }
-export interface ConversationStoreAdapter {
-  list(founderId: string): Promise<ConversationRecord[]>;
-  get(id: string, founderId: string): Promise<ConversationRecord | null>;
-  upsert(record: ConversationRecord): Promise<ConversationRecord>;
-  delete(id: string, founderId: string): Promise<boolean>;
-}
-interface StoredConversations { version: 1; updatedAt: string; conversations: ConversationRecord[]; }
+interface ConversationFile { version: 1; conversations: ConversationRecord[]; }
 
-/** Single-instance, file-backed conversation store. Use a shared database for multi-instance deployments. */
-export class ConversationStore implements ConversationStoreAdapter {
+/**
+ * Founder-scoped, atomic JSON conversation repository for a single Maya instance.
+ * This is durable file storage, not a relational database or multi-instance queue.
+ */
+export class ConversationStore implements ConversationRepository {
+  private readonly directory: string;
   private readonly filePath: string;
-  private readonly records = new Map<string, ConversationRecord>();
-  private writeQueue: Promise<void> = Promise.resolve();
-
-  constructor(filePath = process.env.MAYA_CONVERSATIONS_PATH ||
-    path.join(process.env.MAYA_DATA_DIR || path.resolve(process.cwd(), "..", "maya-data"), "conversations.json")) {
-    this.filePath = path.resolve(filePath);
-    this.load();
+  constructor(directory = process.env.MAYA_DATA_DIR || path.resolve(process.cwd(), "..", "maya-data")) {
+    this.directory = path.resolve(directory);
+    this.filePath = path.join(this.directory, "conversations.json");
   }
 
   async list(founderId: string): Promise<ConversationRecord[]> {
-    return [...this.records.values()]
-      .filter(record => record.founderId === founderId)
+    return this.read().conversations
+      .filter((conversation) => conversation.founderId === founderId)
       .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
-      .map(record => structuredClone(record));
+      .map((conversation) => structuredClone(conversation));
   }
 
-  async get(id: string, founderId: string): Promise<ConversationRecord | null> {
-    const record = this.records.get(id);
-    return record?.founderId === founderId ? structuredClone(record) : null;
+  async get(founderId: string, id: string): Promise<ConversationRecord | undefined> {
+    const conversation = this.read().conversations.find((item) => item.id === id && item.founderId === founderId);
+    return conversation ? structuredClone(conversation) : undefined;
   }
 
-  async upsert(record: ConversationRecord): Promise<ConversationRecord> {
-    this.validateRecord(record);
-    return this.enqueueWrite(() => {
-      const previous = this.records.get(record.id);
-      if (previous && previous.founderId !== record.founderId) {
-        throw new Error("Conversation ownership cannot be changed.");
-      }
-      const saved = structuredClone(record);
-      this.records.set(saved.id, saved);
-      try { this.writeFile(); }
-      catch (error) {
-        if (previous) this.records.set(record.id, previous);
-        else this.records.delete(record.id);
-        throw error;
-      }
-      return structuredClone(saved);
-    });
+  async getOrCreate(founderId: string, id: string, firstMessage = ""): Promise<ConversationRecord> {
+    if (!founderId || !id || id.length > 128) throw new Error("A valid Founder and conversation ID are required.");
+    const state = this.read();
+    const existing = state.conversations.find((item) => item.id === id && item.founderId === founderId);
+    if (existing) return structuredClone(existing);
+    if (state.conversations.some((item) => item.id === id)) throw new Error("Conversation ID is already owned by another Founder.");
+    const now = new Date().toISOString();
+    const record: ConversationRecord = {
+      id, founderId,
+      title: (firstMessage.trim().slice(0, 72) || "New conversation"),
+      createdAt: now, updatedAt: now, messages: [],
+    };
+    state.conversations.unshift(record);
+    state.conversations = state.conversations.slice(0, 2000);
+    this.write(state);
+    return structuredClone(record);
   }
 
-  async delete(id: string, founderId: string): Promise<boolean> {
-    return this.enqueueWrite(() => {
-      const previous = this.records.get(id);
-      if (!previous || previous.founderId !== founderId) return false;
-      this.records.delete(id);
-      try { this.writeFile(); }
-      catch (error) { this.records.set(id, previous); throw error; }
-      return true;
-    });
+  async append(founderId: string, id: string, role: ConversationRole, text: string): Promise<ConversationRecord> {
+    if (role !== "user" && role !== "model") throw new Error("Invalid conversation message role.");
+    if (typeof text !== "string" || !text.trim() || text.length > 20000) throw new Error("Conversation message must contain 1–20,000 characters.");
+    const state = this.read();
+    const conversation = state.conversations.find((item) => item.id === id && item.founderId === founderId);
+    if (!conversation) throw new Error("Conversation not found for this Founder.");
+    conversation.messages.push({ id: randomUUID(), role, text, createdAt: new Date().toISOString() });
+    conversation.messages = conversation.messages.slice(-1000);
+    conversation.updatedAt = new Date().toISOString();
+    if (conversation.title === "New conversation" && role === "user") conversation.title = text.trim().slice(0, 72);
+    this.write(state);
+    return structuredClone(conversation);
   }
 
-  private validateRecord(record: ConversationRecord): void {
-    if (!record || typeof record.id !== "string" || !record.id || record.id.length > 128 ||
-        typeof record.founderId !== "string" || !record.founderId || record.founderId.length > 128 ||
-        typeof record.title !== "string" || record.title.length > 300 ||
-        !Array.isArray(record.messages) || record.messages.length > 5000 ||
-        !Number.isFinite(Date.parse(record.createdAt)) || !Number.isFinite(Date.parse(record.updatedAt))) {
-      throw new Error("Conversation record is invalid.");
-    }
-    for (const message of record.messages) {
-      if (!message || typeof message.id !== "string" || !["system", "user", "assistant"].includes(message.role) ||
-          typeof message.content !== "string" || message.content.length > 100_000 ||
-          (message.parts !== undefined && (!Array.isArray(message.parts) || message.parts.length > 100 ||
-            JSON.stringify(message.parts).length > 1_000_000)) ||
-          !Number.isFinite(Date.parse(message.createdAt))) throw new Error("Conversation contains an invalid message.");
-    }
+  async delete(founderId: string, id: string): Promise<boolean> {
+    const state = this.read();
+    const before = state.conversations.length;
+    state.conversations = state.conversations.filter((item) => !(item.id === id && item.founderId === founderId));
+    if (state.conversations.length === before) return false;
+    this.write(state);
+    return true;
   }
 
-  private load(): void {
-    if (!fs.existsSync(this.filePath)) return;
-    let parsed: unknown;
-    try { parsed = JSON.parse(fs.readFileSync(this.filePath, "utf8")); }
-    catch { throw new Error("Conversation store is corrupt; refusing to overwrite it."); }
-    if (!parsed || typeof parsed !== "object" || (parsed as StoredConversations).version !== 1 ||
-        !Array.isArray((parsed as StoredConversations).conversations)) {
-      throw new Error("Conversation store has an unsupported or invalid format.");
-    }
-    for (const record of (parsed as StoredConversations).conversations) {
-      this.validateRecord(record);
-      if (this.records.has(record.id)) throw new Error("Conversation store contains duplicate ids.");
-      this.records.set(record.id, record);
-    }
-  }
-
-  private enqueueWrite<T>(operation: () => T): Promise<T> {
-    const run = this.writeQueue.then(operation);
-    this.writeQueue = run.then(() => undefined, () => undefined);
-    return run;
-  }
-
-  private writeFile(): void {
-    const directory = path.dirname(this.filePath);
-    fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
-    try { fs.chmodSync(directory, 0o700); } catch {}
-    const state: StoredConversations = { version: 1, updatedAt: new Date().toISOString(), conversations: [...this.records.values()] };
-    const temp = path.join(directory, `.conversations.${process.pid}.${Date.now()}.${randomBytes(4).toString("hex")}.tmp`);
+  private read(): ConversationFile {
     try {
-      fs.writeFileSync(temp, JSON.stringify(state, null, 2), { encoding: "utf8", mode: 0o600, flag: "wx" });
-      fs.renameSync(temp, this.filePath);
-    } catch (error) {
-      try { fs.rmSync(temp, { force: true }); } catch {}
-      throw error;
-    }
+      const parsed = JSON.parse(fs.readFileSync(this.filePath, "utf8"));
+      if (parsed?.version !== 1 || !Array.isArray(parsed.conversations)) return { version: 1, conversations: [] };
+      return { version: 1, conversations: parsed.conversations.filter((item: any) =>
+        item && typeof item.id === "string" && typeof item.founderId === "string" && Array.isArray(item.messages)) };
+    } catch { return { version: 1, conversations: [] }; }
+  }
+
+  private write(state: ConversationFile): void {
+    fs.mkdirSync(this.directory, { recursive: true, mode: 0o700 });
+    try { fs.chmodSync(this.directory, 0o700); } catch {}
+    const temp = path.join(this.directory, `.conversations.${process.pid}.${randomUUID()}.tmp`);
+    fs.writeFileSync(temp, JSON.stringify(state, null, 2), { encoding: "utf8", mode: 0o600, flag: "wx" });
+    try { fs.renameSync(temp, this.filePath); }
+    catch (error) { try { fs.rmSync(temp, { force: true }); } catch {} throw error; }
     try { fs.chmodSync(this.filePath, 0o600); } catch {}
   }
 }
