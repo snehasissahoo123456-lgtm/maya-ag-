@@ -25,7 +25,10 @@ export interface DeveloperFileChangeReceipt {
  * only enqueues a high-risk task. It never writes a file or approves its own proposal.
  */
 export class DeveloperProposalService {
-  constructor(private readonly tasks: Pick<TaskOrchestrator, "enqueue">) {}
+  constructor(
+    private readonly tasks: Pick<TaskOrchestrator, "enqueue">,
+    private readonly readCurrentSha256: (relativePath: string) => string,
+  ) {}
 
   async proposeFileChange(input: DeveloperFileChangeInput): Promise<DeveloperFileChangeReceipt> {
     if (typeof input.founderId !== "string" || !input.founderId.trim() || input.founderId.length > 256) {
@@ -52,6 +55,11 @@ export class DeveloperProposalService {
         base === ".env" || base.startsWith(".env.") || base === ".npmrc" || base === ".netrc" ||
         base === "id_rsa" || base.endsWith(".pem") || base.endsWith(".key") || base.endsWith(".p12") || base.endsWith(".pfx")) {
       throw new Error("Developer proposals cannot target secrets, credentials or generated dependency paths.");
+    }
+
+    const currentSha256 = this.readCurrentSha256(input.path);
+    if (currentSha256 !== input.expectedSha256) {
+      throw new Error("The workspace file changed after it was read; no proposal was queued. Re-read the file and prepare a fresh proposal.");
     }
 
     const envelope = await this.tasks.enqueue({
