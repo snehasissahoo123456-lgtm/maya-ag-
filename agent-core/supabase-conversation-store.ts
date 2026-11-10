@@ -1,94 +1,127 @@
-import type { ConversationRecord, ConversationStoreAdapter } from "./conversation-store.ts";
+import { randomUUID } from "node:crypto";
+import type { ConversationRepository } from "./conversation-repository.ts";
+import type { ConversationMessage, ConversationRecord, ConversationRole } from "./conversation-store.ts";
 
-/** Server-only Supabase REST adapter. Never pass the service-role key to browser code. */
-export class SupabaseConversationStore implements ConversationStoreAdapter {
-  private readonly baseUrl: string;
-  private readonly serviceRoleKey: string;
-  private readonly fetcher: typeof fetch;
+type FetchLike = (input: string | URL, init?: RequestInit) => Promise<Response>;
+interface SupabaseConversationRow {
+  id: string;
+  founder_id: string;
+  title: string;
+  created_at: string;
+  updated_at: string;
+  messages?: Array<{ id: string }>;
+}
+interface SupabaseMessageRow {
+  id: string;
+  role: ConversationRole;
+  content: string;
+  created_at: string;
+}
 
-  constructor(
-    url = process.env.SUPABASE_URL || "",
-    serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY || "",
-    fetcher: typeof fetch = fetch,
-  ) {
-    if (!url) throw new Error("Supabase conversation storage requires SUPABASE_URL.");
-    if (!serviceRoleKey) throw new Error("Supabase conversation storage requires SUPABASE_SERVICE_ROLE_KEY.");
-    const parsed = new URL(url);
+export class SupabaseConversationStore implements ConversationRepository {
+  private readonly restUrl: string;
+  constructor(baseUrl: string, private readonly serviceRoleKey: string, private readonly fetcher: FetchLike = fetch) {
+    const parsed = new URL(baseUrl);
     if (parsed.protocol !== "https:" && parsed.hostname !== "localhost" && parsed.hostname !== "127.0.0.1") {
       throw new Error("Supabase URL must use HTTPS outside localhost.");
     }
-    this.baseUrl = parsed.toString().replace(/\/$/, "") + "/rest/v1/maya_conversations";
-    this.serviceRoleKey = serviceRoleKey;
-    this.fetcher = fetcher;
+    if (!serviceRoleKey.trim()) throw new Error("Supabase service-role key is required.");
+    this.restUrl = parsed.toString().replace(/\/$/, "") + "/rest/v1";
   }
 
   async list(founderId: string): Promise<ConversationRecord[]> {
-    const url = new URL(this.baseUrl);
-    url.searchParams.set("select", "id,founder_id,title,messages,created_at,updated_at");
-    url.searchParams.set("founder_id", `eq.${founderId}`);
-    url.searchParams.set("order", "updated_at.desc");
-    const response = await this.request(url, { method: "GET" });
-    return (await response.json() as any[]).map(row => this.fromRow(row));
-  }
-
-  async get(id: string, founderId: string): Promise<ConversationRecord | null> {
-    const url = new URL(this.baseUrl);
-    url.searchParams.set("select", "id,founder_id,title,messages,created_at,updated_at");
-    url.searchParams.set("id", `eq.${id}`);
-    url.searchParams.set("founder_id", `eq.${founderId}`);
-    url.searchParams.set("limit", "1");
-    const rows = await (await this.request(url, { method: "GET" })).json() as any[];
-    return rows[0] ? this.fromRow(rows[0]) : null;
-  }
-
-  async upsert(record: ConversationRecord): Promise<ConversationRecord> {
-    const url = new URL(this.baseUrl);
-    url.searchParams.set("on_conflict", "id");
-    const response = await this.request(url, {
-      method: "POST",
-      headers: { Prefer: "resolution=merge-duplicates,return=representation" },
-      body: JSON.stringify({
-        id: record.id, founder_id: record.founderId, title: record.title, messages: record.messages,
-        created_at: record.createdAt, updated_at: record.updatedAt,
-      }),
+    const query = new URLSearchParams({
+      select: "id,title,created_at,updated_at,messages:maya_conversation_messages(id)",
+      founder_id: `eq.${founderId}`,
+      order: "updated_at.desc",
+      limit: "200",
     });
-    const rows = await response.json() as any[];
-    if (!rows[0]) throw new Error("Supabase did not return the saved conversation.");
-    return this.fromRow(rows[0]);
+    const rows = await this.request<SupabaseConversationRow[]>(`maya_conversations?${query}`);
+    return rows.map(row => ({
+      id: row.id, founderId, title: row.title, createdAt: row.created_at, updatedAt: row.updated_at,
+      messages: [], messageCount: Array.isArray(row.messages) ? row.messages.length : 0,
+    }));
   }
 
-  async delete(id: string, founderId: string): Promise<boolean> {
-    const url = new URL(this.baseUrl);
-    url.searchParams.set("id", `eq.${id}`);
-    url.searchParams.set("founder_id", `eq.${founderId}`);
-    const response = await this.request(url, { method: "DELETE", headers: { Prefer: "return=representation" } });
-    const rows = await response.json() as unknown[];
-    return rows.length > 0;
+  async get(founderId: string, id: string): Promise<ConversationRecord | undefined> {
+    const query = new URLSearchParams({
+      select: "id,founder_id,title,created_at,updated_at",
+      id: `eq.${id}`, founder_id: `eq.${founderId}`, limit: "1",
+    });
+    const rows = await this.request<SupabaseConversationRow[]>(`maya_conversations?${query}`);
+    const row = rows[0];
+    if (!row) return undefined;
+    const messageQuery = new URLSearchParams({
+      select: "id,role,content,created_at",
+      conversation_id: `eq.${id}`, founder_id: `eq.${founderId}`,
+      order: "created_at.asc", limit: "1000",
+    });
+    const messages = await this.request<SupabaseMessageRow[]>(`maya_conversation_messages?${messageQuery}`);
+    const mapped: ConversationMessage[] = messages.map(message => ({
+      id: message.id, role: message.role, text: message.content, createdAt: message.created_at,
+    }));
+    return {
+      id: row.id, founderId, title: row.title, createdAt: row.created_at,
+      updatedAt: row.updated_at, messages: mapped, messageCount: mapped.length,
+    };
   }
 
-  private async request(url: URL, init: RequestInit): Promise<Response> {
-    const response = await this.fetcher(url, {
+  async getOrCreate(founderId: string, id: string, firstMessage = ""): Promise<ConversationRecord> {
+    if (!founderId || !id || id.length > 128) throw new Error("A valid Founder and conversation ID are required.");
+    const existing = await this.get(founderId, id);
+    if (existing) return existing;
+    const now = new Date().toISOString();
+    try {
+      await this.request<SupabaseConversationRow[]>("maya_conversations", {
+        method: "POST",
+        headers: { Prefer: "resolution=ignore-duplicates,return=representation" },
+        body: JSON.stringify({ id, founder_id: founderId, title: firstMessage.trim().slice(0, 72) || "New conversation", created_at: now, updated_at: now }),
+      });
+    } catch (error) {
+      if (!(error instanceof Error) || !error.message.includes("(409)")) throw error;
+    }
+    const created = await this.get(founderId, id);
+    if (!created) throw new Error("Conversation could not be created for this Founder.");
+    return created;
+  }
+
+  async append(founderId: string, id: string, role: ConversationRole, text: string): Promise<ConversationRecord> {
+    if (role !== "user" && role !== "model") throw new Error("Invalid conversation message role.");
+    if (typeof text !== "string" || !text.trim() || text.length > 20000) throw new Error("Conversation message must contain 1–20,000 characters.");
+    const result = await this.request<unknown>("rpc/maya_append_conversation_message", {
+      method: "POST",
+      body: JSON.stringify({ p_founder_id: founderId, p_conversation_id: id, p_role: role, p_content: text, p_message_id: randomUUID() }),
+    });
+    void result;
+    const updated = await this.get(founderId, id);
+    if (!updated) throw new Error("Conversation not found for this Founder.");
+    return updated;
+  }
+
+  async delete(founderId: string, id: string): Promise<boolean> {
+    const query = new URLSearchParams({ id: `eq.${id}`, founder_id: `eq.${founderId}`, select: "id" });
+    const rows = await this.request<Array<{ id: string }>>(`maya_conversations?${query}`, {
+      method: "DELETE", headers: { Prefer: "return=representation" },
+    });
+    return Array.isArray(rows) && rows.length > 0;
+  }
+
+  private async request<T>(path: string, init: RequestInit = {}): Promise<T> {
+    const response = await this.fetcher(`${this.restUrl}/${path}`, {
       ...init,
       headers: {
         apikey: this.serviceRoleKey,
         Authorization: `Bearer ${this.serviceRoleKey}`,
         "Content-Type": "application/json",
-        Accept: "application/json",
-        ...init.headers,
+        ...(init.headers || {}),
       },
     });
     if (!response.ok) {
-      const detail = (await response.text()).slice(0, 1000);
+      const detail = (await response.text()).slice(0, 500);
       throw new Error(`Supabase conversation storage failed (${response.status}): ${detail}`);
     }
-    return response;
-  }
-
-  private fromRow(row: any): ConversationRecord {
-    return {
-      id: String(row.id), founderId: String(row.founder_id), title: String(row.title || ""),
-      messages: Array.isArray(row.messages) ? row.messages : [],
-      createdAt: String(row.created_at), updatedAt: String(row.updated_at),
-    };
+    if (response.status === 204) return undefined as T;
+    const text = await response.text();
+    return (text ? JSON.parse(text) : undefined) as T;
   }
 }

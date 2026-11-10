@@ -7,8 +7,7 @@ test("stores Gemini user/model turns and restores SDK role names and function pa
   const previous: ConversationMessage[] = [{
     id: "stable-user-id",
     role: "user",
-    content: "hello",
-    parts: [{ text: "hello" }],
+    text: "hello",
     createdAt: "2026-11-08T10:00:00.000Z",
   }];
   const history = [
@@ -18,7 +17,8 @@ test("stores Gemini user/model turns and restores SDK role names and function pa
   ];
   const stored = storeGeminiHistory(history, previous, "conversation-1", "2026-11-09T00:00:00.000Z");
   assert.equal(stored[0].id, "stable-user-id");
-  assert.equal(stored[1].role, "assistant");
+  assert.equal(stored[1].role, "model");
+  assert.equal(stored[1].text, "");
   assert.deepEqual(restoreGeminiHistory(stored), [
     { role: "user", parts: [{ text: "hello" }] },
     { role: "model", parts: [{ functionCall: { name: "list_dir", args: { path: "." } } }] },

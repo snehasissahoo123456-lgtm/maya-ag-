@@ -5,47 +5,55 @@ export interface GeminiHistoryItem {
   parts?: Array<Record<string, unknown>>;
 }
 
-/** Convert Gemini SDK history to a durable, Founder-scoped conversation representation. */
+/**
+ * A conversation-store-compatible message that retains Gemini's structured
+ * function-call/function-response parts alongside the plain-text projection.
+ */
+export interface GeminiConversationMessage extends ConversationMessage {
+  parts: Array<Record<string, unknown>>;
+}
+
+/** Convert Gemini SDK history to the current durable conversation message contract. */
 export function storeGeminiHistory(
   history: GeminiHistoryItem[],
   previous: ConversationMessage[],
   conversationId: string,
   now = new Date().toISOString(),
-): ConversationMessage[] {
+): GeminiConversationMessage[] {
   if (!Array.isArray(history) || history.length > 5000) {
     throw new Error("Gemini conversation history is invalid or exceeds the message limit.");
   }
   return history.map((item, index) => {
-    const role = item?.role === "model" ? "assistant" : item?.role;
-    if (role !== "user" && role !== "assistant") {
+    const role = item?.role;
+    if (role !== "user" && role !== "model") {
       throw new Error("Gemini conversation contains an unsupported message role.");
     }
     const parts = Array.isArray(item.parts) ? structuredClone(item.parts) : [];
     if (parts.length > 100 || JSON.stringify(parts).length > 1_000_000) {
       throw new Error("A conversation message exceeds the durable storage limit.");
     }
-    const content = parts
+    const text = parts
       .map(part => typeof part.text === "string" ? part.text : "")
       .filter(Boolean)
       .join("\n")
-      .slice(0, 100_000);
+      .slice(0, 20_000);
     return {
       id: previous[index]?.id || `${conversationId}-message-${index + 1}`,
       role,
-      content,
+      text,
       parts,
       createdAt: previous[index]?.createdAt || now,
     };
   });
 }
 
-/** Reconstruct the Gemini SDK's user/model role convention from stored messages. */
-export function restoreGeminiHistory(messages: ConversationMessage[]): GeminiHistoryItem[] {
+/** Reconstruct Gemini SDK history without losing structured tool-call parts. */
+export function restoreGeminiHistory(messages: Array<ConversationMessage & { parts?: Array<Record<string, unknown>> }>): GeminiHistoryItem[] {
   return messages.map(message => ({
-    role: message.role === "assistant" ? "model" : "user",
+    role: message.role,
     parts: message.parts?.length
       ? structuredClone(message.parts)
-      : message.content ? [{ text: message.content }] : [],
+      : message.text ? [{ text: message.text }] : [],
   }));
 }
 
