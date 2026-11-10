@@ -765,7 +765,33 @@ const specialistToolExecutor = new SpecialistToolExecutor(
     throw new Error("Specialist capability is not connected to an execution handler.");
   },
   32_000,
-  (event) => {
+  async (event) => {
+    const eventType = event.status === "success"
+      ? "specialist.tool_succeeded"
+      : event.status === "denied" ? "specialist.tool_denied" : "specialist.tool_failed";
+    const auditMetadata = {
+      agentId: event.agentId,
+      outcome: event.status,
+      durationMs: event.durationMs,
+      ...(event.resultBytes !== undefined ? { resultBytes: event.resultBytes } : {}),
+      ...(event.resultSha256 ? { resultSha256: event.resultSha256 } : {}),
+      ...(event.errorCode ? { errorCode: event.errorCode } : {}),
+    };
+    const actionDigest = createHash("sha256")
+      .update(JSON.stringify({ agentId: event.agentId, capability: event.capability, outcome: event.status, resultSha256: event.resultSha256 || null, errorCode: event.errorCode || null }))
+      .digest("hex");
+    await auditRepository.append({
+      id: randomUUID(),
+      founderId: event.founderId,
+      actorId: "specialist:" + event.agentId,
+      actorRole: event.actorRole,
+      type: eventType,
+      taskId: "specialist:" + event.agentId + ":" + event.completedAt,
+      capability: event.capability,
+      actionDigest,
+      occurredAt: event.completedAt,
+      metadata: auditMetadata,
+    });
     currentAuditLogs.unshift({
       id: "specialist-tool-" + randomTaskId(),
       toolName: event.capability,
