@@ -533,7 +533,7 @@ You can use this cockpit to inspect the current development status and configure
             if (msg.durationMs) this.lastBuildDurationMs = msg.durationMs;
             if (msg.timestamp) this.lastBuildTimestamp = msg.timestamp;
             if (msg.status === 'building') {
-              this.lastTestNotification = `⚡ Auto-Build: File saved (${this.lastModifiedFile || 'source'}). Compiling in real time...`;
+              this.lastTestNotification = msg.data || `Workspace change observed (${this.lastModifiedFile || 'source'}). No commands were executed.`;
             }
           } else if (msg.type === 'build_chunk') {
             if (msg.data) {
@@ -633,21 +633,21 @@ You can use this cockpit to inspect the current development status and configure
   private async triggerWatcherBuild(file?: string) {
     this.isManualTriggering = true;
     try {
-      if (this.cockpitWs && this.cockpitWs.readyState === WebSocket.OPEN) {
-        this.cockpitWs.send(JSON.stringify({ type: 'trigger_build', file: file || 'manual-click' }));
-      } else {
-        await fetch('/api/action-engine/watcher/trigger', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ file: file || 'manual-click' }),
-        });
-      }
-    } catch (err) {
-      console.warn('Error triggering watch build:', err);
+      const response = await fetch('/api/action-engine/watcher/trigger', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ file: file || 'manual-click' }),
+      });
+      const data = await response.json();
+      if (!response.ok || !data.success || !data.queued) throw new Error(data.error || "Validation task was not queued.");
+      this.lastTestNotification = "Validation task queued. No commands have run; review and approve it in the Developer department.";
+      this.activeTab = "developer";
+      await this.fetchWatcherStatus();
+    } catch (err: any) {
+      this.lastTestNotification = err.message || "Could not queue validation.";
     } finally {
-      setTimeout(() => {
-        this.isManualTriggering = false;
-      }, 500);
+      this.isManualTriggering = false;
     }
   }
 
@@ -662,8 +662,8 @@ You can use this cockpit to inspect the current development status and configure
         const data = await res.json();
         this.watcherActive = data.active;
         this.lastTestNotification = this.watcherActive
-          ? '🟢 Real-time file watcher activated: Instant builds enabled on save.'
-          : '⚪ File watcher paused.';
+          ? 'Passive workspace monitoring is active. Builds and source edits remain disabled until an approved task is executed.'
+          : 'Passive workspace monitoring paused.';
       }
     } catch (err) {
       console.warn('Error toggling watcher:', err);
@@ -1811,7 +1811,7 @@ Status: Ready to build upon Founder "go ahead".`;
                       : 'bg-slate-800 text-slate-300 border-slate-700 hover:bg-slate-700'
                   }"
                   @click="${() => (this.showMultimodalPanel = !this.showMultimodalPanel)}"
-                  title="Toggle persistent Multimodal & Auto-Fix panel"
+                  title="Toggle persistent Multimodal & Diagnostics panel"
                 >
                   <span class="material-symbols-outlined text-sm">
                     ${this.isScreenActive || this.isVideoActive ? 'smart_display' : 'dock_to_left'}
@@ -2246,7 +2246,7 @@ Status: Ready to build upon Founder "go ahead".`;
               }"
               @click="${() => (this.multimodalPanelTab = 'autofix_stream')}"
             >
-              <span>Auto-Fix</span>
+              <span>Diagnostics</span>
               ${this.autoFixRecords.length > 0
                 ? html`<span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>`
                 : ''}
@@ -3506,9 +3506,9 @@ Status: Ready to build upon Founder "go ahead".`;
                     ${this.buildStatus === 'building' ? 'sync' : this.watcherActive ? 'sensors' : 'sensors_off'}
                   </span>
                   ${this.buildStatus === 'building'
-                    ? `Compiling changes (${this.lastModifiedFile || 'source'})...`
+                    ? `Monitoring workspace changes`
                     : this.watcherActive
-                    ? 'Watcher Active • Auto-Build on Save'
+                    ? 'Passive Monitor Active • Approval Required for Validation'
                     : 'Watcher Paused'}
                 </span>
               </div>
@@ -3544,12 +3544,12 @@ Status: Ready to build upon Founder "go ahead".`;
                 class="px-3 py-1.5 bg-indigo-600/80 hover:bg-indigo-600 text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 border border-indigo-500/40 shadow-sm transition-all hover:scale-[1.02] disabled:opacity-50"
                 ?disabled="${this.buildStatus === 'building' || this.isManualTriggering}"
                 @click="${() => this.triggerWatcherBuild()}"
-                title="Force immediate tsc --noEmit && vite build"
+                title="Queue the fixed validation suite for Founder approval"
               >
                 <span class="material-symbols-outlined text-sm ${this.buildStatus === 'building' || this.isManualTriggering ? 'animate-spin' : ''}">
                   bolt
                 </span>
-                ${this.buildStatus === 'building' ? 'Compiling...' : '⚡ Trigger Build'}
+                ${this.isManualTriggering ? 'Queueing...' : 'Queue Validation'}
               </button>
 
               <button
@@ -3572,7 +3572,7 @@ Status: Ready to build upon Founder "go ahead".`;
                   <div class="flex items-center justify-between mb-2">
                     <div class="flex items-center gap-2 text-xs text-slate-400 font-mono">
                       <span class="material-symbols-outlined text-xs text-indigo-400">code</span>
-                      <span>Real-Time Compiler & Watcher Stream (stdout / stderr)</span>
+                      <span>Passive Workspace Monitor Events</span>
                     </div>
                     <div class="flex items-center gap-2">
                       <button
