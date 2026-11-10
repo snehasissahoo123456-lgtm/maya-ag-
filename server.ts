@@ -747,7 +747,7 @@ function createFounderChatToolExecutor(founderId: string) {
 }
 
 const developerProposalService = new DeveloperProposalService(taskOrchestrator, relativePath => {
-  const file = resolveWorkspacePath(relativePath);
+  const file = resolveWritableWorkspacePath(relativePath);
   if (isSensitiveWorkspacePath(file)) throw new Error("Reading secrets and credential files is blocked.");
   const stat = fs.statSync(file);
   if (!stat.isFile() || stat.size > 100_000) throw new Error("Developer proposals require an existing regular text file no larger than 100 KB.");
