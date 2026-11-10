@@ -1,7 +1,7 @@
 # Maya Implementation Roadmap
 
-Branch: maya/release-hardening-audit-fixes (stacked on maya/specialist-ui-runtime-status)
-Status: The development stack through PR #45 has passed CI, but it is not integrated into main. This hardening branch restores the main-line persistent-session and CSRF controls and repairs migration/adapter contract defects. Live Supabase, physical-device and production deployment validation remain outstanding.
+Branch: maya/developer-department-foundation (stacked on PR #46 / maya/release-hardening-audit-fixes)
+Status: PR #46 passed full CI but remains open/draft and is not integrated into main. The Developer department's first approval-gated workflow is being added on top. No production deployment, live Supabase migration or physical-device acceptance is claimed.
 
 ## Phase 0 — Baseline and contracts
 - [x] Add a Founder dashboard as the default authenticated landing page; derive backend reachability and task counts from live API responses and remove unsupported integration/automation badges.
