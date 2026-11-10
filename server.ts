@@ -1003,7 +1003,7 @@ async function startServer() {
   ]);
   app.use("/api", (req, res, next) => {
     const authorization = req.headers.authorization || "";
-    const bearer = authorization.match(/^Bearer\\s+(.+)$/i)?.[1];
+    const bearer = authorization.match(/^Bearer\s+(.+)$/i)?.[1];
     const cookieToken = (req.headers.cookie || "").split(";").map((part) => part.trim()).find((part) => part.startsWith("maya_session="))?.slice("maya_session=".length);
     const mutatingMethod = ["POST", "PUT", "PATCH", "DELETE"].includes(req.method);
 
@@ -2412,7 +2412,7 @@ MULTILINGUAL & RAPID REACTION:
     try { pathname = new URL(request.url || "/", "http://localhost").pathname; }
     catch { socket.destroy(); return; }
     if (request.headers.origin && !isAllowedRequestOrigin(request)) {
-      socket.write("HTTP/1.1 403 Forbidden\\r\\n\\r\\n");
+      socket.write("HTTP/1.1 403 Forbidden\r\n\r\n");
       socket.destroy();
       return;
     }
