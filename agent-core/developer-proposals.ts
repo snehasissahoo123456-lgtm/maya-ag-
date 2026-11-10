@@ -30,6 +30,28 @@ export class DeveloperProposalService {
     private readonly readCurrentSha256: (relativePath: string) => string,
   ) {}
 
+  async proposeValidation(founderId: string, instruction = "Run the fixed repository lint, test and production build suite."): Promise<{ taskId: string; status: string; capability: "workspace.run_validation"; requiresFounderApproval: true }> {
+    if (!founderId.trim() || founderId.length > 256) throw new Error("A verified Founder identity is required.");
+    if (!instruction.trim() || instruction.length > 1000) throw new Error("Validation instruction must contain 1–1,000 characters.");
+    const envelope = await this.tasks.enqueue({
+      id: "developer-validation-" + randomUUID(),
+      founderId,
+      instruction: instruction.trim(),
+      capability: "workspace.run_validation",
+      args: {},
+      actor: {
+        id: "specialist:developer",
+        founderId,
+        role: "developer",
+        scopes: ["tests:run"],
+      },
+    });
+    if (envelope.capability !== "workspace.run_validation" || envelope.task.requiresApproval !== true) {
+      throw new Error("Validation task was not queued behind the required Founder approval gate.");
+    }
+    return { taskId: envelope.task.id, status: envelope.task.status, capability: "workspace.run_validation", requiresFounderApproval: true };
+  }
+
   async proposeFileChange(input: DeveloperFileChangeInput): Promise<DeveloperFileChangeReceipt> {
     if (typeof input.founderId !== "string" || !input.founderId.trim() || input.founderId.length > 256) {
       throw new Error("A verified Founder identity is required.");
