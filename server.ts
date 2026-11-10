@@ -6,7 +6,7 @@ import express from "express";
 import http from "http";
 import path from "path";
 import fs from "fs";
-import { execSync, spawn } from "child_process";
+import { spawn } from "child_process";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI } from "@google/genai";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
@@ -165,6 +165,7 @@ import { createScheduledJobRepository } from "./agent-core/create-scheduled-job-
 import { ScheduleWorker } from "./agent-core/schedule-worker.ts";
 import { DeveloperProposalService } from "./agent-core/developer-proposals.ts";
 import { replaceWorkspaceFile } from "./agent-core/workspace-file-writer.ts";
+import { runWorkspaceValidation } from "./agent-core/workspace-validation-runner.ts";
 
 const conversationStore = createConversationRepository();
 const taskRepository = createTaskRepository();
@@ -252,6 +253,17 @@ taskCapabilityRegistry.register({
   timeoutMs: 15_000,
   requiresApproval: true,
   verification: "Atomically replace an existing file only after exact Founder approval and verify the resulting SHA-256 digest.",
+});
+taskCapabilityRegistry.register({
+  name: "workspace.run_validation",
+  description: "Run only the fixed repository lint, test and production build scripts in the Maya server workspace.",
+  risk: "high",
+  allowedRoles: ["founder", "worker", "developer"],
+  requiredScopes: ["tests:run"],
+  arguments: {},
+  timeoutMs: 180_000,
+  requiresApproval: true,
+  verification: "All three fixed repository validation scripts must exit successfully and produce a SHA-256 result digest.",
 });
 taskCapabilityRegistry.register({
   name: "device.workspace.write_file",
@@ -553,6 +565,18 @@ const taskOrchestrator = new TaskOrchestrator(
           },
         };
       }
+      if (capability === "workspace.run_validation") {
+        const validation = await runWorkspaceValidation(process.cwd(), signal);
+        return {
+          result: validation,
+          evidence: {
+            kind: "workspace-validation-suite",
+            description: "The fixed lint, test and production build scripts all completed successfully in the Maya server workspace.",
+            reference: "sha256:" + validation.sha256,
+            observedAt: new Date().toISOString(),
+          },
+        };
+      }
       if (capability === "workspace.write_file") {
         const content = args.content;
         if (typeof content !== "string" || content.length > 100_000) throw new Error("File content must be text no larger than 100 KB.");
@@ -579,7 +603,7 @@ const taskOrchestrator = new TaskOrchestrator(
 const taskWorker = new TaskWorker(taskRepository, taskOrchestrator, taskCapabilityRegistry, {
   founderId: "founder-primary",
   pollIntervalMs: Number(process.env.MAYA_TASK_WORKER_POLL_MS) || 3000,
-  leaseMs: Number(process.env.MAYA_TASK_WORKER_LEASE_MS) || 60_000,
+  leaseMs: Number(process.env.MAYA_TASK_WORKER_LEASE_MS) || 300_000,
   maxTasksPerCycle: Number(process.env.MAYA_TASK_WORKER_MAX_TASKS_PER_CYCLE) || 20,
   isDeviceAvailable: (deviceId, founderId) => activeDeviceBridgeManager?.isOnline(deviceId, founderId) === true,
 }, approvalRepository);
@@ -603,7 +627,7 @@ const MAYA_FUNCTION_DECLARATIONS = [
   { name: "list_tasks", description: "List persistent tasks and their current queue state.", parametersJsonSchema: { type: "object", properties: {} } },
   { name: "memory_save", description: "Save a Founder-approved note or lesson to Maya's persistent memory.", parametersJsonSchema: { type: "object", properties: { category: { type: "string" }, title: { type: "string" }, content: { type: "string" } }, required: ["content"] } },
   { name: "memory_search", description: "Search Maya's saved memory notes.", parametersJsonSchema: { type: "object", properties: { query: { type: "string" } }, required: ["query"] } },
-  { name: "run_tests", description: "Run the repository lint, test, and production build commands and return their real output.", parametersJsonSchema: { type: "object", properties: {} } },
+  { name: "run_tests", description: "Queue the fixed repository lint, test and production build suite. Founder approval is required before execution.", parametersJsonSchema: { type: "object", properties: {} } },
 ];
 const IMPLEMENTED_TOOL_NAMES = new Set(MAYA_FUNCTION_DECLARATIONS.map((tool) => tool.name));
 
@@ -687,12 +711,22 @@ async function executeAgentTool(name: string, args: Record<string, unknown>, fou
     return { count: matches.length, results: matches };
   }
   if (name === "run_tests") {
-    try {
-      const output = execSync("bun run lint && bun run test && bun run build", { cwd: process.cwd(), encoding: "utf8", stdio: "pipe", timeout: 180000 });
-      return { verified: true, command: "bun run lint && bun run test && bun run build", output: output.slice(-20000) };
-    } catch (error: any) {
-      throw new Error(`Validation failed (exit ${error.status ?? "unknown"}): ${String(error.stdout || "")}\n${String(error.stderr || error.message || "")}`.slice(-12000));
-    }
+    const envelope = await taskOrchestrator.enqueue({
+      id: "validation-" + randomUUID(),
+      founderId,
+      instruction: "Run the fixed lint, test and production build validation suite in the Maya server workspace.",
+      capability: "workspace.run_validation",
+      args: {},
+      actor: { id: "founder-chat", founderId, role: "founder", scopes: ["tests:run"] },
+    });
+    return {
+      queued: true,
+      executed: false,
+      taskId: envelope.task.id,
+      status: envelope.task.status,
+      requiresFounderApproval: envelope.task.requiresApproval,
+      message: "Validation was queued. A Founder must request and approve the exact validation task before it can execute.",
+    };
   }
   throw new Error("Tool execution is not available.");
 }
@@ -760,6 +794,17 @@ specialistCapabilityRegistry.register({
   verification: "Create a queued high-risk workspace.write_file task bound to the exact file SHA-256 and payload; a Founder must approve it before execution.",
 });
 specialistCapabilityRegistry.register({
+  name: "developer.propose_validation",
+  description: "Queue the fixed repository lint, test and build suite for separate Founder approval. This does not run commands.",
+  risk: "low",
+  allowedRoles: ["developer"],
+  requiredScopes: ["tests:run"],
+  arguments: { instruction: { type: "string", required: false, maxLength: 1000 } },
+  timeoutMs: 15_000,
+  requiresApproval: false,
+  verification: "Create a queued workspace.run_validation task requiring explicit Founder approval.",
+});
+specialistCapabilityRegistry.register({
   name: "specialist.memory.search",
   description: "Search only the authenticated Founder's saved Maya memory.",
   risk: "low",
@@ -778,6 +823,7 @@ const specialistToolExecutor = new SpecialistToolExecutor(
     if (capability === "specialist.workspace.read_file") return executeAgentTool("read_file", args, context.founderId);
     if (capability === "specialist.memory.search") return executeAgentTool("memory_search", args, context.founderId);
     if (capability === "developer.propose_file_change") return developerProposalService.proposeFileChange({ founderId: context.founderId, path: String(args.path || ""), expectedSha256: String(args.expectedSha256 || ""), content: typeof args.content === "string" ? args.content : "", instruction: String(args.instruction || "") });
+    if (capability === "developer.propose_validation") return developerProposalService.proposeValidation(context.founderId, String(args.instruction || "Run the fixed repository lint, test and production build suite."));
     throw new Error("Specialist capability is not connected to an execution handler.");
   },
   32_000,
@@ -1683,6 +1729,7 @@ async function startServer() {
     if (!founderId) return res.status(401).json({ success: false, error: "Verified Founder session required." });
     const instruction = typeof req.body?.instruction === "string" ? req.body.instruction.trim() : "";
     const capability = typeof req.body?.capability === "string" ? req.body.capability : "workspace.read_file";
+    const isValidation = capability === "workspace.run_validation";
     const isMoveFile = capability === "device.workspace.move_file";
     const isSearchFiles = capability === "device.workspace.search_files";
     const isListDirectory = capability === "device.workspace.list_directory";
@@ -1695,8 +1742,8 @@ async function startServer() {
     const content = req.body?.content;
     const expectedSha256 = typeof req.body?.expectedSha256 === "string" ? req.body.expectedSha256 : undefined;
     if (!instruction || instruction.length > 1000) return res.status(400).json({ success: false, error: "Instruction must contain 1–1000 characters." });
-    if (!["workspace.read_file", "device.workspace.read_file", "device.workspace.git_status", "device.workspace.search_files", "device.workspace.list_directory", "workspace.write_file", "device.workspace.write_file", "device.workspace.create_file", "device.workspace.create_directory", "device.workspace.move_file"].includes(capability)) return res.status(400).json({ success: false, error: "Capability is not enabled for the task control plane." });
-    if (!filePath || filePath.length > 1024) return res.status(400).json({ success: false, error: "A workspace-relative path of 1–1024 characters is required." });
+    if (!["workspace.read_file", "device.workspace.read_file", "device.workspace.git_status", "device.workspace.search_files", "device.workspace.list_directory", "workspace.write_file", "workspace.run_validation", "device.workspace.write_file", "device.workspace.create_file", "device.workspace.create_directory", "device.workspace.move_file"].includes(capability)) return res.status(400).json({ success: false, error: "Capability is not enabled for the task control plane." });
+    if (!isValidation && (!filePath || filePath.length > 1024)) return res.status(400).json({ success: false, error: "A workspace-relative path of 1–1024 characters is required." });
     if (isSearchFiles && (!searchQuery.trim() || searchQuery.length > 200)) return res.status(400).json({ success: false, error: "Search query must contain 1–200 characters." });
     if (isMoveFile && (!destinationPath || destinationPath.length > 1024)) return res.status(400).json({ success: false, error: "A workspace-relative destination path of 1–1024 characters is required." });
     const requiresFileContent = ["workspace.write_file", "device.workspace.write_file", "device.workspace.create_file"].includes(capability);
@@ -1708,12 +1755,16 @@ async function startServer() {
         if (!device) return res.status(404).json({ success: false, error: "Enrolled device not found for this Founder." });
         if (!device.online) return res.status(409).json({ success: false, error: "The paired device must be online before creating a local-device task." });
       }
-      const scopes = capability === "workspace.write_file"
+      const scopes = capability === "workspace.run_validation"
+        ? ["tests:run"]
+        : capability === "workspace.write_file"
         ? ["workspace:read", "workspace:write"]
         : ["device.workspace.read_file", "device.workspace.git_status", "device.workspace.search_files", "device.workspace.list_directory"].includes(capability) ? ["device:read"]
           : capability.startsWith("device.workspace.") ? ["device:write"] : ["workspace:read"];
       const actor = { id: founderId, founderId, role: "founder" as const, scopes };
-      const args = isMoveFile
+      const args = isValidation
+        ? {}
+        : isMoveFile
         ? { deviceId, fromPath: filePath, toPath: destinationPath }
         : isSearchFiles
           ? { deviceId, path: filePath, query: searchQuery }
