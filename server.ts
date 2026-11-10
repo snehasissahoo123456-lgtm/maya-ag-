@@ -710,7 +710,7 @@ const goalPlanStore = createGoalPlanRepository();
 const goalPlanExecutor = new GoalPlanExecutor(goalPlanStore, executeAgentTool);
 const goalPlanWorkerEnabled = process.env.MAYA_PLAN_WORKER_ENABLED === "true";
 if (goalPlanWorkerEnabled && (process.env.MAYA_STORAGE_DRIVER || "file").toLowerCase() !== "file") {
-  throw new Error("MAYA_PLAN_WORKER_ENABLED requires single-instance file storage until distributed goal-plan leases are implemented.");
+  throw new Error("MAYA_PLAN_WORKER_ENABLED currently requires single-instance file storage. Supabase lease primitives exist, but activation remains blocked until lease renewal and live multi-instance validation are complete.");
 }
 const goalPlanWorker = new GoalPlanWorker(
   goalPlanStore, goalPlanExecutor, "founder-primary",
