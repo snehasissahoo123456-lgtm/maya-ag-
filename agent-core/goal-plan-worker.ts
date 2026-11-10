@@ -36,7 +36,7 @@ export class GoalPlanWorker {
     private readonly founderId: string,
     pollIntervalMs = 3000,
     maxPlansPerCycle = 10,
-    workerId = randomUUID(),
+    workerId: string = randomUUID(),
     leaseMs = 60_000,
   ) {
     if (!founderId.trim()) throw new Error("Plan worker Founder scope is required.");
