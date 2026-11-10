@@ -44,3 +44,31 @@ test("updates a plan only for the matching Founder and requires a returned row",
   const missing = new SupabaseGoalPlanStore("https://project.supabase.co", "service-secret", async () => new Response("[]", { status: 200 }));
   await assert.rejects(missing.save("founder-1", stored), /not found/i);
 });
+
+test("claims one running goal plan through the atomic Founder-scoped lease RPC", async () => {
+  let url = "";
+  let body: any;
+  const runningRow = { ...row(), status: "running" };
+  const store = new SupabaseGoalPlanStore("https://project.supabase.co", "service-secret", async (input, init) => {
+    url = String(input);
+    body = JSON.parse(String(init?.body));
+    return new Response(JSON.stringify([runningRow]), { status: 200 });
+  });
+  const claimed = await store.claimNext("founder-1", "worker-1", 60_000);
+  assert.equal(claimed?.id, "plan-1");
+  assert.match(url, /rpc\/maya_claim_next_goal_plan$/);
+  assert.deepEqual(body, { p_founder_id: "founder-1", p_worker_id: "worker-1", p_lease_ms: 60_000 });
+});
+
+test("releases only the exact Founder and worker goal-plan lease", async () => {
+  let url = "";
+  let body: any;
+  const store = new SupabaseGoalPlanStore("https://project.supabase.co", "service-secret", async (input, init) => {
+    url = String(input);
+    body = JSON.parse(String(init?.body));
+    return new Response(JSON.stringify([{ id: "plan-1", founder_id: "founder-1" }]), { status: 200 });
+  });
+  await store.releaseClaim("founder-1", "plan-1", "worker-1");
+  assert.match(url, /rpc\/maya_release_goal_plan_claim$/);
+  assert.deepEqual(body, { p_plan_id: "plan-1", p_founder_id: "founder-1", p_worker_id: "worker-1" });
+});
