@@ -80,18 +80,6 @@ test("real HTTP control-plane routes enforce Founder auth and execute only the r
     await waitForServer(baseUrl, child);
     const unauthenticated = await sameOriginFetch(baseUrl + "/api/control-plane/tasks");
     assert.equal(unauthenticated.status, 401);
-    const crossOriginMutation = await fetch(baseUrl + "/api/action-engine/memory", {
-      method: "POST",
-      headers: { "content-type": "application/json", cookie: cookie!, origin: "https://attacker.invalid" },
-      body: JSON.stringify({ content: "Cross-origin memory write must be blocked." }),
-    });
-    assert.equal(crossOriginMutation.status, 403, "Cookie-authenticated cross-origin mutations must be rejected");
-    const missingOriginMutation = await fetch(baseUrl + "/api/action-engine/memory", {
-      method: "POST",
-      headers: { "content-type": "application/json", cookie: cookie! },
-      body: JSON.stringify({ content: "Missing-origin memory write must be blocked." }),
-    });
-    assert.equal(missingOriginMutation.status, 403, "Cookie-authenticated mutations without Origin/Referer must be rejected");
     const unauthenticatedAudit = await sameOriginFetch(baseUrl + "/api/audit-events");
     assert.equal(unauthenticatedAudit.status, 401, "Audit history must require Founder authentication");
     const unauthenticatedMemory = await sameOriginFetch(baseUrl + "/api/action-engine/memory", {
@@ -107,6 +95,18 @@ test("real HTTP control-plane routes enforce Founder auth and execute only the r
     assert.equal(login.status, 200);
     const cookie = login.headers.get("set-cookie")?.split(";")[0];
     assert.ok(cookie, "Founder login should set an HttpOnly session cookie");
+    const crossOriginMutation = await fetch(baseUrl + "/api/action-engine/memory", {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie: cookie!, origin: "https://attacker.invalid" },
+      body: JSON.stringify({ content: "Cross-origin memory write must be blocked." }),
+    });
+    assert.equal(crossOriginMutation.status, 403, "Cookie-authenticated cross-origin mutations must be rejected");
+    const missingOriginMutation = await fetch(baseUrl + "/api/action-engine/memory", {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie: cookie! },
+      body: JSON.stringify({ content: "Missing-origin memory write must be blocked." }),
+    });
+    assert.equal(missingOriginMutation.status, 403, "Cookie-authenticated mutations without Origin/Referer must be rejected");
 
     const schedulesBeforeAuth = await sameOriginFetch(baseUrl + "/api/schedules");
     assert.equal(schedulesBeforeAuth.status, 401, "Schedule inventory must require Founder authentication");
