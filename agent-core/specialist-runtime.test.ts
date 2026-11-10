@@ -75,3 +75,54 @@ test("passes only manifest-scoped read-only tools into the specialist model adap
   assert.deepEqual(executed, { name: "specialist.workspace.read_file", args: { path: "README.md" }, content: "safe" });
   assert.equal(result.executionMode, "bounded_read_only_tools");
 });
+
+test("Developer receives a proposal-only tool that cannot write before Founder approval", async () => {
+  const registry = new CapabilityRegistry();
+  registry.register({
+    name: "specialist.workspace.read_file",
+    description: "Read a safe workspace file.",
+    risk: "low",
+    allowedRoles: ["developer"],
+    requiredScopes: ["workspace:read"],
+    arguments: { path: { type: "string", required: true, maxLength: 100 } },
+    timeoutMs: 1000,
+    requiresApproval: false,
+    verification: "Return file text and its SHA-256.",
+  });
+  registry.register({
+    name: "developer.propose_file_change",
+    description: "Queue an exact file replacement for Founder approval.",
+    risk: "low",
+    allowedRoles: ["developer"],
+    requiredScopes: ["workspace:write"],
+    arguments: {
+      path: { type: "string", required: true, maxLength: 100 },
+      expectedSha256: { type: "string", required: true, maxLength: 64 },
+      content: { type: "string", required: true, maxLength: 1000 },
+      instruction: { type: "string", required: true, maxLength: 500 },
+    },
+    timeoutMs: 1000,
+    requiresApproval: false,
+    verification: "Queues a high-risk task; Founder approval is required before execution.",
+  });
+  let prompt = "";
+  let proposed: unknown;
+  const executor = new SpecialistToolExecutor(registry, async () => ({ queued: true, requiresFounderApproval: true }));
+  const runtime = new SpecialistRuntime({
+    generate: async input => {
+      prompt = input.systemInstruction;
+      assert.ok(input.tools.some(tool => tool.name === "developer.propose_file_change"));
+      proposed = await input.executeTool!("developer.propose_file_change", {
+        path: "src/example.ts",
+        expectedSha256: "a".repeat(64),
+        content: "export const value = 2;",
+        instruction: "Update the verified source file.",
+      });
+      return "Queued an exact-hash change proposal for Founder approval.";
+    },
+  }, executor);
+  const result = await runtime.run({ agentId: "developer", founderId: "founder-1", task: "Inspect and propose a safe change." });
+  assert.equal(result.executionMode, "bounded_tools_with_approval_requests");
+  assert.match(prompt, /only queues a high-risk file replacement for Founder approval/i);
+  assert.deepEqual(proposed, { queued: true, requiresFounderApproval: true });
+});
