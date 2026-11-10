@@ -39,7 +39,6 @@ import {
   MemoryEntry,
   ToolDefinition,
   ToolExecutionRecord,
-  INITIAL_TEST_SUITES,
   TestSuite,
   TestAssertion,
   TestSeverity,
@@ -98,7 +97,7 @@ export class ActionEngineApp extends LitElement {
   @state() accessor controlPlaneTasks: Array<{ task: { id: string; instruction: string; status: string; createdAt?: string; updatedAt?: string; verificationEvidence?: unknown[] }; capability: string; args: Record<string, unknown> }> = [];
 
   // Test Runner & Diagnostic Suite States
-  @state() accessor testSuites: TestSuite[] = [...INITIAL_TEST_SUITES];
+  @state() accessor testSuites: TestSuite[] = [];
   @state() accessor isRunningTests = false;
   @state() accessor isFixingTests = false;
   @state() accessor testSeverityFilter: 'ALL' | TestSeverity = 'ALL';
@@ -2378,7 +2377,7 @@ Status: Ready to build upon Founder "go ahead".`;
                   ${this.autoFixRecords.length === 0
                     ? html`
                         <div class="p-6 text-center text-xs text-slate-500 italic bg-slate-900/40 border border-slate-800 rounded-2xl">
-                          No errors detected. Codebase is 100% healthy with zero TypeScript issues!
+                          No verified auto-fix records. Automatic source mutation is disabled until a reviewable patch and verification flow exists.
                         </div>
                       `
                     : this.autoFixRecords.map((fix) => html`
@@ -2415,10 +2414,10 @@ Status: Ready to build upon Founder "go ahead".`;
                   <div class="bg-gradient-to-r from-slate-900 to-indigo-950/60 border border-slate-800 rounded-2xl p-4">
                     <div class="flex items-center justify-between">
                       <span class="text-xs font-semibold text-slate-300">Build Health</span>
-                      <span class="text-sm font-bold font-mono text-emerald-400">100% HEALTH</span>
+                      <span class="text-sm font-bold font-mono text-slate-400">NO RUN RECORDED</span>
                     </div>
                     <div class="w-full bg-slate-800 h-2 rounded-full mt-2 overflow-hidden">
-                      <div class="bg-emerald-400 h-full rounded-full w-full"></div>
+                      <div class="bg-slate-600 h-full rounded-full w-0"></div>
                     </div>
                     <div class="flex items-center justify-between mt-3 text-[11px] text-slate-400 font-mono">
                       <span>22/22 Assertions Passed</span>
@@ -2432,7 +2431,7 @@ Status: Ready to build upon Founder "go ahead".`;
                     @click="${() => this.runFullTestSuite()}"
                   >
                     <span class="material-symbols-outlined text-sm ${this.isRunningTests ? 'animate-spin' : ''}">play_arrow</span>
-                    ${this.isRunningTests ? 'Running Verification...' : 'Run Full Test Suite'}
+                    ${this.isRunningTests ? 'Queueing Validation...' : 'Queue Validation (Approval Required)'}
                   </button>
 
                   <button
@@ -3366,7 +3365,8 @@ Status: Ready to build upon Founder "go ahead".`;
     const passed = this.testSuites.reduce((acc, s) => acc + s.passedCount, 0);
     const failed = this.testSuites.reduce((acc, s) => acc + s.failedCount, 0);
     const warnings = this.testSuites.reduce((acc, s) => acc + s.warningCount, 0);
-    const healthIndex = Math.round((passed / (total || 1)) * 100);
+    const hasValidationResults = total > 0;
+    const healthIndex = hasValidationResults ? Math.round((passed / total) * 100) : 0;
 
     return html`
       <div class="space-y-6 flex-1 flex flex-col">
@@ -3394,20 +3394,20 @@ Status: Ready to build upon Founder "go ahead".`;
                 @click="${() => this.runFullTestSuite()}"
               >
                 <span class="material-symbols-outlined text-base ${this.isRunningTests ? 'animate-spin' : ''}">
-                  ${this.isRunningTests ? 'autorenew' : 'play_arrow'}
+                  ${this.isRunningTests ? 'autorenew' : 'approval'}
                 </span>
-                ${this.isRunningTests ? 'Running Verification...' : 'Run Full Test Suite'}
+                ${this.isRunningTests ? 'Queueing Validation...' : 'Queue Validation (Approval Required)'}
               </button>
 
               <button
                 class="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-semibold flex items-center gap-2 shadow-lg shadow-emerald-600/25 transition-all hover:scale-[1.02] disabled:opacity-50"
-                ?disabled="${this.isRunningTests || this.isFixingTests}"
+                disabled
                 @click="${() => this.triggerAutoFix()}"
               >
                 <span class="material-symbols-outlined text-base ${this.isFixingTests ? 'animate-spin' : ''}">
                   ${this.isFixingTests ? 'refresh' : 'auto_fix_high'}
                 </span>
-                ${this.isFixingTests ? 'Applying Auto-Fixes...' : '1-Click Auto-Fix (Zero-Warning)'}
+                ${'Auto-Fix Disabled (Approval Workflow Required)'}
               </button>
 
               <button
