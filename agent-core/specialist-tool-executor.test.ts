@@ -107,7 +107,7 @@ test("emits redacted success audit evidence without arguments or returned conten
     registry(),
     async () => ({ content: "private file contents must not enter the audit record" }),
     32_000,
-    event => events.push(event as unknown as Record<string, unknown>),
+    event => { events.push(event as unknown as Record<string, unknown>); },
   );
   await executor.execute("developer", "founder-1", "workspace.read_file", { path: "private.txt" });
   assert.equal(events.length, 1);
