@@ -59,10 +59,12 @@ export class CEOOrchestrator {
     try { parsed = JSON.parse(rawPlan); }
     catch { throw new CEOPlanValidationError("CEO returned invalid dispatch JSON; no specialist was started."); }
     const dispatch = validateCEODispatchPlan(parsed, objective);
-    const findings: SpecialistResult[] = [];
-    for (const assignment of dispatch.assignments) {
-      findings.push(await this.specialists.run({ ...assignment, context }));
-    }
+    // Dispatch the bounded (maximum four) specialist set concurrently to reduce
+    // end-to-end latency. Promise.all preserves assignment order in the synthesis
+    // payload even when individual specialists finish in a different order.
+    const findings = await Promise.all(
+      dispatch.assignments.map(assignment => this.specialists.run({ ...assignment, context })),
+    );
     const summary = await this.adapter.synthesize({ objective, findings, context });
     if (!summary.trim() || summary.length > 16000) throw new Error("CEO synthesis is empty or exceeds the response limit.");
     return {
