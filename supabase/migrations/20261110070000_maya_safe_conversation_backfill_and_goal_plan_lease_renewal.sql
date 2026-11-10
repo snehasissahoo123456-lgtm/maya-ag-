@@ -49,7 +49,7 @@ begin
         nullif(legacy_message->>'content', ''),
         nullif(legacy_message->>'text', ''),
         (
-          select nullif(string_agg(part->>'text', '' order by part.ordinality), '')
+          select nullif(string_agg(part.value->>'text', '' order by part.ordinality), '')
           from jsonb_array_elements(
             case when jsonb_typeof(legacy_message->'parts') = 'array'
               then legacy_message->'parts' else '[]'::jsonb end
