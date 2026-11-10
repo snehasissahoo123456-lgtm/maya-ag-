@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { createServer } from "node:net";
+import { createHash } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -182,6 +183,7 @@ test("real HTTP worker replaces an existing workspace file only after exact Foun
         capability: "workspace.write_file",
         path: relativePath,
         content: replacement,
+        expectedSha256: createHash("sha256").update("Original file contents", "utf8").digest("hex"),
       }),
     });
     assert.equal(created.status, 201);
