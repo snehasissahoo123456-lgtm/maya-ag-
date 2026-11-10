@@ -7,14 +7,14 @@ export interface CEOPlannerAdapter {
   synthesize(input: { objective: string; findings: SpecialistResult[]; context: string }): Promise<string>;
 }
 export interface SpecialistRunner {
-  run(input: { agentId: string; task: string; context?: string }): Promise<SpecialistResult>;
+  run(input: { agentId: string; task: string; context?: string; founderId?: string }): Promise<SpecialistResult>;
 }
 export interface CEOOrchestrationResult {
   objective: string;
   summary: string;
   assignments: SpecialistAssignment[];
   findings: SpecialistResult[];
-  executionMode: "multi_specialist_reasoning_only";
+  executionMode: "multi_specialist_reasoning_only" | "multi_specialist_bounded_read_only";
   completedAt: string;
 }
 export class CEOPlanValidationError extends Error {
@@ -47,7 +47,7 @@ export function validateCEODispatchPlan(input: unknown, objective: string): CEOD
 export class CEOOrchestrator {
   constructor(private readonly adapter: CEOPlannerAdapter, private readonly specialists: SpecialistRunner) {}
 
-  async run(input: { objective: string; context?: string }): Promise<CEOOrchestrationResult> {
+  async run(input: { objective: string; context?: string; founderId?: string }): Promise<CEOOrchestrationResult> {
     const objective = input.objective?.trim() || "";
     if (!objective || objective.length > 2000) throw new Error("Objective must contain 1–2,000 characters.");
     const context = typeof input.context === "string" ? input.context.slice(0, 8000) : "";
@@ -63,7 +63,7 @@ export class CEOOrchestrator {
     // end-to-end latency. Promise.all preserves assignment order in the synthesis
     // payload even when individual specialists finish in a different order.
     const findings = await Promise.all(
-      dispatch.assignments.map(assignment => this.specialists.run({ ...assignment, context })),
+      dispatch.assignments.map(assignment => this.specialists.run({ ...assignment, context, founderId: input.founderId })),
     );
     const summary = await this.adapter.synthesize({ objective, findings, context });
     if (!summary.trim() || summary.length > 16000) throw new Error("CEO synthesis is empty or exceeds the response limit.");
@@ -72,7 +72,7 @@ export class CEOOrchestrator {
       summary: summary.trim(),
       assignments: dispatch.assignments,
       findings,
-      executionMode: "multi_specialist_reasoning_only",
+      executionMode: findings.some(item => item.executionMode === "bounded_read_only_tools") ? "multi_specialist_bounded_read_only" : "multi_specialist_reasoning_only",
       completedAt: new Date().toISOString(),
     };
   }
