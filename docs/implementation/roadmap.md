@@ -15,20 +15,21 @@ Status: The development stack through PR #45 has passed CI, but it is not integr
 
 ## Phase 1 — Make the existing server safe
 - [x] Dashboard only reports backend health and Founder-scoped task records returned by the server; no simulated integration or 24/7 worker status is shown.
-- Integrate verified Google OAuth/SMS identity providers, secure session issuance, HttpOnly cookie lifecycle, CSRF/origin controls, and revocation.
-- Complete route/tool authorization mapping and add security acceptance tests.
+- [x] Persist Founder sessions as SHA-256 token hashes, issue HttpOnly cookies, revoke sessions on logout, and enforce same-origin Origin/Referer checks on cookie-authenticated mutations and live WebSocket upgrades.
+- [ ] Integrate verified Google OAuth/SMS identity providers; these providers remain disabled until configured.
+- [ ] Complete route/tool authorization mapping and security acceptance tests; login throttling is currently single-process/in-memory.
 - [x] Add a single-instance file-backed task repository for the new control plane, with serialized writes, corrupt-store fail-closed behavior, interrupted-task recovery, and rollback when durable writes fail. This is not a multi-instance database.
-- [x] Persist the exact-action approval ledger to a single-instance file store and expose authenticated Founder request/decision endpoints. No high-risk capability is enabled.
+- [x] Persist the exact-action approval ledger to a single-instance file store and expose authenticated Founder request/decision endpoints. File replacement and fixed validation tasks are high-risk and require exact Founder approval; specialists cannot execute them directly.
 - [x] Implement one read-only workspace-file execution adapter with path containment, secret-file blocking, size limit, and SHA-256 evidence.
 - Extend workspace containment to every future file and command adapter; unrestricted shell execution remains disabled.
-Exit gate: partial evidence exists for the task API, read-only capability and opt-in single-process read-only worker. Still required: comprehensive route/tool authorization tests, CSRF/origin protection, durable sessions/audit, and security acceptance testing. No privileged action or general-purpose execution worker is enabled.
+Exit gate: sessions, CSRF/origin checks, approval ledger and selected durable audit events are implemented and CI-tested. Still required: full route/tool review, live database validation, rate-limit sharing, penetration/security acceptance and multi-instance recovery. Only narrowly allowlisted approved writes and fixed validation commands are enabled; arbitrary shell and general desktop control remain disabled.
 
 ## Phase 2 — Cloud control plane
 - Device registry and device-bound credentials.
-- [x] Add an opt-in, single-process worker that polls Founder-scoped queued tasks and executes only the allowlisted low-risk read-only workspace capability; expose worker status in health checks.
+- [x] Add an opt-in worker that polls Founder-scoped queued tasks; it executes bounded reads and only exact-approval high-risk file replacement, local-device writes and fixed validation tasks. Worker status is exposed in health checks.
 - Durable transactional task queue, multi-instance scheduler, bounded retry/backoff, durable event stream, and observability.
 - AI provider adapter with server-side secrets and configurable quotas.
-- [x] Specialist agent manifests and bounded delegation policy (templates only; live model-backed agents and persistent budgets remain future work).
+- [x] Gemini-backed specialist agents, CEO parallel dispatch and bounded delegation policy; role-scoped reads and Developer approval-gated proposals are live in code. Persistent budgets and full agent execution traces remain future work.
 Exit gate: two devices can share tasks securely; retries and restarts preserve state; approvals are bound to exact actions.
 
 ## Phase 3 — PC and VS Code runtime
@@ -50,7 +51,8 @@ Exit gate: installable and signed test APK; reconnect, revocation, permission de
 Exit gate: documented provisioning and recovery test on dedicated hardware.
 
 ## Phase 6 — Company-style multi-agent operations
-- Specialist departments (research, engineering, QA, content, operations) defined as bounded agent templates.
+- [x] Dedicated Developer workspace with exact-hash approval-gated file proposals and fixed validation tasks.
+- [ ] Build separate functional Research, QA, Business, Real Estate, Hospitality, Content/Media and Finance departments; role names alone do not count as implemented workflows.
 - Parent-child delegation with budgets, task scopes, provenance, and human approval boundaries.
 - Daily research/learning proposals and monthly controlled release reviews.
 Exit gate: sub-agents produce measurable artifacts and test evidence; they cannot create privileges, spend money, publish, or deploy outside policy.
@@ -115,14 +117,30 @@ This module is intentionally described as file-backed persistence, not a product
 - [x] Expose Founder-authenticated specialist registry and dedicated UI
 - [x] Run bounded Gemini reasoning calls using registered role manifests
 - [x] Inject relevant saved notes as untrusted reference context
-- [x] Provide only manifest-scoped low-risk workspace reads and Founder-scoped memory search
+- [x] Provide manifest-scoped workspace reads and Founder-scoped memory search
+- [x] Allow Developer to queue exact-SHA file replacements as high-risk tasks; verify the current file hash before enqueue and again before atomic replacement
+- [x] Require separate Founder approval for file replacements and fixed lint/test/build validation; direct test routes now queue instead of executing
 - [x] Persist redacted specialist tool outcomes through the append-only audit repository
-- [x] Block specialist writes, shell, arbitrary browser/device actions and recursive delegation
-- [ ] Add exact-action Founder-approved write adapters and independent effect verification
+- [x] Block direct specialist writes, arbitrary shell, browser/device actions and recursive delegation
+- [ ] Add isolated Git worktrees, patch diff/rollback and sandboxed validation
 - [ ] Add per-agent budgets, durable work queues, cancellation and global concurrency limits
 - [ ] Link each tool event to its CEO run, assignment and task trace
 
 
+
+## Developer department — first approval-gated workflow
+
+- [x] Add a dedicated Developer page with a run panel, proposal queue and Founder approval controls
+- [x] Give Developer role-scoped workspace reads that return file SHA-256 evidence
+- [x] Queue existing-file replacement proposals as high-risk `workspace.write_file` tasks; never write from the specialist tool call
+- [x] Verify the expected file SHA before queueing and immediately before atomic replacement; reject stale proposals, symlinks and secret paths
+- [x] Queue only the fixed `bun run lint`, `bun run test`, `bun run build` suite as a high-risk validation task requiring separate Founder approval
+- [x] Route the legacy chat and Tests-page validation actions through the same approval queue; no direct unapproved test execution
+- [ ] Add isolated Git worktrees, unified diff review, rollback and recovery
+- [ ] Add sandboxed test execution, resource limits and test-log retention
+- [ ] Enroll local Windows workspaces and connect VS Code through the paired device bridge
+
+The current Developer workflow operates only on the Maya server checkout. It does not yet modify arbitrary PC workspaces, create new files, run arbitrary commands, deploy or merge code. Validation executes fixed repository scripts only after Founder approval; it is not yet isolated in a worktree or container sandbox.
 
 ## CEO specialist orchestration — development branch
 
