@@ -6,7 +6,7 @@ import express from "express";
 import http from "http";
 import path from "path";
 import fs from "fs";
-import { spawn } from "child_process";
+import { execSync } from "child_process";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI } from "@google/genai";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
