@@ -764,6 +764,23 @@ const specialistToolExecutor = new SpecialistToolExecutor(
     if (capability === "specialist.memory.search") return executeAgentTool("memory_search", args, context.founderId);
     throw new Error("Specialist capability is not connected to an execution handler.");
   },
+  32_000,
+  (event) => {
+    currentAuditLogs.unshift({
+      id: "specialist-tool-" + randomTaskId(),
+      toolName: event.capability,
+      params: { agentId: event.agentId, founderId: event.founderId, outcome: event.status },
+      status: event.status === "success" ? "success" : "failed",
+      result: {
+        resultBytes: event.resultBytes,
+        resultSha256: event.resultSha256,
+        errorCode: event.errorCode,
+      },
+      timestamp: event.completedAt,
+      durationMs: event.durationMs,
+    });
+    currentAuditLogs = currentAuditLogs.slice(0, 500);
+  },
 );
 const specialistRuntime = new SpecialistRuntime({
   generate: async ({ systemInstruction, task, context, maxOutputTokens, tools, executeTool }) => {
