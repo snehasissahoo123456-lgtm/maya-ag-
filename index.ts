@@ -532,6 +532,7 @@ You can use this cockpit to inspect the current development status and configure
             if (msg.suites) this.testSuites = msg.suites;
             if (msg.durationMs) this.lastBuildDurationMs = msg.durationMs;
             if (msg.timestamp) this.lastBuildTimestamp = msg.timestamp;
+            if (msg.data) this.lastTestNotification = String(msg.data);
             if (msg.status === 'building') {
               this.lastTestNotification = msg.data || `Workspace change observed (${this.lastModifiedFile || 'source'}). No commands were executed.`;
             }
@@ -555,16 +556,6 @@ You can use this cockpit to inspect the current development status and configure
               this.lastTestNotification = `⚡ Live Watch: Build clean in ${msg.durationMs}ms (Health: ${health}%). Zero warnings!`;
             } else {
               this.lastTestNotification = `❌ Live Watch: Build failed (${msg.errorCount ?? 1} errors). Check console stream below.`;
-            }
-          } else if (msg.type === 'auto_fix_applied') {
-            if (msg.autoFixes) {
-              this.autoFixRecords = msg.autoFixes;
-            }
-            if (msg.file) {
-              this.lastAutoFixToast = `⚡ Auto-healed TypeScript issue in ${msg.file}`;
-              setTimeout(() => {
-                this.lastAutoFixToast = null;
-              }, 6000);
             }
           }
         } catch (_e) {}
@@ -3532,7 +3523,7 @@ Status: Ready to build upon Founder "go ahead".`;
               <button
                 class="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-semibold flex items-center gap-1.5 border border-slate-700 transition-colors"
                 @click="${() => this.toggleWatcherMode()}"
-                title="${this.watcherActive ? 'Pause instant watching' : 'Resume instant watching'}"
+                title="${this.watcherActive ? 'Pause passive file monitoring' : 'Resume passive file monitoring'}"
               >
                 <span class="material-symbols-outlined text-sm ${this.watcherActive ? 'text-emerald-400' : 'text-slate-400'}">
                   ${this.watcherActive ? 'pause_circle' : 'play_circle'}
