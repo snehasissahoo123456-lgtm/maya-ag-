@@ -161,6 +161,8 @@ You can use this cockpit to inspect the current development status and configure
   @state() accessor tasks: ActionEngineTask[] = [];
   @state() accessor memories: MemoryEntry[] = [];
   @state() accessor auditLogs: ToolExecutionRecord[] = [];
+  @state() accessor durableAuditEvents: any[] = [];
+  @state() accessor durableAuditStatus: "loading" | "available" | "unauthenticated" | "unavailable" = "loading";
   @state() accessor connectedServices = {
     gemini_live: false,
     local_bridge: false,
@@ -725,6 +727,21 @@ You can use this cockpit to inspect the current development status and configure
       }
     } catch (e) {
       console.warn('Could not fetch server state:', e);
+    }
+    try {
+      const response = await fetch('/api/audit-events?limit=100', { credentials: 'same-origin' });
+      if (response.status === 401) {
+        this.durableAuditStatus = 'unauthenticated';
+        this.durableAuditEvents = [];
+      } else if (!response.ok) {
+        this.durableAuditStatus = 'unavailable';
+      } else {
+        const data = await response.json();
+        this.durableAuditEvents = Array.isArray(data.events) ? data.events : [];
+        this.durableAuditStatus = 'available';
+      }
+    } catch {
+      this.durableAuditStatus = 'unavailable';
     }
   }
 
@@ -3111,6 +3128,24 @@ Status: Ready to build upon Founder "go ahead".`;
                       </tr>
                     `,
                   )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+          <div class="bg-slate-900/80 border border-slate-800 rounded-2xl p-5 mt-4">
+            <h3 class="text-sm font-bold text-white mb-3 flex items-center justify-between">
+              <span>Persistent Founder Audit Events</span>
+              <span class="text-xs font-mono text-slate-400">${this.durableAuditStatus === 'available' ? this.durableAuditEvents.length + ' stored events' : this.durableAuditStatus}</span>
+            </h3>
+            <p class="text-[11px] text-slate-500 mb-3">Append-only events loaded from the configured audit repository. Specialist tool arguments and returned content are not stored.</p>
+            <div class="overflow-x-auto">
+              <table class="w-full text-left text-xs font-mono">
+                <thead><tr class="border-b border-slate-800 text-slate-400"><th class="pb-2">Event</th><th class="pb-2">Capability</th><th class="pb-2">Actor</th><th class="pb-2">Time</th></tr></thead>
+                <tbody class="divide-y divide-slate-800/60">
+                  ${this.durableAuditEvents.map((event: any) => html`<tr class="text-slate-300"><td class="py-2 text-indigo-300">${event.type}</td><td class="py-2">${event.capability}</td><td class="py-2 text-slate-400">${event.actorRole}</td><td class="py-2 text-slate-500">${new Date(event.occurredAt).toLocaleString()}</td></tr>`)}
+                  ${this.durableAuditStatus === 'available' && this.durableAuditEvents.length === 0 ? html`<tr><td colspan="4" class="py-4 text-center text-slate-500">No durable audit events recorded yet.</td></tr>` : ''}
+                  ${this.durableAuditStatus === 'unauthenticated' ? html`<tr><td colspan="4" class="py-4 text-center text-slate-500">Sign in as Founder to view audit events.</td></tr>` : ''}
+                  ${this.durableAuditStatus === 'unavailable' ? html`<tr><td colspan="4" class="py-4 text-center text-rose-300">Durable audit repository is unavailable.</td></tr>` : ''}
                 </tbody>
               </table>
             </div>
