@@ -6,7 +6,8 @@ create table if not exists public.maya_audit_events (
   actor_role text not null,
   event_type text not null check (event_type in (
     'task.enqueued', 'task.approval_requested', 'task.approval_decided',
-    'task.execution_started', 'task.execution_verified', 'task.execution_failed'
+    'task.execution_started', 'task.execution_verified', 'task.execution_failed',
+    'specialist.tool_succeeded', 'specialist.tool_denied', 'specialist.tool_failed'
   )),
   task_id text not null,
   capability text not null,
