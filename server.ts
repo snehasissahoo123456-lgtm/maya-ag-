@@ -712,7 +712,14 @@ function createFounderChatToolExecutor(founderId: string) {
   return createChatToolExecutor((name, args) => executeAgentTool(name, args, founderId));
 }
 
-const developerProposalService = new DeveloperProposalService(taskOrchestrator);
+const developerProposalService = new DeveloperProposalService(taskOrchestrator, relativePath => {
+  const file = resolveWorkspacePath(relativePath);
+  if (isSensitiveWorkspacePath(file)) throw new Error("Reading secrets and credential files is blocked.");
+  const stat = fs.statSync(file);
+  if (!stat.isFile() || stat.size > 100_000) throw new Error("Developer proposals require an existing regular text file no larger than 100 KB.");
+  const content = fs.readFileSync(file, "utf8");
+  return createHash("sha256").update(content, "utf8").digest("hex");
+});
 const specialistCapabilityRegistry = new CapabilityRegistry();
 specialistCapabilityRegistry.register({
   name: "specialist.workspace.list_dir",
