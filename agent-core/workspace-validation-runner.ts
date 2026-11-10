@@ -31,8 +31,22 @@ async function runOne(
     };
     let child: ChildProcessWithoutNullStreams;
     try {
-      child = spawnProcess("bun", ["run", script], {
+      const inherited = process.env;
+    const env = Object.fromEntries(Object.entries({
+      PATH: inherited.PATH || inherited.Path,
+      HOME: inherited.HOME,
+      TMPDIR: inherited.TMPDIR,
+      TEMP: inherited.TEMP,
+      TMP: inherited.TMP,
+      SystemRoot: inherited.SystemRoot,
+      ComSpec: inherited.ComSpec,
+      PATHEXT: inherited.PATHEXT,
+      CI: "true",
+      NODE_ENV: "test",
+    }).filter((entry): entry is [string, string] => typeof entry[1] === "string"));
+    child = spawnProcess("bun", ["run", script], {
         cwd,
+        env,
         shell: false,
         windowsHide: true,
         stdio: ["ignore", "pipe", "pipe"],
