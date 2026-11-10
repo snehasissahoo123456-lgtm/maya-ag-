@@ -76,7 +76,6 @@ import {
   ActionEngineTask,
   MemoryEntry,
   ToolExecutionRecord,
-  INITIAL_TEST_SUITES,
   TestSuite,
   WatcherStatus,
   BuildLogEntry,
@@ -115,7 +114,7 @@ async function getFounderMemories(founderId: string): Promise<MemoryEntry[]> {
   currentMemories = await memoryRepository.list(founderId);
   return currentMemories;
 }
-let currentTestSuites: TestSuite[] = JSON.parse(JSON.stringify(INITIAL_TEST_SUITES));
+let currentTestSuites: TestSuite[] = [];
 for (const suite of currentTestSuites) {
   suite.status = "warning";
   suite.passedCount = 0;
