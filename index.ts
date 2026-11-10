@@ -3368,7 +3368,7 @@ Status: Ready to build upon Founder "go ahead".`;
               <div class="flex items-center gap-2">
                 <span class="material-symbols-outlined text-indigo-400 text-2xl">verified</span>
                 <h2 class="text-xl font-bold text-white tracking-tight">Full Diagnostic Test Suite & Verification</h2>
-                <span class="px-2.5 py-0.5 rounded-full text-xs font-bold font-mono bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                <span class="px-2.5 py-0.5 rounded-full text-xs font-bold font-mono ${hasValidationResults ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30' : 'bg-slate-700/30 text-slate-300 border-slate-600/40'}">
                   ${hasValidationResults ? healthIndex + '% HEALTH' : 'NO RUN RECORDED'}
                 </span>
               </div>
@@ -3453,11 +3453,8 @@ Status: Ready to build upon Founder "go ahead".`;
             </div>
 
             <div class="bg-slate-950/60 border border-indigo-900/40 rounded-xl p-3 col-span-2 sm:col-span-1">
-              <span class="text-[11px] text-indigo-400 uppercase tracking-wider font-semibold block">Zero-Warning Guard</span>
-              <span class="text-xs font-semibold text-emerald-400 mt-2 block flex items-center gap-1">
-                <span class="material-symbols-outlined text-sm">check_circle</span>
-                Enforced by Maya
-              </span>
+              <span class="text-[11px] text-indigo-400 uppercase tracking-wider font-semibold block">Validation Evidence</span>
+              <span class="text-xs font-semibold text-slate-400 mt-2 block">${hasValidationResults ? "Recorded" : "No run recorded"}</span>
             </div>
           </div>
         </div>
@@ -4209,7 +4206,7 @@ Status: Ready to build upon Founder "go ahead".`;
             </div>
 
             <div class="bg-slate-950/60 border border-indigo-900/40 rounded-xl p-3">
-              <span class="text-[11px] text-indigo-400 uppercase tracking-wider font-semibold block">Test Sheet Suite 6</span>
+              <span class="text-[11px] text-indigo-400 uppercase tracking-wider font-semibold block">Validation Status</span>
               <span class="text-xs font-semibold text-slate-400 mt-2 block">No validation run recorded</span>
             </div>
           </div>
