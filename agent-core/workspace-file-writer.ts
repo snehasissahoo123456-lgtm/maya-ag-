@@ -22,7 +22,8 @@ function resolveExistingWorkspaceFile(rootPath: string, requestedPath: string): 
     throw new Error("Workspace writes require a normalized relative path without traversal segments.");
   }
   const root = fs.realpathSync(rootPath);
-  const lexical = path.resolve(root, requestedPath);
+  const normalizedPath = requestedPath.replace(/[\\/]+/g, path.sep);
+  const lexical = path.resolve(root, normalizedPath);
   const relative = path.relative(root, lexical);
   if (!relative || relative.startsWith("..") || path.isAbsolute(relative)) {
     throw new Error("Path escapes the enrolled workspace or targets its root.");
