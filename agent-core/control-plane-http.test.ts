@@ -59,6 +59,8 @@ test("real HTTP control-plane routes enforce Founder auth and execute only the r
     await waitForServer(baseUrl, child);
     const unauthenticated = await fetch(baseUrl + "/api/control-plane/tasks");
     assert.equal(unauthenticated.status, 401);
+    const unauthenticatedConversations = await fetch(baseUrl + "/api/conversations");
+    assert.equal(unauthenticatedConversations.status, 401);
 
     const login = await fetch(baseUrl + "/api/auth/founder-login", {
       method: "POST",
@@ -69,9 +71,43 @@ test("real HTTP control-plane routes enforce Founder auth and execute only the r
     const cookie = login.headers.get("set-cookie")?.split(";")[0];
     assert.ok(cookie, "Founder login should set an HttpOnly session cookie");
 
-    const created = await fetch(baseUrl + "/api/control-plane/tasks", {
+    const csrfBlocked = await fetch(baseUrl + "/api/control-plane/tasks", {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie, origin: "https://attacker.invalid" },
+      body: JSON.stringify({ instruction: "This must be blocked", path: "README.md" }),
+    });
+    assert.equal(csrfBlocked.status, 403, "cross-origin cookie-authenticated mutations must be rejected");
+
+    const missingOriginBlocked = await fetch(baseUrl + "/api/control-plane/tasks", {
       method: "POST",
       headers: { "content-type": "application/json", cookie },
+      body: JSON.stringify({ instruction: "This must also be blocked", path: "README.md" }),
+    });
+    assert.equal(missingOriginBlocked.status, 403, "cookie-authenticated mutations without an origin must be rejected");
+
+    const logoutCsrfBlocked = await fetch(baseUrl + "/api/auth/logout", {
+      method: "POST",
+      headers: { cookie, origin: "https://attacker.invalid" },
+    });
+    assert.equal(logoutCsrfBlocked.status, 403, "cross-origin logout requests must be rejected");
+
+    const offlineChat = await fetch(baseUrl + "/api/chat-message", {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie, origin: baseUrl },
+      body: JSON.stringify({ message: "verify chat session id" }),
+    });
+    assert.equal(offlineChat.status, 200);
+    const offlineChatBody = await offlineChat.json() as any;
+    assert.match(offlineChatBody.sessionId, /^conversation-[a-f0-9]+$/);
+    const conversationList = await fetch(baseUrl + "/api/conversations", { headers: { cookie } });
+    assert.equal(conversationList.status, 200);
+    assert.deepEqual((await conversationList.json() as any).conversations, []);
+    const unknownConversation = await fetch(baseUrl + "/api/conversations/not-found", { headers: { cookie } });
+    assert.equal(unknownConversation.status, 404);
+
+    const created = await fetch(baseUrl + "/api/control-plane/tasks", {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie, origin: baseUrl },
       body: JSON.stringify({ instruction: "Read the project README for verification", path: "README.md" }),
     });
     assert.equal(created.status, 201);
@@ -85,7 +121,7 @@ test("real HTTP control-plane routes enforce Founder auth and execute only the r
     assert.ok(listBody.tasks.some((item: any) => item.task.id === taskId));
 
     const executed = await fetch(baseUrl + `/api/control-plane/tasks/${encodeURIComponent(taskId)}/execute`, {
-      method: "POST", headers: { cookie },
+      method: "POST", headers: { cookie, origin: baseUrl },
     });
     assert.equal(executed.status, 200);
     const executedBody = await executed.json() as any;
@@ -94,7 +130,7 @@ test("real HTTP control-plane routes enforce Founder auth and execute only the r
     assert.equal(executedBody.result.path, "README.md");
 
     const repeated = await fetch(baseUrl + `/api/control-plane/tasks/${encodeURIComponent(taskId)}/execute`, {
-      method: "POST", headers: { cookie },
+      method: "POST", headers: { cookie, origin: baseUrl },
     });
     assert.equal(repeated.status, 409, "Completed tasks must not execute a second time");
   } catch (error) {

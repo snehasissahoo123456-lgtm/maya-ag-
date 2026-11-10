@@ -4,10 +4,11 @@ on:
   push:
     branches:
       - main
-      - maya/foundation-architecture
+      - 'maya/**'
   pull_request:
     branches:
       - main
+      - 'maya/**'
 
 permissions:
   contents: read

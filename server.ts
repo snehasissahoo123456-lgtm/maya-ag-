@@ -102,17 +102,23 @@ for (const suite of currentTestSuites) {
     assertion.message = "Not executed in this server process. Run the real validation command to obtain evidence.";
   }
 }
-let currentAuditLogs: ToolExecutionRecord[] = [
-  {
-    id: "init-audit-1",
-    toolName: "system_info",
-    params: {},
-    status: "success",
-    result: { status: "Maya prototype server started; agent capabilities are not yet verified.", pid: process.pid },
-    timestamp: new Date().toISOString(),
-    durationMs: 12,
-  },
-];
+const auditLogStore = new FileAuditLogStore<ToolExecutionRecord>();
+let currentAuditLogs: ToolExecutionRecord[] = auditLogStore.list(500);
+
+function recordAudit(record: ToolExecutionRecord): void {
+  auditLogStore.append(record);
+  currentAuditLogs = auditLogStore.list(500);
+}
+
+recordAudit({
+  id: "server-start-" + Date.now().toString(36),
+  toolName: "system_info",
+  params: {},
+  status: "success",
+  result: { status: "Maya server started; agent capabilities remain limited to explicitly enabled adapters.", pid: process.pid },
+  timestamp: new Date().toISOString(),
+  durationMs: 0,
+});
 
 import { WatcherService } from "./watcherService.ts";
 import { AuthService } from "./authService.ts";
@@ -123,8 +129,12 @@ import { CapabilityRegistry } from "./agent-core/capability-registry.ts";
 import { ApprovalLedger } from "./agent-core/approval-ledger.ts";
 import { TaskOrchestrator } from "./agent-core/task-orchestrator.ts";
 import { FileTaskRepository } from "./agent-core/file-task-repository.ts";
+import { FileAuditLogStore } from "./agent-core/audit-log-store.ts";
+import { createConversationRepository } from "./agent-core/create-conversation-repository.ts";
+import { normalizeIncomingGeminiHistory, restoreGeminiHistory, storeGeminiHistory } from "./agent-core/conversation-history.ts";
 
 const taskRepository = new FileTaskRepository();
+const conversationRepository = createConversationRepository();
 const taskCapabilityRegistry = new CapabilityRegistry();
 taskCapabilityRegistry.register({
   name: "workspace.read_file",
@@ -255,7 +265,54 @@ function randomTaskId(): string {
   return randomBytes(8).toString("hex");
 }
 
-const authService = new AuthService();
+function resolveConversationId(value: unknown): string | null {
+  if (value === undefined || value === null || value === "") return "conversation-" + randomTaskId();
+  if (typeof value !== "string") return null;
+  const id = value.trim();
+  return id.length > 0 && id.length <= 128 ? id : null;
+}
+
+async function loadFounderChat(
+  ai: any,
+  founderId: string,
+  conversationId: string,
+  model: string | undefined,
+  config: any,
+  incomingHistory: unknown,
+): Promise<any> {
+  const cacheKey = `${founderId}:${conversationId}`;
+  const cached = chats.get(cacheKey);
+  if (cached) return cached;
+
+  const saved = await conversationRepository.get(conversationId, founderId);
+  const history = saved
+    ? restoreGeminiHistory(saved.messages)
+    : normalizeIncomingGeminiHistory(incomingHistory);
+  const chat = ai.chats.create({ model: resolveModel(model), config, history });
+  chats.set(cacheKey, chat);
+  if (chats.size > 1000) {
+    const oldestKey = chats.keys().next().value;
+    if (oldestKey) chats.delete(oldestKey);
+  }
+  return chat;
+}
+
+async function persistFounderConversation(chat: any, founderId: string, conversationId: string): Promise<void> {
+  const now = new Date().toISOString();
+  const existing = await conversationRepository.get(conversationId, founderId);
+  const messages = storeGeminiHistory(chat.getHistory(), existing?.messages || [], conversationId, now);
+  const firstUserMessage = messages.find(message => message.role === "user" && message.content);
+  await conversationRepository.upsert({
+    id: conversationId,
+    founderId,
+    title: existing?.title || firstUserMessage?.content.slice(0, 80) || "New conversation",
+    messages,
+    createdAt: existing?.createdAt || now,
+    updatedAt: now,
+  });
+}
+
+const authService = new AuthService(path.join(process.env.MAYA_DATA_DIR || path.resolve(process.cwd(), "..", "maya-data"), "sessions.json"));
 const platformService = new PlatformService();
 
 const watcherService = new WatcherService({
@@ -264,7 +321,7 @@ const watcherService = new WatcherService({
     currentTestSuites = suites;
   },
   onAuditLog: (record) => {
-    currentAuditLogs.unshift(record);
+    recordAudit(record);
   },
 });
 watcherService.start();
@@ -303,6 +360,33 @@ function handlePersonaCommands(rawMsg: string): string | null {
   return null;
 }
 
+function isAllowedRequestOrigin(req: any): boolean {
+  const rawOrigin = typeof req.headers.origin === "string" && req.headers.origin
+    ? req.headers.origin
+    : typeof req.headers.referer === "string" ? req.headers.referer : "";
+  if (!rawOrigin || rawOrigin === "null") return false;
+
+  let sourceOrigin: string;
+  try {
+    const parsed = new URL(rawOrigin);
+    if (parsed.protocol !== "https:" && parsed.protocol !== "http:") return false;
+    sourceOrigin = parsed.origin;
+  } catch {
+    return false;
+  }
+
+  const configuredOrigins = (process.env.MAYA_ALLOWED_ORIGINS || "")
+    .split(",")
+    .map(value => value.trim())
+    .filter(Boolean)
+    .flatMap(value => {
+      try { return [new URL(value).origin]; } catch { return []; }
+    });
+  const requestHost = typeof req.get === "function" ? req.get("host") : req.headers.host;
+  const requestOrigin = requestHost ? `${req.protocol}://${requestHost}` : "";
+  return sourceOrigin === requestOrigin || configuredOrigins.includes(sourceOrigin);
+}
+
 async function startServer() {
   const app = express();
   const server = http.createServer(app);
@@ -333,10 +417,18 @@ async function startServer() {
     "/auth/logout",
   ]);
   app.use("/api", (req, res, next) => {
-    if (publicApiPaths.has(req.path)) return next();
     const authorization = req.headers.authorization || "";
-    const bearer = authorization.match(/^Bearer\s+(.+)$/i)?.[1];
+    const bearer = authorization.match(/^Bearer\\s+(.+)$/i)?.[1];
     const cookieToken = (req.headers.cookie || "").split(";").map((part) => part.trim()).find((part) => part.startsWith("maya_session="))?.slice("maya_session=".length);
+    const mutatingMethod = ["POST", "PUT", "PATCH", "DELETE"].includes(req.method);
+
+    // Cookie-authenticated state changes require a same-origin browser request.
+    // Non-browser clients should use an explicit bearer credential instead.
+    if (!bearer && cookieToken && mutatingMethod && !isAllowedRequestOrigin(req)) {
+      return res.status(403).json({ success: false, error: "Cross-origin request blocked. Send a valid same-origin Origin or Referer header." });
+    }
+    if (publicApiPaths.has(req.path)) return next();
+
     const session = authService.validateSession(bearer || cookieToken);
     if (!session) {
       return res.status(401).json({ success: false, error: "Authentication required. No verified session is active." });
@@ -487,7 +579,7 @@ async function startServer() {
       founderLoginAttempts.delete(clientKey);
       const secure = req.secure || req.headers["x-forwarded-proto"] === "https";
       res.cookie("maya_session", session.token, { httpOnly: true, secure, sameSite: "strict", path: "/", maxAge: 12 * 60 * 60 * 1000 });
-      currentAuditLogs.unshift({
+      recordAudit({
         id: "auth-founder-" + Date.now().toString(36), toolName: "auth_founder_password",
         params: { email: session.user.email }, status: "success",
         result: { user: session.user.name, role: session.user.role },
@@ -516,7 +608,7 @@ async function startServer() {
     try {
       const { phone, code, name } = req.body || {};
       const session = authService.verifyOtp(phone, code, name);
-      currentAuditLogs.unshift({
+      recordAudit({
         id: "auth-otp-" + Date.now().toString(36),
         toolName: "auth_phone_verify",
         params: { phone: session.user.phone },
@@ -557,7 +649,7 @@ async function startServer() {
 
   app.post("/api/platforms/probe-all", async (_req, res) => {
     const result = await platformService.probeAll();
-    currentAuditLogs.unshift({
+    recordAudit({
       id: "probe-all-" + Date.now().toString(36),
       toolName: "probe_all_platforms",
       params: { count: result.platforms.length },
@@ -655,7 +747,7 @@ async function startServer() {
         args: { path: filePath },
         actor,
       });
-      currentAuditLogs.unshift({
+      recordAudit({
         id: "control-task-create-" + randomTaskId(), toolName: "control_plane_task_create",
         params: { taskId: envelope.task.id, capability: envelope.capability }, status: "success",
         result: { status: envelope.task.status }, timestamp: new Date().toISOString(), durationMs: 0,
@@ -674,7 +766,7 @@ async function startServer() {
     try {
       const actor = { id: founderId, founderId, role: "founder" as const, scopes: ["workspace:read"] };
       const output = await taskOrchestrator.execute(req.params.id, actor);
-      currentAuditLogs.unshift({
+      recordAudit({
         id: "control-task-run-" + randomTaskId(), toolName: "control_plane_task_execute",
         params: { taskId: req.params.id }, status: "success",
         result: { status: output.task.status, evidence: output.task.verificationEvidence },
@@ -685,7 +777,7 @@ async function startServer() {
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       const conflict = /already in progress|not executable/i.test(message);
-      currentAuditLogs.unshift({
+      recordAudit({
         id: "control-task-error-" + randomTaskId(), toolName: "control_plane_task_execute",
         params: { taskId: req.params.id }, status: "failed",
         result: { error: message }, timestamp: new Date().toISOString(), durationMs: 0,
@@ -720,6 +812,68 @@ async function startServer() {
       return res.json({ success: true, approvalId: req.params.approvalId, status: req.body.approved ? "approved" : "rejected" });
     } catch (error) {
       return res.status(400).json({ success: false, error: error instanceof Error ? error.message : String(error) });
+    }
+  });
+
+  // Founder-scoped durable conversation APIs for chat history navigation.
+  app.get("/api/conversations", async (req, res): Promise<any> => {
+    const founderId = (req as any).authSession?.user?.id;
+    if (!founderId) return res.status(401).json({ success: false, error: "Verified Founder session required." });
+    const requestedLimit = Number.parseInt(String(req.query.limit || "50"), 10);
+    const limit = Number.isFinite(requestedLimit) ? Math.max(1, Math.min(100, requestedLimit)) : 50;
+    try {
+      const conversations = await conversationRepository.list(founderId);
+      return res.json({
+        success: true,
+        conversations: conversations.slice(0, limit).map(item => ({
+          id: item.id,
+          title: item.title,
+          createdAt: item.createdAt,
+          updatedAt: item.updatedAt,
+          messageCount: item.messages.length,
+        })),
+      });
+    } catch (error) {
+      console.error("[Maya] Conversation list failed:", error);
+      return res.status(503).json({ success: false, error: "Conversation storage is unavailable." });
+    }
+  });
+
+  app.get("/api/conversations/:id", async (req, res): Promise<any> => {
+    const founderId = (req as any).authSession?.user?.id;
+    if (!founderId) return res.status(401).json({ success: false, error: "Verified Founder session required." });
+    if (!req.params.id || req.params.id.length > 128) return res.status(400).json({ success: false, error: "Invalid conversation id." });
+    try {
+      const conversation = await conversationRepository.get(req.params.id, founderId);
+      if (!conversation) return res.status(404).json({ success: false, error: "Conversation not found." });
+      return res.json({ success: true, conversation });
+    } catch (error) {
+      console.error("[Maya] Conversation read failed:", error);
+      return res.status(503).json({ success: false, error: "Conversation storage is unavailable." });
+    }
+  });
+
+  app.delete("/api/conversations/:id", async (req, res): Promise<any> => {
+    const founderId = (req as any).authSession?.user?.id;
+    if (!founderId) return res.status(401).json({ success: false, error: "Verified Founder session required." });
+    if (!req.params.id || req.params.id.length > 128) return res.status(400).json({ success: false, error: "Invalid conversation id." });
+    try {
+      const deleted = await conversationRepository.delete(req.params.id, founderId);
+      if (!deleted) return res.status(404).json({ success: false, error: "Conversation not found." });
+      chats.delete(`${founderId}:${req.params.id}`);
+      recordAudit({
+        id: "conversation-delete-" + randomTaskId(),
+        toolName: "conversation_delete",
+        params: { conversationId: req.params.id },
+        status: "success",
+        result: { deleted: true },
+        timestamp: new Date().toISOString(),
+        durationMs: 0,
+      });
+      return res.json({ success: true, deleted: req.params.id });
+    } catch (error) {
+      console.error("[Maya] Conversation deletion failed:", error);
+      return res.status(503).json({ success: false, error: "Conversation storage is unavailable." });
     }
   });
 
@@ -779,7 +933,7 @@ async function startServer() {
       timestamp: new Date().toISOString(),
       durationMs: Date.now() - startTime,
     };
-    currentAuditLogs.unshift(logItem);
+    recordAudit(logItem);
     currentAuditLogs = currentAuditLogs.slice(0, 500);
 
     return res.status(status === "success" ? 200 : 400)
@@ -900,6 +1054,10 @@ You act as an autonomous founder-grade CTO, lead engineer, and QA engineer.
   app.post("/api/chat-message", async (req, res): Promise<any> => {
     try {
       const { sessionId, model, config: incomingConfig, history, message, msgConfig } = req.body || {};
+      const founderId = (req as any).authSession?.user?.id;
+      if (!founderId) return res.status(401).json({ error: "Verified Founder session required." });
+      const conversationId = resolveConversationId(sessionId);
+      if (!conversationId) return res.status(400).json({ error: "Conversation id must contain 1–128 characters." });
 
       // Check if this message is a persona control command
       const cmdResponse = handlePersonaCommands(String(message || ""));
@@ -907,6 +1065,7 @@ You act as an autonomous founder-grade CTO, lead engineer, and QA engineer.
         return res.json({
           text: cmdResponse,
           candidates: [{ content: { parts: [{ text: cmdResponse }] } }],
+          sessionId: conversationId,
         });
       }
 
@@ -947,21 +1106,15 @@ MULTILINGUAL & RAPID REACTION:
         return res.json({
           text: fallbackText,
           candidates: [{ content: { parts: [{ text: fallbackText }] } }],
+          sessionId: conversationId,
         });
       }
 
       const ai = new GoogleGenAI({ apiKey });
-      let chat = sessionId ? chats.get(sessionId) : undefined;
-      if (!chat) {
-        chat = ai.chats.create({
-          model: resolveModel(model),
-          config,
-          history,
-        });
-        if (sessionId) chats.set(sessionId, chat);
-      }
+      const chat = await loadFounderChat(ai, founderId, conversationId, model, config, history);
       const response = await runFunctionCallingTurn(chat, message, executeAgentTool);
-      return res.json(serializeGenerateContentResponse(response));
+      await persistFounderConversation(chat, founderId, conversationId);
+      return res.json({ ...serializeGenerateContentResponse(response), sessionId: conversationId });
     } catch (error: any) {
       console.error("[Backend] /api/chat-message error:", error);
       return res.status(500).json({ error: error.message || "Failed to send chat message." });
@@ -971,6 +1124,10 @@ MULTILINGUAL & RAPID REACTION:
   app.post("/api/chat-stream", async (req, res): Promise<any> => {
     try {
       const { sessionId, model, config: incomingConfig, history, message, msgConfig } = req.body || {};
+      const founderId = (req as any).authSession?.user?.id;
+      if (!founderId) return res.status(401).json({ error: "Verified Founder session required." });
+      const conversationId = resolveConversationId(sessionId);
+      if (!conversationId) return res.status(400).json({ error: "Conversation id must contain 1–128 characters." });
 
       // Check if this message is a persona control command
       const cmdResponse = handlePersonaCommands(String(message || ""));
@@ -978,7 +1135,7 @@ MULTILINGUAL & RAPID REACTION:
         res.setHeader("Content-Type", "application/x-ndjson");
         res.setHeader("Cache-Control", "no-cache");
         res.setHeader("Connection", "keep-alive");
-        res.write(JSON.stringify({ text: cmdResponse, candidates: [{ content: { parts: [{ text: cmdResponse }] } }] }) + "\n");
+        res.write(JSON.stringify({ text: cmdResponse, candidates: [{ content: { parts: [{ text: cmdResponse }] } }], sessionId: conversationId }) + "\n");
         res.end();
         return;
       }
@@ -1016,7 +1173,7 @@ MULTILINGUAL & RAPID REACTION:
         const words = fallbackText.split(" ");
         for (let i = 0; i < words.length; i += 3) {
           const chunk = words.slice(i, i + 3).join(" ") + " ";
-          res.write(JSON.stringify({ text: chunk, candidates: [{ content: { parts: [{ text: chunk }] } }] }) + "\n");
+          res.write(JSON.stringify({ text: chunk, candidates: [{ content: { parts: [{ text: chunk }] } }], sessionId: conversationId }) + "\n");
           await new Promise((r) => setTimeout(r, 30));
         }
         res.end();
@@ -1024,20 +1181,13 @@ MULTILINGUAL & RAPID REACTION:
       }
 
       const ai = new GoogleGenAI({ apiKey });
-      let chat = sessionId ? chats.get(sessionId) : undefined;
-      if (!chat) {
-        chat = ai.chats.create({
-          model: resolveModel(model),
-          config,
-          history,
-        });
-        if (sessionId) chats.set(sessionId, chat);
-      }
+      const chat = await loadFounderChat(ai, founderId, conversationId, model, config, history);
       const response = await runFunctionCallingTurn(chat, message, executeAgentTool);
+      await persistFounderConversation(chat, founderId, conversationId);
       res.setHeader("Content-Type", "application/x-ndjson");
       res.setHeader("Cache-Control", "no-cache");
       res.setHeader("Connection", "keep-alive");
-      res.write(JSON.stringify(serializeGenerateContentResponse(response)) + "\n");
+      res.write(JSON.stringify({ ...serializeGenerateContentResponse(response), sessionId: conversationId }) + "\n");
       res.end();
     } catch (error: any) {
       console.error("[Backend] /api/chat-stream error:", error);
