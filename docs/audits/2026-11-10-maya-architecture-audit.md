@@ -18,7 +18,7 @@ It is **not yet a fully autonomous multi-department operator and is not release-
 - PRs #34, #35 and #38–#45 are merged into stacked development branches, not into `main`.
 - PRs #2–#33 remain open as 32 stacked draft pull requests. They are not part of the default branch.
 - GitHub compare reported the final development head 72 commits behind `main`. The development stack therefore cannot be treated as a safe release candidate until the histories and overlapping server/database files are reconciled.
-- PR #43, #44 and #45 passed their latest full CI runs. The latest PR #44 run completed successfully. PR #45's typecheck, PowerShell validation, tests, production build, Compose validation and production image all passed.
+- PR #43, #44 and #45 passed their latest full CI runs. PR #46's latest head (`3ff282c`) also passed typecheck, PowerShell validation, unit/integration tests, production build, Compose validation and production image. PR #46 remains open and draft; it has not been merged.
 - Among open PRs #2–#33, most latest recorded runs passed. PRs #5, #9, #10, #13 and #23 had no workflow run for the current head in the queried run history. PRs #7 and #12 failed during Bun setup before typecheck or tests, so those failures do not establish a code regression.
 - The normal CI checks TypeScript, tests, build, Windows PowerShell scripts, Compose configuration and the production image. It does **not** execute the Supabase SQL migrations against PostgreSQL.
 
@@ -32,7 +32,7 @@ The development stack had diverged from the already-merged main security baselin
 - Main rejected cookie-authenticated state-changing REST requests without a same-origin `Origin`/`Referer`; the development stack lacked this CSRF check.
 - The live authenticated WebSocket relay also needed explicit origin validation.
 
-The hardening branch restores persistent hashed sessions, adds cookie-mutation origin checks, validates the live WebSocket origin and adds HTTP integration assertions for cross-origin and missing-origin requests. These changes remain subject to CI. File-backed sessions are still single-instance; a shared transactional session store is not implemented.
+The hardening branch restores persistent hashed sessions, adds cookie-mutation origin checks, validates the live WebSocket origin and adds HTTP integration assertions for cross-origin and missing-origin requests. PR #46 passes full CI but remains unmerged. File-backed sessions are still single-instance; a shared transactional session store is not implemented.
 
 ### 2. Supabase task RPC contract mismatch
 
