@@ -1,7 +1,7 @@
 # Maya Implementation Roadmap
 
-Branch: maya/foundation-architecture
-Status: Foundation and first security-hardening pass are implemented. Latest CI validates install, typecheck, tests, and production build. No Android APK or production deployment is claimed.
+Branch: maya/release-hardening-audit-fixes (stacked on maya/specialist-ui-runtime-status)
+Status: The development stack through PR #45 has passed CI, but it is not integrated into main. This hardening branch restores the main-line persistent-session and CSRF controls and repairs migration/adapter contract defects. Live Supabase, physical-device and production deployment validation remain outstanding.
 
 ## Phase 0 — Baseline and contracts
 - [x] Add a Founder dashboard as the default authenticated landing page; derive backend reachability and task counts from live API responses and remove unsupported integration/automation badges.
@@ -110,29 +110,31 @@ This module is intentionally described as file-backed persistence, not a product
 
 
 
-## Specialist reasoning runtime — development branch
+## Specialist runtime — development branch
 
-- [x] Expose Founder-authenticated specialist registry
-- [x] Run bounded Gemini reasoning calls using specialist role manifests
-- [x] Provide a dedicated Specialist Agents UI
+- [x] Expose Founder-authenticated specialist registry and dedicated UI
+- [x] Run bounded Gemini reasoning calls using registered role manifests
 - [x] Inject relevant saved notes as untrusted reference context
-- [x] Enforce reasoning-only boundary with no tools or further delegation
-- [ ] Build CEO orchestration and real specialist-to-specialist delegation
-- [ ] Add per-agent durable work queues, budgets, concurrency controls and result verification
-- [ ] Connect scoped tools through approval-aware adapters
+- [x] Provide only manifest-scoped low-risk workspace reads and Founder-scoped memory search
+- [x] Persist redacted specialist tool outcomes through the append-only audit repository
+- [x] Block specialist writes, shell, arbitrary browser/device actions and recursive delegation
+- [ ] Add exact-action Founder-approved write adapters and independent effect verification
+- [ ] Add per-agent budgets, durable work queues, cancellation and global concurrency limits
+- [ ] Link each tool event to its CEO run, assignment and task trace
 
 
 
 ## CEO specialist orchestration — development branch
 
 - [x] CEO selects 1–4 registered specialists with validated dispatch JSON
-- [x] Sequential specialist execution with bounded task sizes
-- [x] CEO synthesis of specialist findings
+- [x] Run the bounded specialist set concurrently while preserving synthesis order
+- [x] Synthesize findings and report each specialist's actual execution mode
+- [x] Persist Founder-scoped run history through file and Supabase adapters
 - [x] Founder-authenticated orchestration API and dedicated UI
-- [x] Prevent recursive CEO/Founder delegation and specialist tool execution
-- [ ] Persist orchestration runs, assignments, findings and project status
-- [ ] Add cross-agent budgets, concurrency limits, cancellation and resumable queues
-- [ ] Allow approved specialists to use scoped tools through the approval ledger
+- [x] Prevent recursive CEO/Founder delegation and high-risk specialist execution
+- [ ] Add partial-failure handling, cancellation and resumable assignments
+- [ ] Add per-run/per-agent budgets and global concurrency controls
+- [ ] Add durable task-level traces and independent QA verification
 
 
 
@@ -158,7 +160,8 @@ This module is intentionally described as file-backed persistence, not a product
 - [x] Add RLS-enabled `maya_goal_plans` table and service-role-only access
 - [x] Refactor executor and plan APIs to await repository operations
 - [x] Add adapter tests for Founder scoping and updates
-- [ ] Add optimistic concurrency/version checks and cross-process plan execution locks
+- [x] Add atomic Supabase claim/release RPCs for running plans
+- [ ] Add lease renewal, optimistic concurrency/version checks and live multi-instance worker validation
 - [ ] Migrate task queue, memory notes, approval ledger and audit logs to database storage
 
 
@@ -169,9 +172,10 @@ This module is intentionally described as file-backed persistence, not a product
 - [x] Server-side service-role authentication; no database key is exposed to the browser
 - [x] Atomic owner-bound task save RPC and immutable task-owner checks
 - [x] Founder-filtered task reads/lists and adapter tests
-- [ ] Durable approvals and audit event storage
-- [ ] Distributed task leases, worker heartbeats and multi-instance idempotency
-- [ ] Live Supabase migration/application and end-to-end verification in the user's project
+- [x] Founder-scoped approval and append-only audit repositories with Supabase adapters
+- [x] Atomic task claim/release leases and expired-claim recovery
+- [ ] Worker heartbeat/renewal for long-running work and live two-instance concurrency validation
+- [ ] Apply migrations and run end-to-end verification in the user's Supabase project
 
 
 ## Durable task audit trail — development branch
@@ -272,12 +276,13 @@ Direct device commands remain read-only. Mutating file operations are exposed on
 - [x] Stop at unapproved state-mutating steps and await Founder approval
 - [x] Recover in-flight steps after process restart by parking the plan as failed; never replay uncertain side effects
 - [x] Worker status exposed through health endpoint and bounded polling settings
-- [ ] Add transactional distributed plan leases before multi-instance deployment
-- [ ] Add per-step timeout/heartbeat, cancellation, retry review and evidence contracts
+- [x] Add transactional Supabase claim/release lease primitives (migration and adapter tests)
+- [ ] Add lease renewal/heartbeat and cancellation before enabling the Supabase plan worker
+- [ ] Add per-step timeout, retry review and evidence contracts
 - [ ] Add plan-worker concurrency tests against two real server processes
 - [ ] Enable only after the operator configures a single-instance persistent data directory and validates the approval workflow
 
-The plan worker is disabled by default. It currently requires the file storage driver and one server instance; it must not be enabled with Supabase until distributed goal-plan leases exist.
+The plan worker is disabled by default. The server deliberately keeps it on single-instance file storage: although Supabase claim/release primitives now exist, lease renewal and real two-instance concurrency tests are not complete. Do not enable it with Supabase or multiple replicas yet.
 
 
 ## Persistent CEO orchestration history — development branch
