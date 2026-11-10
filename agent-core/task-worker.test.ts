@@ -66,6 +66,17 @@ function setup(
     verification: "Read back and hash the written file.",
   });
   registry.register({
+    name: "workspace.run_validation",
+    description: "Run fixed repository validation scripts.",
+    risk: "high",
+    allowedRoles: ["founder", "worker", "developer"],
+    requiredScopes: ["tests:run"],
+    arguments: {},
+    timeoutMs: 180_000,
+    requiresApproval: true,
+    verification: "All fixed validation scripts passed.",
+  });
+  registry.register({
     name: "device.workspace.write_file",
     description: "Replace an existing local device workspace file after Founder approval.",
     risk: "high",
@@ -583,5 +594,29 @@ test("worker creates a new local PC file only after exact Founder approval", asy
   assert.equal(result.executed, 1);
   assert.deepEqual(executedArgs, args);
   assert.equal((await repository.get("worker-device-create-1"))?.task.status, "completed");
+  assert.equal((await approvals.listForFounder("founder-primary")).find(item => item.id === pending.approvalId)?.status, "consumed");
+});
+
+test("worker executes fixed repository validation only after exact Founder approval", async () => {
+  let executedCapability = "";
+  const { orchestrator, worker, repository, approvals } = setup(async input => {
+    executedCapability = input.capability;
+    return {
+      result: { passed: true, commands: ["lint", "test", "build"] },
+      evidence: { kind: "workspace-validation-suite", description: "All fixed validation commands passed.", reference: "sha256:" + "d".repeat(64), observedAt: new Date().toISOString() },
+    };
+  });
+  const validationFounder = { ...founder, scopes: ["tests:run"] };
+  await orchestrator.enqueue({
+    id: "worker-validation-1", founderId: "founder-primary",
+    instruction: "Run fixed lint, test and build suite.",
+    capability: "workspace.run_validation", args: {}, actor: validationFounder,
+  });
+  const pending = await orchestrator.requestApproval("worker-validation-1", validationFounder);
+  await orchestrator.decideApproval({ approvalId: pending.approvalId, approved: true, actor: validationFounder });
+  const result = await worker.runOnce();
+  assert.equal(result.executed, 1);
+  assert.equal(executedCapability, "workspace.run_validation");
+  assert.equal((await repository.get("worker-validation-1"))?.task.status, "completed");
   assert.equal((await approvals.listForFounder("founder-primary")).find(item => item.id === pending.approvalId)?.status, "consumed");
 });
