@@ -33,6 +33,8 @@ test("Developer proposal rejects unsafe paths, missing hashes and oversized cont
   const service = new DeveloperProposalService({ enqueue: async () => { throw new Error("must not enqueue"); } } as any, () => digest);
   const base = { founderId: "founder-1", path: "src/file.ts", expectedSha256: digest, content: "x", instruction: "Update file" };
   await assert.rejects(() => service.proposeFileChange({ ...base, path: "../outside.ts" }), /workspace-relative/);
+  await assert.rejects(() => service.proposeFileChange({ ...base, path: ".env" }), /secrets, credentials/);
+  await assert.rejects(() => service.proposeFileChange({ ...base, path: "node_modules/pkg/index.js" }), /secrets, credentials/);
   await assert.rejects(() => service.proposeFileChange({ ...base, expectedSha256: "bad" }), /SHA-256/);
   await assert.rejects(() => service.proposeFileChange({ ...base, content: "x".repeat(100_001) }), /100 KB/);
 });
