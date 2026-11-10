@@ -30,7 +30,7 @@ export class MayaDeveloperWorkspace extends LitElement {
       const taskData = await taskResponse.json();
       const approvalData = await approvalResponse.json();
       this.tasks = (Array.isArray(taskData.tasks) ? taskData.tasks : [])
-        .filter((item: any) => item.capability === 'workspace.write_file' && typeof item.args?.expectedSha256 === 'string')
+        .filter((item: any) => (item.capability === 'workspace.write_file' && typeof item.args?.expectedSha256 === 'string') || item.capability === 'workspace.run_validation')
         .sort((a: any, b: any) => String(b.task.createdAt).localeCompare(String(a.task.createdAt)));
       this.approvals = Array.isArray(approvalData.approvals) ? approvalData.approvals : [];
     } catch (error: any) { this.error = error.message || String(error); }
@@ -52,6 +52,21 @@ export class MayaDeveloperWorkspace extends LitElement {
       await this.refresh();
     } catch (error: any) { this.error = error.message || String(error); }
     finally { this.busy = false; }
+  }
+
+  private async queueValidation() {
+    this.error = null; this.notice = null;
+    try {
+      const response = await fetch('/api/control-plane/tasks', {
+        method: 'POST', credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ capability: 'workspace.run_validation', instruction: 'Run the fixed lint, test and production build validation suite in the Maya server workspace.' }),
+      });
+      const data = await response.json();
+      if (!response.ok || !data.success) throw new Error(data.error || 'Could not queue repository validation.');
+      this.notice = 'Validation task queued. Request and approve it below before execution.';
+      await this.refresh();
+    } catch (error: any) { this.error = error.message || String(error); }
   }
 
   private async requestApproval(taskId: string) {
@@ -108,12 +123,12 @@ export class MayaDeveloperWorkspace extends LitElement {
           <div class='grid grid-cols-1 md:grid-cols-3 gap-2'>
             <div class='rounded-xl border border-slate-800 bg-slate-950/70 p-3'><div class='text-[10px] uppercase tracking-wide text-slate-500'>Workspace</div><div class='text-xs text-slate-200 mt-1'>Maya server repository</div></div>
             <div class='rounded-xl border border-slate-800 bg-slate-950/70 p-3'><div class='text-[10px] uppercase tracking-wide text-slate-500'>Write policy</div><div class='text-xs text-slate-200 mt-1'>Exact SHA-256 + single-use Founder approval</div></div>
-            <div class='rounded-xl border border-slate-800 bg-slate-950/70 p-3'><div class='text-[10px] uppercase tracking-wide text-slate-500'>Execution boundary</div><div class='text-xs text-slate-200 mt-1'>No shell, tests, deploy or local-PC writes from this page</div></div>
+            <div class='rounded-xl border border-slate-800 bg-slate-950/70 p-3'><div class='text-[10px] uppercase tracking-wide text-slate-500'>Execution boundary</div><div class='text-xs text-slate-200 mt-1'>No arbitrary shell, deployment or local-PC writes. The fixed lint/test/build suite requires separate Founder approval</div></div>
           </div>
           <p class='text-[11px] text-amber-200/80'>This first Developer workflow operates on the server-side Maya checkout only. It is not yet connected to arbitrary Windows/VS Code workspaces and does not use an isolated Git worktree. Review each proposed file payload before approval.</p>
           <label class='block text-[11px] uppercase tracking-wide text-slate-400'>Development assignment</label>
           <textarea class='w-full min-h-28 rounded-xl bg-slate-950 border border-slate-700 p-3 text-sm text-slate-100 outline-none focus:border-indigo-500' .value=${this.task} @input=${(event: any) => this.task = event.target.value} placeholder='Example: inspect the task worker and propose a fix for a verified bug. Read the relevant files first, then queue a file proposal with its SHA-256.'></textarea>
-          <div class='flex flex-wrap items-center justify-between gap-2'><span class='text-[11px] text-slate-500'>Gemini is required. The Developer can read files and queue existing-file replacements only.</span><button class='px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold disabled:opacity-50' ?disabled=${this.busy || !this.task.trim()} @click=${() => this.runDeveloper()}>${this.busy ? 'Analyzing workspace…' : 'Run Developer'}</button></div>
+          <div class='flex flex-wrap items-center justify-between gap-2'><span class='text-[11px] text-slate-500'>Gemini is required. The Developer can read files, queue exact-hash replacements and request the fixed validation suite; every mutation or command run requires separate Founder approval.</span><button class='px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold disabled:opacity-50' ?disabled=${this.busy || !this.task.trim()} @click=${() => this.runDeveloper()}>${this.busy ? 'Analyzing workspace…' : 'Run Developer'}</button></div>
           ${this.error ? html`<p class='text-xs text-rose-300'>${this.error}</p>` : ''}
           ${this.notice ? html`<p class='text-xs text-emerald-300'>${this.notice}</p>` : ''}
         </section>
@@ -124,12 +139,13 @@ export class MayaDeveloperWorkspace extends LitElement {
           ${this.tasks.length ? this.tasks.map((envelope: any) => {
             const task = envelope.task || {};
             const approval = this.approvals.find((item: any) => item.taskId === task.id);
-            const path = String(envelope.args?.path || '');
+            const isValidation = envelope.capability === 'workspace.run_validation';
+            const path = isValidation ? 'Repository lint / test / build' : String(envelope.args?.path || '');
             const content = String(envelope.args?.content || '');
             const expected = String(envelope.args?.expectedSha256 || '');
             return html`<article class='rounded-xl border border-slate-800 bg-slate-950/70 p-4 space-y-3'>
               <div class='flex flex-wrap items-start justify-between gap-3'>
-                <div class='min-w-0'><div class='text-xs font-semibold text-white break-all'>${path}</div><div class='text-[10px] text-slate-500 mt-1'>Task ${task.id} · ${task.status} · ${content.length.toLocaleString()} characters</div><div class='text-[10px] text-slate-500 mt-1'>Expected SHA-256: <span class='font-mono text-slate-300'>${expected.slice(0, 20)}…</span></div></div>
+                <div class='min-w-0'><div class='text-xs font-semibold text-white break-all'>${path}</div><div class='text-[10px] text-slate-500 mt-1'>Task ${task.id} · ${task.status} · \${isValidation ? 'fixed validation suite' : content.length.toLocaleString() + ' characters'}</div><div class='text-[10px] text-slate-500 mt-1'>Expected SHA-256: <span class='font-mono text-slate-300'>${expected.slice(0, 20)}…</span></div></div>
                 <span class='text-[10px] rounded px-2 py-1 border ${task.status === 'completed' ? 'border-emerald-500/30 text-emerald-300' : task.status === 'failed' || task.status === 'requires_recovery' ? 'border-rose-500/30 text-rose-300' : 'border-amber-500/30 text-amber-200'}'>${task.status}</span>
               </div>
               <details class='rounded-lg border border-slate-800 p-3'><summary class='cursor-pointer text-[11px] text-slate-300'>Review proposed file contents</summary><pre class='whitespace-pre-wrap break-words text-[11px] leading-relaxed text-slate-300 mt-3 max-h-72 overflow-auto'>${content.slice(0, 8000)}${content.length > 8000 ? '\n… preview truncated at 8 KB' : ''}</pre></details>
