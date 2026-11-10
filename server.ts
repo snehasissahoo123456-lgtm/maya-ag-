@@ -1686,6 +1686,7 @@ async function startServer() {
     const searchQuery = typeof req.body?.query === "string" ? req.body.query.trim() : "";
     const deviceId = typeof req.body?.deviceId === "string" ? req.body.deviceId : "";
     const content = req.body?.content;
+    const expectedSha256 = typeof req.body?.expectedSha256 === "string" ? req.body.expectedSha256 : undefined;
     if (!instruction || instruction.length > 1000) return res.status(400).json({ success: false, error: "Instruction must contain 1–1000 characters." });
     if (!["workspace.read_file", "device.workspace.read_file", "device.workspace.git_status", "device.workspace.search_files", "device.workspace.list_directory", "workspace.write_file", "device.workspace.write_file", "device.workspace.create_file", "device.workspace.create_directory", "device.workspace.move_file"].includes(capability)) return res.status(400).json({ success: false, error: "Capability is not enabled for the task control plane." });
     if (!filePath || filePath.length > 1024) return res.status(400).json({ success: false, error: "A workspace-relative path of 1–1024 characters is required." });
@@ -1712,7 +1713,7 @@ async function startServer() {
           : isListDirectory
             ? { deviceId, path: filePath }
             : capability === "workspace.write_file"
-            ? { path: filePath, content }
+            ? { path: filePath, content, ...(expectedSha256 ? { expectedSha256 } : {}) }
             : ["device.workspace.read_file", "device.workspace.git_status", "device.workspace.create_directory"].includes(capability)
               ? { deviceId, path: filePath }
               : capability.startsWith("device.workspace.")
