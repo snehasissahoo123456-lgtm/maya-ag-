@@ -154,7 +154,7 @@ test("real HTTP control-plane routes enforce Founder auth and execute only the r
     assert.equal(deviceList.devices[0].online, true);
 
     const commandMessagePromise = waitForWsMessage(deviceSocket, "command");
-    const commandResponsePromise = fetch(baseUrl + `/api/devices/${pairedMessage.device.id}/commands`, {
+    const commandResponsePromise = sameOriginFetch(baseUrl + `/api/devices/${pairedMessage.device.id}/commands`, {
       method: "POST", headers: { "content-type": "application/json", cookie },
       body: JSON.stringify({ command: "system.info" }),
     });
