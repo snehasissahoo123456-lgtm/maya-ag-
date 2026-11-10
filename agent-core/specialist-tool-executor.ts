@@ -13,7 +13,19 @@ export interface SpecialistToolDeclaration {
   };
 }
 
-export interface SpecialistToolExecutionEvent {\n  agentId: string;\n  founderId?: string;\n  capability: string;\n  status: "success" | "denied" | "failed";\n  durationMs: number;\n  completedAt: string;\n  resultBytes?: number;\n  resultSha256?: string;\n  errorCode?: "policy_denied" | "execution_failed";\n}\n\nexport type SpecialistCapabilityHandler = (
+export interface SpecialistToolExecutionEvent {
+  agentId: string;
+  founderId?: string;
+  capability: string;
+  status: "success" | "denied" | "failed";
+  durationMs: number;
+  completedAt: string;
+  resultBytes?: number;
+  resultSha256?: string;
+  errorCode?: "policy_denied" | "execution_failed";
+}
+
+export type SpecialistCapabilityHandler = (
   capability: string,
   args: Record<string, unknown>,
   context: { founderId: string; signal: AbortSignal },
@@ -28,6 +40,7 @@ export class SpecialistToolExecutor {
     private readonly registry: CapabilityRegistry,
     private readonly handler: SpecialistCapabilityHandler,
     private readonly maxResultBytes = 32_000,
+    private readonly onExecution?: (event: SpecialistToolExecutionEvent) => void,
   ) {}
 
   list(agentId: string): SpecialistToolDeclaration[] {
