@@ -108,10 +108,11 @@ export class TaskWorker {
     const isDeviceRead = ["device.workspace.read_file", "device.workspace.git_status", "device.workspace.search_files", "device.workspace.list_directory"].includes(envelope.capability);
     const isWorkspaceWrite = envelope.capability === "workspace.write_file";
     const isDeviceWrite = ["device.workspace.write_file", "device.workspace.create_file", "device.workspace.create_directory", "device.workspace.move_file"].includes(envelope.capability);
-    const isApprovedWrite = isWorkspaceWrite || isDeviceWrite;
-    if (!isRead && !isDeviceRead && !isApprovedWrite) return "skipped";
+    const isValidation = envelope.capability === "workspace.run_validation";
+    const isApprovedAction = isWorkspaceWrite || isDeviceWrite || isValidation;
+    if (!isRead && !isDeviceRead && !isApprovedAction) return "skipped";
     if ((isRead || isDeviceRead) && envelope.task.requiresApproval) return "skipped";
-    if (isApprovedWrite && (!envelope.task.requiresApproval || !this.approvals)) return "skipped";
+    if (isApprovedAction && (!envelope.task.requiresApproval || !this.approvals)) return "skipped";
     if (isDeviceRead || isDeviceWrite) {
       const deviceId = typeof envelope.args.deviceId === "string" ? envelope.args.deviceId : "";
       if (!deviceId || !this.isDeviceAvailable?.(deviceId, this.founderId)) return "skipped";
@@ -121,12 +122,12 @@ export class TaskWorker {
       id: "maya-internal-task-worker:" + this.workerId,
       founderId: this.founderId,
       role: "worker",
-      scopes: isWorkspaceWrite ? ["workspace:read", "workspace:write"] : isDeviceRead ? ["device:read"] : isDeviceWrite ? ["device:write"] : ["workspace:read"],
+      scopes: isWorkspaceWrite ? ["workspace:read", "workspace:write"] : isDeviceRead ? ["device:read"] : isDeviceWrite ? ["device:write"] : isValidation ? ["tests:run"] : ["workspace:read"],
     };
     const { definition } = this.capabilities.validate(envelope.capability, actor, envelope.args);
     if (!definition.allowedRoles.includes("worker")) return "skipped";
     let approvalId: string | undefined;
-    if (isApprovedWrite) {
+    if (isApprovedAction) {
       if (definition.risk !== "high" || !definition.requiresApproval) return "skipped";
       const expectedDigest = digestAction(envelope.capability, envelope.args);
       const grant = (await this.approvals!.listForFounder(this.founderId)).find(item =>
