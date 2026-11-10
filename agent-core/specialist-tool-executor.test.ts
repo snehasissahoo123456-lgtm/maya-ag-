@@ -67,7 +67,7 @@ test("executes an allowed capability with the Founder identity and validated arg
 
 test("denies write capabilities, unknown roles, missing Founder identity and invalid arguments", async () => {
   const executor = new SpecialistToolExecutor(registry(), async () => "should not run");
-  await assert.rejects(executor.execute("developer", "founder-1", "workspace.write_file", { path: "README.md" }), /Required capability scope|role is not allowed|not registered/);
+  await assert.rejects(executor.execute("developer", "founder-1", "workspace.write_file", { path: "README.md" }), /Specialists may execute only low-risk|Required capability scope|role is not allowed|not registered/);
   await assert.rejects(executor.execute("founder", "founder-1", "workspace.read_file", { path: "README.md" }), /non-runnable/);
   await assert.rejects(executor.execute("developer", "", "workspace.read_file", { path: "README.md" }), /Founder identity/);
   await assert.rejects(executor.execute("developer", "founder-1", "workspace.read_file", { path: "../.env", extra: true }), /Unexpected argument/);
