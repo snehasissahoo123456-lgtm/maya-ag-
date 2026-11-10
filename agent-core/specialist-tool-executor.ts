@@ -121,6 +121,20 @@ export class SpecialistToolExecutor {
     }
   }
 
+  private toDeclaration(definition: CapabilityDefinition): SpecialistToolDeclaration {
+    const properties: SpecialistToolDeclaration["parametersJsonSchema"]["properties"] = {};
+    const required: string[] = [];
+    for (const [name, argument] of Object.entries(definition.arguments)) {
+      properties[name] = { type: argument.type, ...(argument.enum ? { enum: argument.enum } : {}) };
+      if (argument.required) required.push(name);
+    }
+    return {
+      name: definition.name,
+      description: definition.description,
+      parametersJsonSchema: { type: "object", properties, required, additionalProperties: false },
+    };
+  }
+
   private emit(event: SpecialistToolExecutionEvent): void {
     try { this.onExecution?.(event); } catch { /* Audit observers must not change capability outcomes. */ }
   }
