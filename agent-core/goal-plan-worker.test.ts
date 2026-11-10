@@ -95,3 +95,41 @@ test("running plans cannot pre-approve a future step while another step is execu
     await assert.rejects(() => executor.approveStep("founder-a", created.id, "save_step"), /only approve the exact step currently awaiting approval/i);
   } finally { fs.rmSync(directory, { recursive: true, force: true }); }
 });
+
+test("database-backed worker uses atomic claims and releases every claimed plan", async () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "maya-plan-leased-worker-"));
+  try {
+    const store = new GoalPlanStore(directory);
+    const created = await store.create("founder-a", plan([readStep]));
+    await store.save("founder-a", { ...created, status: "running" });
+    const claims: string[] = [];
+    const releases: string[] = [];
+    let available = true;
+    const repository = {
+      create: store.create.bind(store),
+      list: store.list.bind(store),
+      get: store.get.bind(store),
+      save: store.save.bind(store),
+      claimNext: async (founderId: string, workerId: string, leaseMs: number) => {
+        assert.equal(founderId, "founder-a");
+        assert.equal(workerId, "worker-test");
+        assert.equal(leaseMs, 30_000);
+        if (!available) return undefined;
+        available = false;
+        claims.push(created.id);
+        return store.get(founderId, created.id);
+      },
+      releaseClaim: async (founderId: string, planId: string, workerId: string) => {
+        assert.equal(founderId, "founder-a");
+        assert.equal(workerId, "worker-test");
+        releases.push(planId);
+      },
+    };
+    const executor = new GoalPlanExecutor(store, async () => ({ ok: true }));
+    const worker = new GoalPlanWorker(repository, executor, "founder-a", 3000, 5, "worker-test", 30_000);
+    const result = await worker.runOnce();
+    assert.equal(result.completed, 1);
+    assert.deepEqual(claims, [created.id]);
+    assert.deepEqual(releases, [created.id]);
+  } finally { fs.rmSync(directory, { recursive: true, force: true }); }
+});

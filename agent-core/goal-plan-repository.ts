@@ -6,4 +6,6 @@ export interface GoalPlanRepository {
   list(founderId: string): Promise<StoredGoalPlan[]>;
   get(founderId: string, id: string): Promise<StoredGoalPlan | undefined>;
   save(founderId: string, plan: StoredGoalPlan): Promise<void>;
+  claimNext?(founderId: string, workerId: string, leaseMs: number): Promise<StoredGoalPlan | undefined>;
+  releaseClaim?(founderId: string, planId: string, workerId: string): Promise<void>;
 }

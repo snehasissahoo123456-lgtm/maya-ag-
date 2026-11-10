@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type { GoalPlanRepository } from "./goal-plan-repository.ts";
 import type { GoalPlanExecutor } from "./goal-plan-executor.ts";
 
@@ -25,6 +26,8 @@ export class GoalPlanWorker {
   private cycleActive = false;
   private readonly pollIntervalMs: number;
   private readonly maxPlansPerCycle: number;
+  private readonly workerId: string;
+  private readonly leaseMs: number;
   private status: GoalPlanWorkerStatus = { enabled: false, running: false, resumed: 0, completed: 0, awaitingApproval: 0, recovered: 0, failed: 0 };
 
   constructor(
@@ -33,10 +36,14 @@ export class GoalPlanWorker {
     private readonly founderId: string,
     pollIntervalMs = 3000,
     maxPlansPerCycle = 10,
+    workerId: string = randomUUID(),
+    leaseMs = 60_000,
   ) {
     if (!founderId.trim()) throw new Error("Plan worker Founder scope is required.");
     this.pollIntervalMs = Math.min(60_000, Math.max(1_000, Number.isFinite(pollIntervalMs) ? pollIntervalMs : 3_000));
     this.maxPlansPerCycle = Math.min(50, Math.max(1, Number.isFinite(maxPlansPerCycle) ? Math.floor(maxPlansPerCycle) : 10));
+    this.workerId = workerId.slice(0, 128);
+    this.leaseMs = Math.min(300_000, Math.max(5_000, Number.isFinite(leaseMs) ? leaseMs : 60_000));
   }
 
   getStatus(): GoalPlanWorkerStatus { return { ...this.status, enabled: !this.stopped, running: this.cycleActive }; }
@@ -64,31 +71,61 @@ export class GoalPlanWorker {
     const result = { scanned: 0, resumed: 0, completed: 0, awaitingApproval: 0, recovered: 0, failed: 0 };
     this.status = { ...this.status, lastCycleAt: new Date().toISOString(), lastError: undefined };
     try {
-      const plans = await this.repository.list(this.founderId);
-      // Recover a step that was marked running when the previous process stopped.
-      for (const plan of plans) {
-        if (plan.founderId !== this.founderId || plan.status !== "running") continue;
-        const interrupted = plan.plan.steps.find(step => plan.stepStates[step.id]?.status === "running");
-        if (!interrupted) continue;
-        const state = plan.stepStates[interrupted.id];
-        state.status = "failed";
-        state.error = "Worker stopped while this step was in flight. Automatic replay is disabled; create a reviewed replacement plan.";
-        plan.status = "failed";
-        await this.repository.save(this.founderId, plan);
-        result.recovered++;
-      }
-
-      const runnable = plans.filter(plan => plan.founderId === this.founderId && plan.status === "running" && !plan.plan.steps.some(step => plan.stepStates[step.id]?.status === "running")).slice(0, this.maxPlansPerCycle);
-      result.scanned = plans.length;
-      for (const plan of runnable) {
-        result.resumed++;
-        try {
-          const updated = await this.executor.execute(this.founderId, plan.id);
-          if (updated.status === "completed") result.completed++;
-          else if (updated.status === "awaiting_approval") result.awaitingApproval++;
-        } catch (error) {
-          result.failed++;
-          this.status = { ...this.status, lastError: error instanceof Error ? error.message : String(error) };
+      if (this.repository.claimNext && this.repository.releaseClaim) {
+        // Database-backed repositories use atomic row-lock claims so multiple server
+        // instances cannot execute the same goal plan concurrently.
+        for (let index = 0; index < this.maxPlansPerCycle; index++) {
+          const plan = await this.repository.claimNext(this.founderId, this.workerId, this.leaseMs);
+          if (!plan) break;
+          result.scanned++;
+          try {
+            const interrupted = plan.plan.steps.find(step => plan.stepStates[step.id]?.status === "running");
+            if (interrupted) {
+              const state = plan.stepStates[interrupted.id];
+              state.status = "failed";
+              state.error = "A previous worker lease expired while this step was in flight. Automatic replay is disabled; create a reviewed replacement plan.";
+              plan.status = "failed";
+              await this.repository.save(this.founderId, plan);
+              result.recovered++;
+              continue;
+            }
+            result.resumed++;
+            const updated = await this.executor.execute(this.founderId, plan.id);
+            if (updated.status === "completed") result.completed++;
+            else if (updated.status === "awaiting_approval") result.awaitingApproval++;
+          } catch (error) {
+            result.failed++;
+            this.status = { ...this.status, lastError: error instanceof Error ? error.message : String(error) };
+          } finally {
+            await this.repository.releaseClaim(this.founderId, plan.id, this.workerId);
+          }
+        }
+      } else {
+        // File-backed mode remains single-instance and uses a local bounded scan.
+        const plans = await this.repository.list(this.founderId);
+        for (const plan of plans) {
+          if (plan.founderId !== this.founderId || plan.status !== "running") continue;
+          const interrupted = plan.plan.steps.find(step => plan.stepStates[step.id]?.status === "running");
+          if (!interrupted) continue;
+          const state = plan.stepStates[interrupted.id];
+          state.status = "failed";
+          state.error = "Worker stopped while this step was in flight. Automatic replay is disabled; create a reviewed replacement plan.";
+          plan.status = "failed";
+          await this.repository.save(this.founderId, plan);
+          result.recovered++;
+        }
+        const runnable = plans.filter(plan => plan.founderId === this.founderId && plan.status === "running" && !plan.plan.steps.some(step => plan.stepStates[step.id]?.status === "running")).slice(0, this.maxPlansPerCycle);
+        result.scanned = plans.length;
+        for (const plan of runnable) {
+          result.resumed++;
+          try {
+            const updated = await this.executor.execute(this.founderId, plan.id);
+            if (updated.status === "completed") result.completed++;
+            else if (updated.status === "awaiting_approval") result.awaitingApproval++;
+          } catch (error) {
+            result.failed++;
+            this.status = { ...this.status, lastError: error instanceof Error ? error.message : String(error) };
+          }
         }
       }
       this.status = {

@@ -39,6 +39,26 @@ export class SupabaseGoalPlanStore implements GoalPlanRepository {
     const rows = await this.request<PlanRow[]>(`maya_goal_plans?${query}`);
     return rows[0] ? this.map(rows[0]) : undefined;
   }
+  async claimNext(founderId: string, workerId: string, leaseMs: number): Promise<StoredGoalPlan | undefined> {
+    if (!founderId || !workerId) throw new Error("Founder and worker identity are required to claim a goal plan.");
+    const boundedLease = Math.max(5_000, Math.min(Math.floor(leaseMs), 300_000));
+    const rows = await this.request<PlanRow[]>("rpc/maya_claim_next_goal_plan", {
+      method: "POST",
+      body: JSON.stringify({ p_founder_id: founderId, p_worker_id: workerId, p_lease_ms: boundedLease }),
+    });
+    if (!Array.isArray(rows) || rows.length === 0) return undefined;
+    if (rows.length !== 1 || rows[0].founder_id !== founderId) throw new Error("Supabase returned an invalid goal-plan lease owner.");
+    return this.map(rows[0]);
+  }
+  async releaseClaim(founderId: string, planId: string, workerId: string): Promise<void> {
+    const rows = await this.request<Array<{ id: string; founder_id: string }>>("rpc/maya_release_goal_plan_claim", {
+      method: "POST",
+      body: JSON.stringify({ p_plan_id: planId, p_founder_id: founderId, p_worker_id: workerId }),
+    });
+    if (!Array.isArray(rows) || rows.length !== 1 || rows[0].id !== planId || rows[0].founder_id !== founderId) {
+      throw new Error("Goal-plan lease was not released for the owning Founder and worker.");
+    }
+  }
   async save(founderId: string, plan: StoredGoalPlan): Promise<void> {
     const query = new URLSearchParams({ id: `eq.${plan.id}`, founder_id: `eq.${founderId}`, select: "id" });
     const rows = await this.request<Array<{ id: string }>>(`maya_goal_plans?${query}`, {
