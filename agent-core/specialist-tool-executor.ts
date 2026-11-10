@@ -15,7 +15,8 @@ export interface SpecialistToolDeclaration {
 
 export interface SpecialistToolExecutionEvent {
   agentId: string;
-  founderId?: string;
+  founderId: string;
+  actorRole: string;
   capability: string;
   status: "success" | "denied" | "failed";
   durationMs: number;
@@ -40,7 +41,7 @@ export class SpecialistToolExecutor {
     private readonly registry: CapabilityRegistry,
     private readonly handler: SpecialistCapabilityHandler,
     private readonly maxResultBytes = 32_000,
-    private readonly onExecution?: (event: SpecialistToolExecutionEvent) => void,
+    private readonly onExecution?: (event: SpecialistToolExecutionEvent) => void | Promise<void>,
   ) {}
 
   list(agentId: string): SpecialistToolDeclaration[] {
@@ -99,8 +100,8 @@ export class SpecialistToolExecutor {
         if (resultBytes > this.maxResultBytes) {
           throw new Error("Specialist capability result exceeds the configured response limit.");
         }
-        this.emit({
-          agentId, founderId, capability, status: "success",
+        await this.emit({
+          agentId, founderId, actorRole: manifest.role, capability, status: "success",
           durationMs: Date.now() - startedAt, completedAt: new Date().toISOString(),
           resultBytes,
           resultSha256: createHash("sha256").update(serialized, "utf8").digest("hex"),
@@ -110,8 +111,8 @@ export class SpecialistToolExecutor {
         if (timeout) clearTimeout(timeout);
       }
     } catch (error) {
-      this.emit({
-        agentId, ...(founderId ? { founderId } : {}), capability,
+      await this.emit({
+        agentId, founderId: founderId || "unknown", actorRole: getAgentManifest(agentId)?.role || "unknown", capability,
         status: handlerStarted ? "failed" : "denied",
         durationMs: Date.now() - startedAt,
         completedAt: new Date().toISOString(),
@@ -135,7 +136,7 @@ export class SpecialistToolExecutor {
     };
   }
 
-  private emit(event: SpecialistToolExecutionEvent): void {
-    try { this.onExecution?.(event); } catch { /* Audit observers must not change capability outcomes. */ }
+  private async emit(event: SpecialistToolExecutionEvent): Promise<void> {
+    await this.onExecution?.(event);
   }
 }
