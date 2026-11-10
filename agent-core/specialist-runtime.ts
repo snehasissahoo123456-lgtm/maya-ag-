@@ -48,7 +48,7 @@ export class SpecialistRuntime {
     }
     const context = typeof input.context === "string" ? input.context.slice(0, MAX_CONTEXT_CHARS) : "";
     const tools = input.founderId && this.toolExecutor ? this.toolExecutor.list(manifest.id) : [];
-    const proposalMode = manifest.id === "developer" && tools.some(tool => tool.name === "developer.propose_file_change");
+    const proposalMode = manifest.id === "developer" && tools.some(tool => tool.name === "developer.propose_file_change" || tool.name === "developer.propose_validation");
     const systemInstruction = [
       "You are a bounded specialist agent operating inside Maya.",
       `IDENTITY: ${manifest.displayName} (${manifest.role}).`,
@@ -56,7 +56,7 @@ export class SpecialistRuntime {
       `AUTHORIZED SCOPES: ${manifest.defaultScopes.join(", ")}.`,
       tools.length
         ? proposalMode
-          ? "You may use the listed low-risk workspace read tools and the developer.propose_file_change proposal tool. Read the exact file first and use its returned SHA-256. The proposal tool only queues a high-risk file replacement for Founder approval; it never changes a file. Do not claim a proposal was applied. You have no shell, test runner, deployment or arbitrary device control."
+          ? "You may use the listed low-risk workspace read tools and the developer.propose_file_change proposal tool. Read the exact file first and use its returned SHA-256. The file proposal tool only queues a high-risk file replacement for Founder approval; it never changes a file. The validation proposal tool only queues the fixed lint/test/build suite for Founder approval; it never runs commands itself. Do not claim a proposal was applied or a test was run unless the task result proves it. You have no arbitrary shell, deployment or arbitrary device control."
           : "You may use only the explicitly listed low-risk read-only tools. Tool calls are checked against your role and scopes on the server. Never attempt another capability."
         : "You are reasoning-only in this runtime. You have no tools, browser, filesystem, shell, account, payment, deployment, or device access.",
       "Never claim to have executed actions, contacted people, changed files, or verified external state unless a tool result directly proves it.",
