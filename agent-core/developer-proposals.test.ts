@@ -12,7 +12,7 @@ test("Developer proposal queues an exact Founder-approved task without executing
       enqueued = input;
       return { capability: input.capability, task: { id: input.id, status: "queued", requiresApproval: true } } as any;
     },
-  } as any);
+  } as any, () => digest);
   const receipt = await service.proposeFileChange({
     founderId: "founder-1",
     path: "agent-core/example.ts",
@@ -30,9 +30,21 @@ test("Developer proposal queues an exact Founder-approved task without executing
 });
 
 test("Developer proposal rejects unsafe paths, missing hashes and oversized content", async () => {
-  const service = new DeveloperProposalService({ enqueue: async () => { throw new Error("must not enqueue"); } } as any);
+  const service = new DeveloperProposalService({ enqueue: async () => { throw new Error("must not enqueue"); } } as any, () => digest);
   const base = { founderId: "founder-1", path: "src/file.ts", expectedSha256: digest, content: "x", instruction: "Update file" };
   await assert.rejects(() => service.proposeFileChange({ ...base, path: "../outside.ts" }), /workspace-relative/);
   await assert.rejects(() => service.proposeFileChange({ ...base, expectedSha256: "bad" }), /SHA-256/);
   await assert.rejects(() => service.proposeFileChange({ ...base, content: "x".repeat(100_001) }), /100 KB/);
+});
+
+test("Developer proposal refuses a stale read before creating an approval task", async () => {
+  let enqueued = false;
+  const service = new DeveloperProposalService({
+    enqueue: async () => { enqueued = true; throw new Error("unexpected enqueue"); },
+  } as any, () => "b".repeat(64));
+  await assert.rejects(() => service.proposeFileChange({
+    founderId: "founder-1", path: "src/file.ts", expectedSha256: digest,
+    content: "new", instruction: "Update file",
+  }), /file changed after it was read/i);
+  assert.equal(enqueued, false);
 });
