@@ -60,7 +60,7 @@ function setup(
     risk: "high",
     allowedRoles: ["founder", "worker"],
     requiredScopes: ["workspace:write"],
-    arguments: { path: { type: "string", required: true, maxLength: 1024 }, content: { type: "string", required: true, maxLength: 100_000 } },
+    arguments: { path: { type: "string", required: true, maxLength: 1024 }, content: { type: "string", required: true, maxLength: 100_000 }, expectedSha256: { type: "string", required: true, maxLength: 64 } },
     timeoutMs: 5000,
     requiresApproval: true,
     verification: "Read back and hash the written file.",
@@ -345,7 +345,7 @@ test("worker executes a workspace write only after exact Founder approval", asyn
   const writeFounder = { ...founder, scopes: ["workspace:write"] };
   await orchestrator.enqueue({
     id: "worker-write-1", founderId: "founder-primary", instruction: "Replace the approved report",
-    capability: "workspace.write_file", args: { path: "report.md", content: "Approved contents" }, actor: writeFounder,
+    capability: "workspace.write_file", args: { path: "report.md", content: "Approved contents", expectedSha256: "a".repeat(64) }, actor: writeFounder,
   });
   const pending = await orchestrator.requestApproval("worker-write-1", writeFounder);
   await orchestrator.decideApproval({ approvalId: pending.approvalId, approved: true, actor: writeFounder });
@@ -366,7 +366,7 @@ test("worker never executes a write without a matching approval digest", async (
   const writeFounder = { ...founder, scopes: ["workspace:write"] };
   await orchestrator.enqueue({
     id: "worker-write-unapproved", founderId: "founder-primary", instruction: "Replace a report",
-    capability: "workspace.write_file", args: { path: "report.md", content: "Original approved payload" }, actor: writeFounder,
+    capability: "workspace.write_file", args: { path: "report.md", content: "Original approved payload", expectedSha256: "a".repeat(64) }, actor: writeFounder,
   });
   const pending = await orchestrator.requestApproval("worker-write-unapproved", writeFounder);
   await orchestrator.decideApproval({ approvalId: pending.approvalId, approved: true, actor: writeFounder });
