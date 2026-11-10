@@ -256,7 +256,8 @@ This module is intentionally described as file-backed persistence, not a product
 - [x] Verify local file moves by destination SHA-256 before removing the source name; preserve source on failed verification
 - [ ] Add transactional Supabase device registry and multi-instance connection routing
 - [ ] Add broader audited capability grants before shell, browser-control or arbitrary application actions
-- [ ] Add Windows service installation, secure auto-start, health monitoring and signed updater
+- [x] Add optional current-user Windows logon startup task with limited privileges, bounded local logging and an uninstall script
+- [ ] Add a managed Windows service, signed connector updater and production health monitoring
 - [ ] Add Android remote client and mobile push notification support
 - [ ] Run threat modelling and penetration testing before enabling broader PC control
 

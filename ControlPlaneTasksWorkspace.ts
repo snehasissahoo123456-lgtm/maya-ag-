@@ -33,7 +33,7 @@ export class MayaControlPlaneTasksWorkspace extends LitElement {
   @state() private filePath = "README.md";
   @state() private destinationPath = "archive/README.md";
   @state() private searchQuery = "";
-  @state() private capability: "workspace.read_file" | "device.workspace.read_file" | "device.workspace.git_status" | "workspace.write_file" | "device.workspace.write_file" | "device.workspace.create_file" | "device.workspace.create_directory" | "device.workspace.move_file" | "device.workspace.search_files" = "workspace.read_file";
+  @state() private capability: "workspace.read_file" | "device.workspace.read_file" | "device.workspace.git_status" | "workspace.write_file" | "device.workspace.write_file" | "device.workspace.create_file" | "device.workspace.create_directory" | "device.workspace.move_file" | "device.workspace.search_files" | "device.workspace.list_directory" = "workspace.read_file";
   @state() private content = "";
   @state() private busy = false;
   @state() private busyId = "";
@@ -94,7 +94,7 @@ export class MayaControlPlaneTasksWorkspace extends LitElement {
 
   private async createTask() {
     if (this.busy || !this.instruction.trim() || !this.filePath.trim()) return;
-    const isRead = ["workspace.read_file", "device.workspace.read_file", "device.workspace.git_status", "device.workspace.search_files"].includes(this.capability);
+    const isRead = ["workspace.read_file", "device.workspace.read_file", "device.workspace.git_status", "device.workspace.search_files", "device.workspace.list_directory"].includes(this.capability);
     const isMutation = !isRead;
     const requiresContent = requiresFileContent(this.capability);
     const isMoveFile = this.capability === "device.workspace.move_file";
@@ -250,20 +250,21 @@ export class MayaControlPlaneTasksWorkspace extends LitElement {
         <section class="panel space-y-4">
           <div>
             <h3 class="font-medium text-white">Create a workspace task</h3>
-            <p class="muted mt-1">Reads are limited to non-sensitive text files up to 50 KB. Search uses literal queries, scans at most 1,000 files/200 directories for five seconds, returns at most 100 snippets, and redacts common credential patterns. File replacement/creation is limited to 100 KB and requires exact approval. Directory creation is non-recursive. File moves require exact approval, remain inside the paired-PC workspace, and cannot overwrite an existing destination; symlinks and shell commands remain blocked.</p>
+            <p class="muted mt-1">Directory listings return at most 100 non-sensitive entries. Reads are limited to non-sensitive text files up to 50 KB. Search uses literal queries, scans at most 1,000 files/200 directories for five seconds, returns at most 100 snippets, and redacts common credential patterns. File replacement/creation is limited to 100 KB and requires exact approval. Directory creation is non-recursive. File moves require exact approval, remain inside the paired-PC workspace, and cannot overwrite an existing destination; symlinks and shell commands remain blocked.</p>
           </div>
           <div class="grid gap-3 md:grid-cols-2">
             <label class="space-y-1"><span class="muted">Task instruction</span><input .value=${this.instruction} @input=${(e: Event) => this.instruction = (e.target as HTMLInputElement).value} maxlength="1000" placeholder="Read the project overview"></label>
             <label class="space-y-1"><span class="muted">Capability</span><select .value=${this.capability} @change=${(e: Event) => {
               const next = (e.target as HTMLSelectElement).value as any;
               this.capability = next;
-              if (["device.workspace.git_status", "device.workspace.search_files"].includes(next) && this.filePath === "README.md") this.filePath = ".";
-              if (!["device.workspace.git_status", "device.workspace.search_files"].includes(next) && this.filePath === ".") this.filePath = "README.md";
+              if (["device.workspace.git_status", "device.workspace.search_files", "device.workspace.list_directory"].includes(next) && this.filePath === "README.md") this.filePath = ".";
+              if (!["device.workspace.git_status", "device.workspace.search_files", "device.workspace.list_directory"].includes(next) && this.filePath === ".") this.filePath = "README.md";
             }}>
               <option value="workspace.read_file">Read a workspace file</option>
               <option value="device.workspace.read_file">Read a paired-PC text file</option>
               <option value="device.workspace.git_status">Inspect paired-PC Git status (read-only)</option>
               <option value="device.workspace.search_files">Search paired-PC text files (read-only)</option>
+              <option value="device.workspace.list_directory">List a paired-PC directory (read-only)</option>
               <option value="workspace.write_file">Replace an existing server text file (approval required)</option>
               <option value="device.workspace.write_file">Replace an existing paired-PC text file (approval required)</option>
               <option value="device.workspace.create_file">Create a new paired-PC text file (approval required)</option>
@@ -276,7 +277,7 @@ export class MayaControlPlaneTasksWorkspace extends LitElement {
                 ${this.devices.map(device => html`<option value=${device.id} ?disabled=${!device.online || Boolean(device.revokedAt)}>${device.name} · ${device.revokedAt ? "revoked" : device.online ? "online" : "offline"}</option>`)}
               </select></label>
             ` : ""}
-            <label class="space-y-1 md:col-span-2"><span class="muted">${["device.workspace.git_status", "device.workspace.search_files"].includes(this.capability) ? "Workspace directory to inspect" : this.capability === "device.workspace.move_file" ? "Source file path" : this.capability.startsWith("device.workspace.") ? "Device workspace-relative path" : "Workspace-relative path"}</span><input .value=${this.filePath} @input=${(e: Event) => this.filePath = (e.target as HTMLInputElement).value} maxlength="1024" placeholder=${["device.workspace.git_status", "device.workspace.search_files"].includes(this.capability) ? "." : "docs/status.md"}></label>
+            <label class="space-y-1 md:col-span-2"><span class="muted">${["device.workspace.git_status", "device.workspace.search_files"].includes(this.capability) ? "Workspace directory to inspect" : this.capability === "device.workspace.list_directory" ? "Directory to list" : this.capability === "device.workspace.move_file" ? "Source file path" : this.capability.startsWith("device.workspace.") ? "Device workspace-relative path" : "Workspace-relative path"}</span><input .value=${this.filePath} @input=${(e: Event) => this.filePath = (e.target as HTMLInputElement).value} maxlength="1024" placeholder=${["device.workspace.git_status", "device.workspace.search_files", "device.workspace.list_directory"].includes(this.capability) ? "." : "docs/status.md"}></label>
             ${this.capability === "device.workspace.search_files" ? html`<label class="space-y-1 md:col-span-2"><span class="muted">Literal search query (1–200 characters)</span><input .value=${this.searchQuery} @input=${(e: Event) => this.searchQuery = (e.target as HTMLInputElement).value} maxlength="200" placeholder="function executeTask"></label>` : ""}
             ${this.capability === "device.workspace.move_file" ? html`<label class="space-y-1 md:col-span-2"><span class="muted">Destination path (must not already exist)</span><input .value=${this.destinationPath} @input=${(e: Event) => this.destinationPath = (e.target as HTMLInputElement).value} maxlength="1024" placeholder="archive/status.md"></label>` : ""}
             ${requiresFileContent(this.capability) ? html`
@@ -284,7 +285,7 @@ export class MayaControlPlaneTasksWorkspace extends LitElement {
             ` : ""}
           </div>
           <div class="flex flex-wrap items-center justify-between gap-3">
-            <p class="muted">${["workspace.read_file", "device.workspace.read_file", "device.workspace.git_status", "device.workspace.search_files"].includes(this.capability) ? "Read tasks do not modify files; local reads/searches require an online paired PC." : "Creating this task opens an approval request; it does not perform the action."}</p>
+            <p class="muted">${["workspace.read_file", "device.workspace.read_file", "device.workspace.git_status", "device.workspace.search_files", "device.workspace.list_directory"].includes(this.capability) ? "Read tasks do not modify files; local reads, listings and searches require an online paired PC." : "Creating this task opens an approval request; it does not perform the action."}</p>
             <button class="btn primary" ?disabled=${this.busy || !this.instruction.trim() || !this.filePath.trim() || (this.capability.startsWith("device.workspace.") && !this.devices.some(device => device.id === this.deviceId && device.online))} @click=${() => this.createTask()}>${this.busy ? "Creating…" : "Create task"}</button>
           </div>
         </section>

@@ -12,7 +12,7 @@ export class DeviceCommandUncertainError extends Error {
     this.name = "DeviceCommandUncertainError";
   }
 }
-const ALLOWED_COMMANDS = new Set(["system.info", "workspace.list", "workspace.read_file", "workspace.git_status", "workspace.search_files"]);
+const ALLOWED_COMMANDS = new Set(["system.info", "workspace.list", "workspace.list_directory", "workspace.read_file", "workspace.git_status", "workspace.search_files"]);
 
 export class DeviceBridgeManager {
   private readonly connected = new Map<string, ConnectedDevice>();
@@ -258,6 +258,9 @@ export class DeviceBridgeManager {
     }
     if (input.command === "workspace.list" && args.path !== undefined && (typeof args.path !== "string" || args.path.length > 1024)) {
       throw new Error("Workspace path is invalid.");
+    }
+    if (input.command === "workspace.list_directory" && args.path !== undefined && (typeof args.path !== "string" || args.path.length > 1024)) {
+      throw new Error("Workspace listing path is invalid.");
     }
     if (input.command === "workspace.git_status" && args.path !== undefined && (typeof args.path !== "string" || args.path.length > 1024)) {
       throw new Error("Git status workspace path is invalid.");

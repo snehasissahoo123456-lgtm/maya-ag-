@@ -244,3 +244,38 @@ test("local bridge search is bounded, literal and excludes sensitive, binary and
     }
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
+
+
+test("local bridge directory listing is bounded and excludes sensitive and symlink entries", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "maya-bridge-list-"));
+  try {
+    fs.mkdirSync(path.join(root, "src"));
+    fs.mkdirSync(path.join(root, ".ssh"));
+    fs.writeFileSync(path.join(root, "README.md"), "safe");
+    fs.writeFileSync(path.join(root, ".env"), "GEMINI_API_KEY=private");
+    fs.writeFileSync(path.join(root, ".ssh", "id_ed25519"), "private");
+    if (process.platform !== "win32") {
+      const outside = fs.mkdtempSync(path.join(os.tmpdir(), "maya-list-outside-"));
+      try {
+        fs.writeFileSync(path.join(outside, "secret.txt"), "secret");
+        fs.symlinkSync(outside, path.join(root, "linked"), "dir");
+        const entries = await executeLocalBridgeCommand(root, "workspace.list", { path: "." }) as any[];
+        assert.ok(entries.some(item => item.name === "README.md" && item.type === "file"));
+        assert.ok(entries.some(item => item.name === "src" && item.type === "directory"));
+        assert.equal(entries.some(item => item.name === ".env" || item.name === ".ssh" || item.name === "linked"), false);
+      } finally { fs.rmSync(outside, { recursive: true, force: true }); }
+    } else {
+      const entries = await executeLocalBridgeCommand(root, "workspace.list", { path: "." }) as any[];
+      assert.ok(entries.some(item => item.name === "README.md" && item.type === "file"));
+      assert.equal(entries.some(item => item.name === ".env" || item.name === ".ssh"), false);
+    }
+    const detailed = await executeLocalBridgeCommand(root, "workspace.list_directory", { path: "." }) as any;
+    assert.equal(detailed.path, ".");
+    assert.equal(detailed.count, detailed.entries.length);
+    assert.equal(detailed.truncated, false);
+    assert.ok(detailed.entries.some((item: any) => item.name === "README.md" && item.type === "file"));
+    assert.equal(detailed.entries.some((item: any) => item.name === ".env" || item.name === ".ssh" || item.name === "linked"), false);
+    await assert.rejects(() => executeLocalBridgeCommand(root, "workspace.list", { path: "../outside" }), /escapes/i);
+    await assert.rejects(() => executeLocalBridgeCommand(root, "workspace.list_directory", { path: "../outside" }), /escapes/i);
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});

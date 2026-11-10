@@ -48,6 +48,29 @@ test("device bridge pairs, authenticates commands to one Founder and rejects non
     assert.deepEqual(await searchPromise, {
       path: ".", query: "executeTask", matches: [], filesScanned: 4, directoriesScanned: 2, truncated: false,
     });
+    const listPromise = manager.executeCommand({
+      deviceId: paired.device.id, founderId: "founder-a", command: "workspace.list", args: { path: "src" },
+    });
+    await new Promise(resolve => setTimeout(resolve, 0));
+    const listCommand = socket.sent.find(item => item.type === "command" && item.command === "workspace.list");
+    assert.ok(listCommand?.requestId);
+    assert.deepEqual(listCommand.args, { path: "src" });
+    socket.receive({ type: "command_result", requestId: listCommand.requestId, success: true, result: [
+      { name: "agent.ts", type: "file" }, { name: "core", type: "directory" },
+    ] });
+    assert.deepEqual(await listPromise, [{ name: "agent.ts", type: "file" }, { name: "core", type: "directory" }]);
+    const structuredListPromise = manager.executeCommand({
+      deviceId: paired.device.id, founderId: "founder-a", command: "workspace.list_directory", args: { path: "src" },
+    });
+    await new Promise(resolve => setTimeout(resolve, 0));
+    const structuredListCommand = socket.sent.find(item => item.type === "command" && item.command === "workspace.list_directory");
+    assert.ok(structuredListCommand?.requestId);
+    socket.receive({ type: "command_result", requestId: structuredListCommand.requestId, success: true, result: {
+      path: "src", entries: [{ name: "agent.ts", type: "file" }], count: 1, truncated: false,
+    } });
+    assert.deepEqual(await structuredListPromise, {
+      path: "src", entries: [{ name: "agent.ts", type: "file" }], count: 1, truncated: false,
+    });
     await assert.rejects(() => manager.executeCommand({
       deviceId: paired.device.id, founderId: "founder-a", command: "workspace.search_files", args: { query: "" },
     }), /1–200 characters/i);
