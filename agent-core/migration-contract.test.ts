@@ -32,7 +32,7 @@ test("goal-plan constraints are added to the legacy-created table", () => {
   assert.match(sql, /maya_goal_plans_founder_length_check/);
   assert.match(sql, /maya_goal_plans_plan_shape_check/);
   assert.match(sql, /maya_goal_plans_step_states_shape_check/);
-  assert.match(sql, /case[\\s\\S]*jsonb_typeof/i);
+  assert.match(sql, /case[\s\S]*jsonb_typeof/i);
 });
 
 test("conversation storage compatibility adds the JSONB messages column and immutable owner trigger", () => {
