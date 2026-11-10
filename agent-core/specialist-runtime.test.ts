@@ -105,6 +105,17 @@ test("Developer receives a proposal-only tool that cannot write before Founder a
     requiresApproval: false,
     verification: "Queues a high-risk task; Founder approval is required before execution.",
   });
+  registry.register({
+    name: "developer.propose_validation",
+    description: "Queue the fixed lint/test/build suite for Founder approval.",
+    risk: "low",
+    allowedRoles: ["developer"],
+    requiredScopes: ["tests:run"],
+    arguments: {},
+    timeoutMs: 1000,
+    requiresApproval: false,
+    verification: "Queue a Founder-approved validation task.",
+  });
   let prompt = "";
   let proposed: unknown;
   const executor = new SpecialistToolExecutor(registry, async () => ({ queued: true, requiresFounderApproval: true }));
@@ -112,6 +123,7 @@ test("Developer receives a proposal-only tool that cannot write before Founder a
     generate: async input => {
       prompt = input.systemInstruction;
       assert.ok(input.tools.some(tool => tool.name === "developer.propose_file_change"));
+      assert.ok(input.tools.some(tool => tool.name === "developer.propose_validation"));
       proposed = await input.executeTool!("developer.propose_file_change", {
         path: "src/example.ts",
         expectedSha256: "a".repeat(64),
