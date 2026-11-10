@@ -603,7 +603,7 @@ const taskOrchestrator = new TaskOrchestrator(
 const taskWorker = new TaskWorker(taskRepository, taskOrchestrator, taskCapabilityRegistry, {
   founderId: "founder-primary",
   pollIntervalMs: Number(process.env.MAYA_TASK_WORKER_POLL_MS) || 3000,
-  leaseMs: Number(process.env.MAYA_TASK_WORKER_LEASE_MS) || 300_000,
+  leaseMs: 300_000,
   maxTasksPerCycle: Number(process.env.MAYA_TASK_WORKER_MAX_TASKS_PER_CYCLE) || 20,
   isDeviceAvailable: (deviceId, founderId) => activeDeviceBridgeManager?.isOnline(deviceId, founderId) === true,
 }, approvalRepository);
