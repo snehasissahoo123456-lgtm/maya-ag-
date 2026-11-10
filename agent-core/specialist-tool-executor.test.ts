@@ -100,3 +100,39 @@ test("rejects oversized capability results", async () => {
   const executor = new SpecialistToolExecutor(registry(), async () => "x".repeat(100), 10);
   await assert.rejects(executor.execute("developer", "founder-1", "workspace.read_file", { path: "README.md" }), /response limit/);
 });
+
+test("emits redacted success audit evidence without arguments or returned content", async () => {
+  const events: Array<Record<string, unknown>> = [];
+  const executor = new SpecialistToolExecutor(
+    registry(),
+    async () => ({ content: "private file contents must not enter the audit record" }),
+    32_000,
+    event => events.push(event as unknown as Record<string, unknown>),
+  );
+  await executor.execute("developer", "founder-1", "workspace.read_file", { path: "private.txt" });
+  assert.equal(events.length, 1);
+  assert.equal(events[0].status, "success");
+  assert.equal(events[0].agentId, "developer");
+  assert.equal(events[0].founderId, "founder-1");
+  assert.equal(events[0].capability, "workspace.read_file");
+  assert.equal(typeof events[0].resultSha256, "string");
+  assert.equal((events[0].resultSha256 as string).length, 64);
+  assert.equal(typeof events[0].resultBytes, "number");
+  assert.equal("args" in events[0], false);
+  assert.equal(JSON.stringify(events[0]).includes("private file contents"), false);
+});
+
+test("emits a redacted denial event when policy rejects a specialist tool", async () => {
+  const events: Array<Record<string, unknown>> = [];
+  const executor = new SpecialistToolExecutor(
+    registry(),
+    async () => "should not execute",
+    32_000,
+    event => events.push(event as unknown as Record<string, unknown>),
+  );
+  await assert.rejects(executor.execute("developer", "founder-1", "workspace.write_file", { path: "private.txt" }), /low-risk/);
+  assert.equal(events.length, 1);
+  assert.equal(events[0].status, "denied");
+  assert.equal(events[0].errorCode, "policy_denied");
+  assert.equal("args" in events[0], false);
+});
