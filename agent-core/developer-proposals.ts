@@ -46,6 +46,14 @@ export class DeveloperProposalService {
       throw new Error("Developer change instruction must contain 1–1,000 characters.");
     }
 
+    const segments = input.path.split(/[\\/]/).map(segment => segment.toLowerCase());
+    const base = segments[segments.length - 1] || "";
+    if (segments.some(segment => [".git", "node_modules", ".maya-data", "secrets", "credentials"].includes(segment)) ||
+        base === ".env" || base.startsWith(".env.") || base === ".npmrc" || base === ".netrc" ||
+        base === "id_rsa" || base.endsWith(".pem") || base.endsWith(".key") || base.endsWith(".p12") || base.endsWith(".pfx")) {
+      throw new Error("Developer proposals cannot target secrets, credentials or generated dependency paths.");
+    }
+
     const envelope = await this.tasks.enqueue({
       id: "developer-" + randomUUID(),
       founderId: input.founderId,
