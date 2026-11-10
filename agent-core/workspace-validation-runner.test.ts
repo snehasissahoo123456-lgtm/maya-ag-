@@ -26,6 +26,10 @@ test("validation runner executes only the fixed lint, test and build scripts wit
     ["bun", ["run", "build"]],
   ]);
   assert.ok(calls.every(call => call.options.shell === false));
+  assert.equal(calls[0].options.env.CI, "true");
+  assert.equal(calls[0].options.env.NODE_ENV, "test");
+  assert.equal(Object.hasOwn(calls[0].options.env, "GEMINI_API_KEY"), false);
+  assert.equal(Object.hasOwn(calls[0].options.env, "SUPABASE_SERVICE_ROLE_KEY"), false);
   assert.equal(result.passed, true);
   assert.equal(result.commands.length, 3);
   assert.equal(result.sha256.length, 64);
