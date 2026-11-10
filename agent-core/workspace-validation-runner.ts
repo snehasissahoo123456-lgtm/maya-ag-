@@ -42,7 +42,7 @@ async function runOne(
       ComSpec: inherited.ComSpec,
       PATHEXT: inherited.PATHEXT,
       CI: "true",
-      NODE_ENV: "test",
+      NODE_ENV: script === "build" ? "production" : "test",
     }).filter((entry): entry is [string, string] => typeof entry[1] === "string"));
     child = spawnProcess("bun", ["run", script], {
         cwd,
