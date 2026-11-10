@@ -3,6 +3,7 @@
 **Audit date:** 10 November 2026  
 **Repository:** `snehasissahoo123456-lgtm/maya-ag-`  
 **Reviewed development head:** `maya/specialist-ui-runtime-status` (`6d0e554484123b83dc9d5af0eca91fd7ed9ca8e5`)  
+**Latest hardening head:** `maya/release-hardening-audit-fixes` (`4cbaefdeaae9f7e975290740183b94c6b377700b`)  
 **Development merge commit:** `ee48f4fc83367ae87f55d368c82058f4f88d3a18`  
 **Main before this audit's hardening work:** `9d0ec6d73f101dcfdecd6f3d188355bc7752c82b`
 
@@ -17,8 +18,9 @@ It is **not yet a fully autonomous multi-department operator and is not release-
 - PRs #36 and #37 are merged into `main`; they provide the persistent-session, audit, CSRF and conversation-history foundation.
 - PRs #34, #35 and #38–#45 are merged into stacked development branches, not into `main`.
 - PRs #2–#33 remain open as 32 stacked draft pull requests. They are not part of the default branch.
-- GitHub compare reported the final development head 72 commits behind `main`. The development stack therefore cannot be treated as a safe release candidate until the histories and overlapping server/database files are reconciled.
-- PR #43, #44 and #45 passed their latest full CI runs. PR #46's latest head (`3ff282c`) also passed typecheck, PowerShell validation, unit/integration tests, production build, Compose validation and production image. PR #46 remains open and draft; it has not been merged.
+- Current GitHub compare (`main...maya/release-hardening-audit-fixes`) reports **662 commits ahead and 72 behind**, with status `diverged`; the merge base is `6dd67d1bb4c0d77da575f55b0b63808f4672696a`. This is a history/integration problem, not a failing-CI problem.
+- A direct file-tree comparison found 29 paths whose contents differ on both lines, 105 files present only on the development head, and 6 files present only on `main`. The overlapping paths include high-risk files such as `server.ts`, `index.ts`, `package.json`, `agent-core/task-orchestrator.ts`, and the CI workflow. The six main-only files include the audit-log store, conversation-history implementation/tests, a conversation repository test, and the original conversation migration. A snapshot replacement or force-push would therefore risk dropping main-only code or overwriting newer main behavior.
+- PR #46 was **merged** into `maya/specialist-ui-runtime-status` (merge commit `052ad3e3920f68b650a51179e9a6b85285a574fe`); it was not merged into `main`. Its latest hardening head (`4cbaefde`) passed typecheck, Windows PowerShell validation, tests, production build, Compose validation and production container image. The merge into the stacked development branch did not resolve the divergence from `main`.
 - Among open PRs #2–#33, most latest recorded runs passed. PRs #5, #9, #10, #13 and #23 had no workflow run for the current head in the queried run history. PRs #7 and #12 failed during Bun setup before typecheck or tests, so those failures do not establish a code regression.
 - The normal CI checks TypeScript, tests, build, Windows PowerShell scripts, Compose configuration and the production image. It does **not** execute the Supabase SQL migrations against PostgreSQL.
 
@@ -32,7 +34,7 @@ The development stack had diverged from the already-merged main security baselin
 - Main rejected cookie-authenticated state-changing REST requests without a same-origin `Origin`/`Referer`; the development stack lacked this CSRF check.
 - The live authenticated WebSocket relay also needed explicit origin validation.
 
-The hardening branch restores persistent hashed sessions, adds cookie-mutation origin checks, validates the live WebSocket origin and adds HTTP integration assertions for cross-origin and missing-origin requests. PR #46 passes full CI but remains unmerged. File-backed sessions are still single-instance; a shared transactional session store is not implemented.
+The hardening branch restores persistent hashed sessions, adds cookie-mutation origin checks, validates the live WebSocket origin and adds HTTP integration assertions for cross-origin and missing-origin requests. PR #46 is merged into the stacked development branch, but these changes are not yet integrated into `main`. File-backed sessions are still single-instance; a shared transactional session store is not implemented.
 
 ### 2. Supabase task RPC contract mismatch
 
@@ -86,7 +88,7 @@ The UI currently has general pages for Dashboard, Live Chat, Goal Plans, CEO Orc
 
 ## Recommended build order
 
-1. Finish the main-line security/schema reconciliation branch and get full CI green. Keep Supabase goal-plan workers disabled until lease renewal and two-worker tests exist.
+1. Create a fresh integration branch from the current `main`, then reconcile the 29 overlapping paths with three-way merges while retaining the 6 main-only files and porting the 105 development-only files selectively. Do not copy the whole development tree over `main`, force-push, or merge the 662-commit history blindly. Run the full CI suite on the resulting PR. Keep Supabase goal-plan workers disabled until lease renewal and two-worker tests exist.
 2. Build the **Developer department**: isolated worktree, exact Founder-approved patch/write, visible diff, test/build execution, independent verification and rollback. Never grant unrestricted shell or PC access as the first implementation.
 3. Build the **QA department** as an independent verification gate for Developer and all other departments.
 4. Build **Research** as a source-backed workflow with saved evidence, citations, comparison and reusable reports.
