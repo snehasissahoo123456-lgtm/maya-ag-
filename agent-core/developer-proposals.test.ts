@@ -8,7 +8,7 @@ test("Developer proposal queues an exact Founder-approved task without executing
   let enqueued: any;
   let executed = false;
   const service = new DeveloperProposalService({
-    enqueue: async input => {
+    enqueue: async (input: any) => {
       enqueued = input;
       return { capability: input.capability, task: { id: input.id, status: "queued", requiresApproval: true } } as any;
     },
