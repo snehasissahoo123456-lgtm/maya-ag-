@@ -54,12 +54,16 @@ Main's conversation migration describes a JSONB `messages` column. The developme
 
 Task lifecycle and specialist tool outcomes are persisted through the Founder-scoped append-only audit repository. The legacy activity feed still contains in-memory-only events. Specialist audit entries do not yet provide complete CEO-run/assignment/task trace linkage. Audit-chain verification, external backup and retention policy remain outstanding.
 
+### 6. Direct validation execution bypass removed in the Developer branch
+
+The earlier `run_tests` model tool and `/api/action-engine/tests/run` endpoint executed repository scripts directly without a separate approval task. The Developer branch replaces both paths with a high-risk `workspace.run_validation` task. Only the fixed lint, test and build scripts are accepted, execution requires a single-use Founder approval, and the task worker lease exceeds the bounded validation timeout. The runner uses a no-shell child process and has cancellation/output limits. This is still not a container sandbox or isolated Git worktree.
+
 ## Department-by-department capability audit
 
 | Department | Status | What is actually present | What remains |
 |---|---|---|---|
 | Research and intelligence | Limited | Gemini Google Search grounding in chat; bounded specialist reasoning | Dedicated research workspace, source archive, provenance/citation checks, repeatable research jobs and evidence comparison |
-| Software engineering / Developer | Limited | Server workspace list/read and repository validation command; limited approved file operations elsewhere in the task control plane | Developer-owned write workflow, isolated worktree/sandbox, patch review, Git diff verification, test execution under approval, rollback and VS Code integration |
+| Software engineering / Developer | Limited; first workflow in PR #47 | Dedicated Developer page; workspace reads with SHA-256; exact-hash file replacement proposals; Founder-approved atomic writes; fixed lint/test/build validation queued as a separate Founder-approved task | Isolated Git worktree, unified diff review, rollback, sandboxed validation, local PC workspace enrollment, new-file creation and VS Code integration |
 | QA and verification | Not a complete department | CI and task verification evidence exist | Independent QA agent, test-plan generation, regression matrix, failure triage and acceptance gate |
 | Business and venture operations | Planned | Generic tasks and memory notes | Projects, SOPs, KPIs, owners, reporting cadence and connected business systems |
 | Real estate and property | Planned | No property-specific workflow | Property CRM, leads, land/acre/dismil records, document vault, due diligence, valuation sources and human legal review |
@@ -70,19 +74,19 @@ Task lifecycle and specialist tool outcomes are persisted through the Founder-sc
 | PC and device operations | Limited | Paired local PC bridge, bounded file/list/search/Git operations and exact-approved file changes | Device registry/relay distribution, connector isolation, shell/browser/app control under separate grants, VS Code integration and physical-PC acceptance |
 | AI workforce / CEO | Limited | CEO selects up to four specialists concurrently; role-scoped read tools and persisted specialist audit events | Approved write tools, per-agent budgets, global concurrency, cancellation, durable assignment queues, independent verification and larger workforce governance |
 
-The UI currently has general pages for Dashboard, Live Chat, Goal Plans, CEO Orchestration, Specialist Agents, Devices, Schedules, Tasks, Tools and Memory. The specialist interface is a shared role-driven workspace. There are not yet separate, functional department pages for Research, Developer, QA, Business, Real Estate, Hospitality, Media and Finance.
+The UI has general pages for Dashboard, Live Chat, Goal Plans, CEO Orchestration, Specialist Agents, Developer, Devices, Schedules, Tasks, Tools and Memory. Developer now has a separate first-stage workspace. There are not yet separate, functional department pages for Research, QA, Business, Real Estate, Hospitality, Media and Finance.
 
 ## Platform and operational status
 
-- **Authentication:** Founder password flow only. Google OAuth and SMS OTP are deliberately disabled because verified providers are not configured. Login rate limiting remains outstanding.
+- **Authentication:** Founder password flow only. A single-process in-memory login throttle exists; it is not shared or persistent across instances. Google OAuth and SMS OTP remain disabled because verified providers are not configured.
 - **Persistence:** File-backed stores are the default; optional Supabase adapters exist for several repositories. Migrations have not been applied to a live project.
-- **Workers:** Task and schedule workers are opt-in. Goal-plan worker is opt-in and file-only pending lease renewal. Worker flags default to disabled.
+- **Workers:** Task and schedule workers are opt-in. The task worker can execute exact-approval file writes and the fixed validation suite; the validation timeout is 180 seconds and the worker lease is fixed at 300 seconds. The goal-plan worker remains file-only pending lease renewal. Worker flags default to disabled.
 - **PC connector:** Limited paired local bridge, not unrestricted desktop automation. Windows logon-task registration and real device operation have not been tested on the Founder's PC.
 - **Browser/app automation:** No general browser automation, browser-session control, arbitrary shell or arbitrary desktop-app control.
 - **Android:** PWA only. The Android directory explicitly has no Gradle project and no APK.
 - **Cloud:** Dockerfile/Compose and CI image build exist. No production host, domain, TLS proxy, live secret provisioning, monitoring or backup restore test has been verified.
 - **Voice:** UI/media capture and Gemini integration code exist; real provider sessions and end-to-end voice reliability have not been acceptance-tested.
-- **Security:** Route/tool review, login rate limits, live WebSocket/device-origin tests, penetration testing, secret rotation, backup recovery and a complete audit trail remain outstanding.
+- **Security:** Route/tool review, shared/persistent login throttling, live WebSocket/device-origin tests, penetration testing, secret rotation, backup recovery and a complete unified audit trail remain outstanding.
 
 ## Recommended build order
 
