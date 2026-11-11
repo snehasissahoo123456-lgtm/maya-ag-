@@ -21,7 +21,7 @@ COPY --chown=node:node package.json ./package.json
 # .dockerignore excludes local secrets, data, node_modules and build output.
 COPY --chown=node:node . .
 
-RUN mkdir -p /data && chown node:node /data
+RUN mkdir -p /data /developer-queue /developer-workspaces && chown node:node /data /developer-queue /developer-workspaces
 USER node
 
 EXPOSE 3000

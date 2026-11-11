@@ -28,6 +28,8 @@ services:
       MAYA_SCHEDULE_WORKER_POLL_MS: ${MAYA_SCHEDULE_WORKER_POLL_MS:-3000}
     volumes:
       - maya-data:/data
+      - maya-developer-queue:/developer-queue
+      - maya-developer-workspaces:/developer-workspaces
     read_only: true
     tmpfs:
       - /tmp:rw,noexec,nosuid,size=64m
@@ -45,5 +47,35 @@ services:
       retries: 3
       start_period: 30s
 
+  # Opt-in worker: no network, credentials, Docker socket or host mounts.
+  developer-sandbox:
+    image: maya-personal-agent:local
+    profiles: ["developer-sandbox"]
+    command: ["node", "--import", "tsx", "agent-core/developer-sandbox-worker.ts"]
+    restart: unless-stopped
+    init: true
+    user: "node"
+    network_mode: none
+    environment:
+      NODE_ENV: test
+      MAYA_DEVELOPER_SANDBOX_QUEUE_DIR: /developer-queue
+      MAYA_DEVELOPER_SANDBOX_WORKSPACE_DIR: /developer-workspaces
+    volumes:
+      - maya-developer-queue:/developer-queue
+      - maya-developer-workspaces:/developer-workspaces
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=128m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 2g
+    cpus: 2.0
+    pids_limit: 128
+    stop_grace_period: 15s
+
 volumes:
   maya-data:
+  maya-developer-queue:
+  maya-developer-workspaces:
