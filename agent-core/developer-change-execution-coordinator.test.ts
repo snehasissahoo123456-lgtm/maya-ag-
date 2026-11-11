@@ -80,7 +80,10 @@ test("restores the exact snapshot if execution lifecycle persistence fails", asy
   });
   await f.approvals.decide({ approvalId: grant.id, founderId: f.change.founderId, approved: true });
   const broken = {
-    ...f.changes,
+    create: f.changes.create.bind(f.changes),
+    get: f.changes.get.bind(f.changes),
+    list: f.changes.list.bind(f.changes),
+    delete: f.changes.delete.bind(f.changes),
     update: async () => { throw new Error("disk unavailable"); },
   };
   const coordinator = new DeveloperChangeExecutionCoordinator({
