@@ -60,3 +60,23 @@ test("prepares a group-writable workspace for an unprivileged command identity",
  const r=JSON.parse(await fs.readFile(path.join(f.queueRoot,"results","job-00000001.json"),"utf8"));assert.equal(r.status,"passed");
  await fs.rm(f.root,{recursive:true,force:true});
 });
+
+test("allows only in-workspace dependency symlinks and preserves executable permissions",async()=>{
+ const f=await fixture();const target=path.join(f.workspaceRoot,f.workspaceId,"tools","compiler.js");
+ await fs.mkdir(path.dirname(target),{recursive:true});await fs.writeFile(target,"console.log('ok')");await fs.chmod(target,0o755);
+ await fs.symlink("tools/compiler.js",path.join(f.workspaceRoot,f.workspaceId,"compiler"));
+ await enqueue(f,job(f));
+ await processOneSandboxJob({queueRoot:f.queueRoot,workspaceRoot:f.workspaceRoot,runCommand:async(_c,cwd)=>{
+   const st=await fs.stat(path.join(cwd,"tools","compiler.js"));
+   return{exitCode:(st.mode&0o010)!==0?0:1,timedOut:false,output:"mode check",durationMs:1};
+ }});
+ const r=JSON.parse(await fs.readFile(path.join(f.queueRoot,"results","job-00000001.json"),"utf8"));assert.equal(r.status,"passed");
+ await fs.rm(f.root,{recursive:true,force:true});
+});
+test("rejects symlinks that resolve outside the workspace",async()=>{
+ const f=await fixture();const outside=path.join(f.root,"outside");await fs.mkdir(outside);await fs.symlink(outside,path.join(f.workspaceRoot,f.workspaceId,"escape"));
+ await enqueue(f,job(f));let called=false;
+ await processOneSandboxJob({queueRoot:f.queueRoot,workspaceRoot:f.workspaceRoot,runCommand:async()=>{called=true;return{exitCode:0,timedOut:false,output:"",durationMs:1};}});
+ const r=JSON.parse(await fs.readFile(path.join(f.queueRoot,"results","job-00000001.json"),"utf8"));assert.equal(r.status,"rejected");assert.equal(called,false);
+ await fs.rm(f.root,{recursive:true,force:true});
+});

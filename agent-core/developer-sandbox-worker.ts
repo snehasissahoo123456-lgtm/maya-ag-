@@ -38,17 +38,25 @@ function parseJob(v:unknown):SandboxJob {
     typeof j.createdAt!=="string"||!Number.isFinite(Date.parse(j.createdAt))) throw new Error("Invalid or unsupported sandbox job fields.");
   return j as unknown as SandboxJob;
 }
-async function prepareWorkspacePermissions(directory:string,depth=0,state={count:0}):Promise<void> {
+async function prepareWorkspacePermissions(directory:string,root:string,depth=0,state={count:0}):Promise<void> {
   if(depth>16||state.count>10_000) throw new Error("Workspace exceeds the sandbox file-tree limits.");
   await fs.chmod(directory,0o2770);
   for(const entry of await fs.readdir(directory,{withFileTypes:true})) {
     state.count++;
-    if(entry.isSymbolicLink()) throw new Error("Workspace symlinks are blocked.");
-    const target=path.join(directory,entry.name),stat=await fs.lstat(target);
-    if(stat.isDirectory()) await prepareWorkspacePermissions(target,depth+1,state);
+    const target=path.join(directory,entry.name);
+    if(entry.isSymbolicLink()) {
+      const resolved=await fs.realpath(target);
+      if(!inside(root,resolved)) throw new Error("Workspace symlink target escapes the workspace.");
+      const linked=await fs.stat(target);
+      if(!linked.isFile()&&!linked.isDirectory()) throw new Error("Workspace symlink target is not a regular file or directory.");
+      continue;
+    }
+    const stat=await fs.lstat(target);
+    if(stat.isDirectory()) await prepareWorkspacePermissions(target,root,depth+1,state);
     else if(stat.isFile()) {
       if(stat.nlink>1) throw new Error("Workspace hard-linked files are blocked.");
-      await fs.chmod(target,0o660);
+      const mode=stat.mode&0o777;
+      await fs.chmod(target,mode|0o060|((mode&0o100)?0o010:0));
     } else throw new Error("Workspace contains a non-regular filesystem entry.");
   }
 }
@@ -65,7 +73,7 @@ async function workspacePath(rootInput:string,id:string,baselineCommit:string,qu
   const recorded=(await fs.readFile(baselinePath,"utf8")).trim();
   if(recorded.toLowerCase()!==baselineCommit.toLowerCase()) throw new Error("Workspace baseline commit does not match the approved job.");
   await fs.chmod(root,0o710);
-  await prepareWorkspacePermissions(real);
+  await prepareWorkspacePermissions(real,real);
   return real;
 }
 export async function runSandboxCommand(command:SandboxCommand,cwd:string,timeoutMs=TIMEOUT) {
