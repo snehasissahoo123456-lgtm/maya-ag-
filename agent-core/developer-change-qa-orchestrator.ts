@@ -124,7 +124,7 @@ export async function verifyDeveloperWorkspaceChange(
   const passed = !failure && report.passed;
   const summary = passed
     ? "All required isolated Developer checks passed: typecheck, tests and production build."
-    : (failure ?? report.gate.summary ?? "One or more required Developer QA checks did not pass.").slice(0, 4000);
+    : (failure ?? report.gate.findings.map(finding => `${finding.checkId}: ${finding.message}`).join("\n") ?? "One or more required Developer QA checks did not pass.").slice(0, 4000);
   const verified = recordDeveloperVerification(change, {
     passed, evidenceRef: "maya-sandbox://verification/" + change.id,
     summary, now: timestamp(),
