@@ -8,8 +8,9 @@ async function fixture(){
  const root=await fs.mkdtemp(path.join(os.tmpdir(),"maya-sandbox-"));
  const queueRoot=path.join(root,"queue"),workspaceRoot=path.join(root,"workspaces"),workspaceId="workspace-001";
  await fs.mkdir(path.join(workspaceRoot,workspaceId),{recursive:true});
- await fs.writeFile(path.join(workspaceRoot,workspaceId,".maya-baseline"),"a".repeat(40));
  await fs.mkdir(path.join(queueRoot,"pending"),{recursive:true});
+ await fs.mkdir(path.join(queueRoot,"baselines"),{recursive:true});
+ await fs.writeFile(path.join(queueRoot,"baselines",workspaceId+".sha"),"a".repeat(40));
  return {root,queueRoot,workspaceRoot,workspaceId};
 }
 function job(f:Awaited<ReturnType<typeof fixture>>,overrides:Record<string,unknown>={}) {
@@ -45,8 +46,17 @@ test("rejects oversized queue entries",async()=>{
 });
 
 test("rejects a workspace whose baseline marker differs from the requested commit",async()=>{
- const f=await fixture();await fs.writeFile(path.join(f.workspaceRoot,f.workspaceId,".maya-baseline"),"b".repeat(40));await enqueue(f,job(f));let called=false;
+ const f=await fixture();await fs.writeFile(path.join(f.queueRoot,"baselines",f.workspaceId+".sha"),"b".repeat(40));await enqueue(f,job(f));let called=false;
  await processOneSandboxJob({queueRoot:f.queueRoot,workspaceRoot:f.workspaceRoot,runCommand:async()=>{called=true;return{exitCode:0,timedOut:false,output:"",durationMs:1};}});
  const r=JSON.parse(await fs.readFile(path.join(f.queueRoot,"results","job-00000001.json"),"utf8"));assert.equal(r.status,"rejected");assert.equal(called,false);
+ await fs.rm(f.root,{recursive:true,force:true});
+});
+
+test("prepares a group-writable workspace for an unprivileged command identity",async()=>{
+ const f=await fixture();await enqueue(f,job(f));
+ await processOneSandboxJob({queueRoot:f.queueRoot,workspaceRoot:f.workspaceRoot,runCommand:async(_c,cwd)=>{
+   const st=await fs.stat(cwd);return{exitCode:(st.mode&0o070)===0o070?0:1,timedOut:false,output:"permission check",durationMs:1};
+ }});
+ const r=JSON.parse(await fs.readFile(path.join(f.queueRoot,"results","job-00000001.json"),"utf8"));assert.equal(r.status,"passed");
  await fs.rm(f.root,{recursive:true,force:true});
 });

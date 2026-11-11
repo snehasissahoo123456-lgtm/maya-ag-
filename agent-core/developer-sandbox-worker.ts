@@ -20,9 +20,12 @@ const clean=(s:string)=>s.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/g,""
 const inside=(root:string,target:string)=>{const r=path.relative(root,target);return r===""||(!r.startsWith("..")&&!path.isAbsolute(r));};
 
 async function dirs(root:string) {
-  for(const n of ["pending","running","results"]) {
+  await fs.mkdir(root,{recursive:true,mode:0o700});
+  await fs.chmod(root,0o700);
+  for(const n of ["pending","running","results","baselines"]) {
     const p=path.join(root,n); await fs.mkdir(p,{recursive:true,mode:0o700});
     const st=await fs.lstat(p); if(!st.isDirectory()||st.isSymbolicLink()) throw new Error("Queue paths must be regular directories.");
+    await fs.chmod(p,0o700);
   }
 }
 function parseJob(v:unknown):SandboxJob {
@@ -35,18 +38,34 @@ function parseJob(v:unknown):SandboxJob {
     typeof j.createdAt!=="string"||!Number.isFinite(Date.parse(j.createdAt))) throw new Error("Invalid or unsupported sandbox job fields.");
   return j as unknown as SandboxJob;
 }
-async function workspacePath(rootInput:string,id:string,baselineCommit:string) {
+async function prepareWorkspacePermissions(directory:string,depth=0,state={count:0}):Promise<void> {
+  if(depth>16||state.count>10_000) throw new Error("Workspace exceeds the sandbox file-tree limits.");
+  await fs.chmod(directory,0o2770);
+  for(const entry of await fs.readdir(directory,{withFileTypes:true})) {
+    state.count++;
+    if(entry.isSymbolicLink()) throw new Error("Workspace symlinks are blocked.");
+    const target=path.join(directory,entry.name),stat=await fs.lstat(target);
+    if(stat.isDirectory()) await prepareWorkspacePermissions(target,depth+1,state);
+    else if(stat.isFile()) {
+      if(stat.nlink>1) throw new Error("Workspace hard-linked files are blocked.");
+      await fs.chmod(target,0o660);
+    } else throw new Error("Workspace contains a non-regular filesystem entry.");
+  }
+}
+async function workspacePath(rootInput:string,id:string,baselineCommit:string,queueRoot:string) {
   const root=await fs.realpath(rootInput), target=path.resolve(root,id);
   if(!inside(root,target)||target===root) throw new Error("Workspace path escapes sandbox root.");
   const st=await fs.lstat(target);
   if(!st.isDirectory()||st.isSymbolicLink()) throw new Error("Workspace must be a regular non-symlink directory.");
   const real=await fs.realpath(target);
   if(real!==target||!inside(root,real)) throw new Error("Workspace symlinks are blocked.");
-  const marker=path.join(real,".maya-baseline");
-  const markerStat=await fs.lstat(marker);
-  if(!markerStat.isFile()||markerStat.isSymbolicLink()) throw new Error("Workspace baseline marker must be a regular file.");
-  const recorded=(await fs.readFile(marker,"utf8")).trim();
+  const baselinePath=path.join(queueRoot,"baselines",id+".sha");
+  const markerStat=await fs.lstat(baselinePath);
+  if(!markerStat.isFile()||markerStat.isSymbolicLink()||markerStat.size>64) throw new Error("Protected workspace baseline record is invalid.");
+  const recorded=(await fs.readFile(baselinePath,"utf8")).trim();
   if(recorded.toLowerCase()!==baselineCommit.toLowerCase()) throw new Error("Workspace baseline commit does not match the approved job.");
+  await fs.chmod(root,0o710);
+  await prepareWorkspacePermissions(real);
   return real;
 }
 export async function runSandboxCommand(command:SandboxCommand,cwd:string,timeoutMs=TIMEOUT) {
@@ -56,6 +75,7 @@ export async function runSandboxCommand(command:SandboxCommand,cwd:string,timeou
     const finish=(exitCode:number|null)=>{if(settled)return;settled=true;resolve({exitCode,timedOut,output:clean(output),durationMs:Date.now()-start});};
     const child=spawn("npm",["run",script],{cwd,shell:false,windowsHide:true,detached:process.platform!=="win32",
       env:{PATH:process.env.PATH||"/usr/local/bin:/usr/bin:/bin",HOME:"/tmp",TMPDIR:"/tmp",CI:"1",NODE_ENV:"test"},
+      uid:process.platform==="win32"?undefined:65534,gid:process.platform==="win32"?undefined:process.getgid(),
       stdio:["ignore","pipe","pipe"]});
     const add=(b:Buffer)=>{output=clean(output+b.toString("utf8"));};
     child.stdout?.on("data",add); child.stderr?.on("data",add);
@@ -79,7 +99,7 @@ export async function processOneSandboxJob(o:SandboxOptions):Promise<boolean> {
   try{
     const st=await fs.lstat(claimed); if(!st.isFile()||st.isSymbolicLink()||st.size>16_384)throw new Error("Invalid or oversized job file.");
     job=parseJob(JSON.parse(await fs.readFile(claimed,"utf8")));
-    const cwd=await workspacePath(o.workspaceRoot,job.workspaceId,job.baselineCommit);
+    const cwd=await workspacePath(o.workspaceRoot,job.workspaceId,job.baselineCommit,root);
     const r=await (o.runCommand??runSandboxCommand)(job.command,cwd,TIMEOUT);
     result={id:job.id,workspaceId:job.workspaceId,command:job.command,status:!r.timedOut&&r.exitCode===0?"passed":"failed",exitCode:r.exitCode,timedOut:r.timedOut,durationMs:r.durationMs,output:clean(r.output),finishedAt:(o.now?.()??new Date()).toISOString()};
   }catch(e){
