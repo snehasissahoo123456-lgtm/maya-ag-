@@ -121,3 +121,20 @@ test("rolls back if queue creation fails and rejects executions without applied 
   }), /successfully applied/i);
   await fs.rm(f.root, { recursive: true, force: true });
 });
+
+test("rolls back when the workspace is no longer isolated before checks begin", async () => {
+  const f = await fixture(), calls: string[] = [], run = execution();
+  const unsafe = workspace(calls);
+  unsafe.inspect = async () => ({
+    workspaceId: "workspace-001", baselineCommit, isolated: false,
+    networkAccess: false, secretsMounted: false,
+  });
+  const outcome = await verifyDeveloperWorkspaceExecution({
+    execution: run, baselineCommit, queueRoot: f.queueRoot, workspace: unsafe, now: () => fixedNow,
+  });
+  assert.equal(outcome.rolledBack, true);
+  assert.match(outcome.failure ?? "", /isolation/i);
+  assert.equal(outcome.change.status, "rolled_back");
+  assert.deepEqual(calls, ["restore:snapshot-001"]);
+  await fs.rm(f.root, { recursive: true, force: true });
+});
