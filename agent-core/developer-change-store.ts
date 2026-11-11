@@ -16,6 +16,11 @@ const ID = /^[a-zA-Z0-9][a-zA-Z0-9_-]{2,79}$/;
 const FOUNDER = /^[a-zA-Z0-9][a-zA-Z0-9_.:@-]{1,119}$/;
 const SHA = /^[a-f0-9]{64}$/;
 const STATUSES = new Set<DeveloperChangeStatus>(["draft","submitted","reviewed","approved","executing","verifying","completed","rejected","rolled_back"]);
+const ALLOWED_TRANSITIONS: Record<DeveloperChangeStatus, readonly DeveloperChangeStatus[]> = {
+  draft: ["submitted"], submitted: ["reviewed","rejected"], reviewed: ["approved"],
+  approved: ["executing"], executing: ["verifying","completed","rolled_back"],
+  verifying: ["completed","rolled_back"], completed: ["rolled_back"], rejected: [], rolled_back: [],
+};
 const DEFAULT_MAX_RECORDS = 2000;
 const DEFAULT_MAX_BYTES = 16 * 1024 * 1024;
 const hash = (value: string) => createHash("sha256").update(value, "utf8").digest("hex");
@@ -52,10 +57,13 @@ function validateRecord(value: unknown): DeveloperChangeRequest {
   if (r.rollbackSnapshotId !== undefined && (typeof r.rollbackSnapshotId !== "string" || !r.rollbackSnapshotId.trim())) {
     throw new Error("Developer change rollback snapshot metadata is invalid.");
   }
-  if (["reviewed","approved","executing","verifying","completed"].includes(r.status) &&
+  if (["reviewed","approved","executing","verifying","completed","rolled_back"].includes(r.status) &&
       r.review?.decision !== "approved") throw new Error("Advanced Developer change status requires independent approval.");
-  if (["approved","executing","verifying","completed"].includes(r.status) && !r.founderApproval) {
+  if (["approved","executing","verifying","completed","rolled_back"].includes(r.status) && !r.founderApproval) {
     throw new Error("Approved Developer change status requires owning Founder approval.");
+  }
+  if (["executing","verifying","completed","rolled_back"].includes(r.status) && !r.execution) {
+    throw new Error("Executed Developer change status requires execution metadata.");
   }
   if (r.status === "completed" && r.verification?.passed !== true) throw new Error("Completed Developer change requires passing verification.");
   if (r.status === "rolled_back" && !r.rollbackSnapshotId) throw new Error("Rolled-back Developer change requires snapshot evidence.");
@@ -105,6 +113,19 @@ export class DeveloperChangeStore implements DeveloperChangeRepository {
     const current = this.records.get(valid.id);
     if (!current || current.founderId !== valid.founderId) throw new Error("Developer change not found for this Founder.");
     if (valid.createdAt !== current.createdAt) throw new Error("Developer change creation timestamp is immutable.");
+    if (valid.status !== current.status && !ALLOWED_TRANSITIONS[current.status].includes(valid.status)) {
+      throw new Error("Developer change lifecycle transition is not allowed: " + current.status + " -> " + valid.status);
+    }
+    if (current.review && JSON.stringify(valid.review) !== JSON.stringify(current.review)) {
+      throw new Error("Independent review metadata is immutable once recorded.");
+    }
+    if (current.founderApproval && JSON.stringify(valid.founderApproval) !== JSON.stringify(current.founderApproval)) {
+      throw new Error("Founder approval metadata is immutable once recorded.");
+    }
+    if (current.execution && (valid.execution?.startedAt !== current.execution.startedAt ||
+        JSON.stringify(valid.execution.commandIds) !== JSON.stringify(current.execution.commandIds))) {
+      throw new Error("Developer execution identity is immutable once execution starts.");
+    }
     this.records.set(valid.id, valid);
     try { this.persist(); } catch (error) { this.records.set(valid.id,current); throw error; }
     return clone(valid);

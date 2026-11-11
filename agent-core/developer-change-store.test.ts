@@ -47,11 +47,13 @@ test("updates lifecycle state without allowing Founder or creation-time reassign
   assert.equal((await store.get({changeId:"change-001",founderId:"founder-1"}))?.status,"submitted");
   await assert.rejects(store.update({...submitted,founderId:"founder-2"}),/not found/);
   await assert.rejects(store.update({...submitted,createdAt:"2026-11-10T00:00:00.000Z"}),/immutable/);
+  await assert.rejects(store.update({...make(),status:"approved"}),/transition is not allowed/);
 });
 
-test("requires review and Founder approval metadata for advanced states", async () => {
+test("requires review, Founder approval and execution evidence for advanced states", async () => {
   const store = new DeveloperChangeStore();
   await assert.rejects(store.create({...make(),status:"approved"}),/independent approval/);
+  await assert.rejects(store.create({...make(),status:"rolled_back",rollbackSnapshotId:"snapshot-1"}),/independent approval/);
   const value = approved();
   await store.create(value);
   assert.equal((await store.get({changeId:value.id,founderId:"founder-1"}))?.status,"approved");
