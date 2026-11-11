@@ -18,19 +18,22 @@ const taskId = "task-001";
 const content = "export const featureEnabled = true;\n";
 const patch = "diff --git a/src/feature.ts b/src/feature.ts\n--- a/src/feature.ts\n+++ b/src/feature.ts\n@@ -0,0 +1 @@\n+export const featureEnabled = true;";
 
-function makeChange() {
-  const draft = createDeveloperChangeRequest({
+function makeDraftChange() {
+  return createDeveloperChangeRequest({
     id: "change-001", founderId, title: "Add feature", objective: "Apply a reviewed feature patch",
     workspaceId: "workspace-1", files: ["src/feature.ts"], patch, diffSha256: digest(patch), now,
   });
-  const reviewed = recordDeveloperReview(submitDeveloperChange(draft, now), {
+}
+
+function makeChange() {
+  const reviewed = recordDeveloperReview(submitDeveloperChange(makeDraftChange(), now), {
     reviewerId: "independent-qa", decision: "approved", notes: "Reviewed", now,
   });
   return approveDeveloperChange(reviewed, founderId, now);
 }
 function makePackage() {
   return prepareDeveloperPatchPackage({
-    change: makeChange(), baselineCommit: "a".repeat(40),
+    change: makeDraftChange(), baselineCommit: "a".repeat(40),
     files: [{ path: "src/feature.ts", content, expectedSha256: null }], now,
   });
 }
