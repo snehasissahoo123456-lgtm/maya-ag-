@@ -47,7 +47,7 @@ test("updates lifecycle state without allowing Founder or creation-time reassign
   assert.equal((await store.get({changeId:"change-001",founderId:"founder-1"}))?.status,"submitted");
   await assert.rejects(store.update({...submitted,founderId:"founder-2"}),/not found/);
   await assert.rejects(store.update({...submitted,createdAt:"2026-11-10T00:00:00.000Z"}),/immutable/);
-  const invalidJump = recordDeveloperReview(submitDeveloperChange(make(),now),{reviewerId:"reviewer-1",decision:"approved",notes:"Reviewed",now});
+  const invalidJump = approved();
   await assert.rejects(store.update(invalidJump),/transition is not allowed/);
 });
 
