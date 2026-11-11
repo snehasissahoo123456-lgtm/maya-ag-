@@ -141,8 +141,13 @@ export class DeveloperChangeStore implements DeveloperChangeRepository {
     return true;
   }
   private load(): void {
-    if (!this.filePath || !fs.existsSync(this.filePath)) return;
-    const stat = fs.lstatSync(this.filePath);
+    if (!this.filePath) return;
+    let stat: fs.Stats;
+    try { stat = fs.lstatSync(this.filePath); }
+    catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+      throw error;
+    }
     if (!stat.isFile() || stat.isSymbolicLink() || stat.nlink !== 1 || stat.size > this.maxBytes) {
       throw new Error("Developer change store must be a bounded regular non-symlink file.");
     }
