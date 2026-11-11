@@ -27,7 +27,9 @@ services:
       MAYA_SCHEDULE_WORKER_ENABLED: ${MAYA_SCHEDULE_WORKER_ENABLED:-false}
       MAYA_SCHEDULE_WORKER_POLL_MS: ${MAYA_SCHEDULE_WORKER_POLL_MS:-3000}
     volumes:
-      - maya-data:/data\n      - maya-developer-queue:/developer-queue\n      - maya-developer-workspaces:/developer-workspaces
+      - maya-data:/data
+      - maya-developer-queue:/developer-queue
+      - maya-developer-workspaces:/developer-workspaces
     read_only: true
     tmpfs:
       - /tmp:rw,noexec,nosuid,size=64m
