@@ -79,6 +79,12 @@ export async function verifyDeveloperWorkspaceExecution(
   let timedOut = false;
 
   try {
+    const state = await input.workspace.inspect();
+    if (state.workspaceId !== execution.change.workspaceId ||
+        state.baselineCommit.toLowerCase() !== input.baselineCommit.toLowerCase() ||
+        !state.isolated || state.networkAccess || state.secretsMounted) {
+      throw new Error("Workspace isolation, identity or baseline changed before verification.");
+    }
     for (const command of DEVELOPER_SANDBOX_COMMANDS) {
       jobs.push(await enqueueDeveloperSandboxJob({ queueRoot: input.queueRoot, now }, {
         workspaceId: execution.change.workspaceId,
