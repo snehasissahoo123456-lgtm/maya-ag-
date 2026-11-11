@@ -10,7 +10,7 @@ interface DeveloperChange {
 export class MayaDeveloperChangesWorkspace extends LitElement {
   @state() private changes: DeveloperChange[] = [];
   @state() private selected: DeveloperChange | null = null;
-  @state() private title = "";
+  @state() private proposalTitle = "";
   @state() private objective = "";
   @state() private workspaceId = "developer-workspace";
   @state() private filesText = "";
@@ -31,7 +31,7 @@ export class MayaDeveloperChangesWorkspace extends LitElement {
     .status { border:1px solid rgba(148,163,184,.25); border-radius:999px; padding:3px 8px; font-size:10px; text-transform:uppercase; letter-spacing:.05em; }
   `;
 
-  override createRenderRoot() { return this; }
+  override createRenderRoot(): HTMLElement { return this; }
   override connectedCallback() { super.connectedCallback(); void this.refresh(); }
 
   private async request(url: string, init: RequestInit = {}) {
@@ -63,7 +63,7 @@ export class MayaDeveloperChangesWorkspace extends LitElement {
   private async createDraft() {
     if (this.busy) return;
     const files = this.filesText.split(/\r?\n/).map(value => value.trim()).filter(Boolean);
-    if (!this.title.trim() || !this.objective.trim() || !this.workspaceId.trim() || !files.length || !this.patch.trim()) {
+    if (!this.proposalTitle.trim() || !this.objective.trim() || !this.workspaceId.trim() || !files.length || !this.patch.trim()) {
       this.error = "Complete the title, objective, workspace ID, file list and proposed patch.";
       return;
     }
@@ -72,12 +72,12 @@ export class MayaDeveloperChangesWorkspace extends LitElement {
       const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(this.patch));
       const diffSha256 = Array.from(new Uint8Array(digest), value => value.toString(16).padStart(2,"0")).join("");
       const response = await this.request("/api/developer/changes", { method:"POST", body:JSON.stringify({
-        title:this.title.trim(), objective:this.objective.trim(), workspaceId:this.workspaceId.trim(),
+        title:this.proposalTitle.trim(), objective:this.objective.trim(), workspaceId:this.workspaceId.trim(),
         files, patch:this.patch, diffSha256,
       }) });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || "Draft creation failed.");
-      this.title = ""; this.objective = ""; this.filesText = ""; this.patch = "";
+      this.proposalTitle = ""; this.objective = ""; this.filesText = ""; this.patch = "";
       this.notice = "Draft saved. It has not been reviewed, approved or executed.";
       await this.refresh();
       await this.loadDetail(data.change.id);
@@ -124,7 +124,7 @@ export class MayaDeveloperChangesWorkspace extends LitElement {
           <h3 class="font-semibold text-white">New change proposal</h3>
           <p class="muted">This creates a draft only. The patch is stored for review; no repository files are changed.</p>
           <div class="grid md:grid-cols-2 gap-3">
-            <label class="muted">Title<input .value=${this.title} @input=${(e:Event)=>this.title=(e.target as HTMLInputElement).value} maxlength="160" placeholder="Improve agent task routing"></label>
+            <label class="muted">Title<input .value=${this.proposalTitle} @input=${(e:Event)=>this.proposalTitle=(e.target as HTMLInputElement).value} maxlength="160" placeholder="Improve agent task routing"></label>
             <label class="muted">Workspace ID<input .value=${this.workspaceId} @input=${(e:Event)=>this.workspaceId=(e.target as HTMLInputElement).value} maxlength="80"></label>
           </div>
           <label class="muted">Objective<textarea .value=${this.objective} @input=${(e:Event)=>this.objective=(e.target as HTMLTextAreaElement).value} maxlength="4000" placeholder="Describe the intended outcome and acceptance criteria."></textarea></label>
