@@ -35,7 +35,7 @@ test("creates a verified content-hashed snapshot from requested Git blobs", asyn
 test("rejects missing paths, duplicate paths and protected paths", async () => {
   const source = sourceFor({ "src/app.ts": "ok" });
   await assert.rejects(() => createDeveloperGitSnapshot({ source, ref: "main", workspaceId: "workspace-123", paths: ["missing.ts"] }), /not present/);
-  await assert.rejects(() => createDeveloperGitSnapshot({ source, ref: "main", workspaceId: "workspace-123", paths: ["src/app.ts", "src/app.ts"] }), /unique/);
+  await assert.rejects(() => createDeveloperGitSnapshot({ source, ref: "main", workspaceId: "workspace-123", paths: ["src/app.ts", "src/app.ts"] }), /Duplicate file paths/);
   await assert.rejects(() => createDeveloperGitSnapshot({ source, ref: "main", workspaceId: "workspace-123", paths: ["server.ts"] }), /protected/);
 });
 
