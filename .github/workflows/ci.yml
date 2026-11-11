@@ -68,8 +68,22 @@ jobs:
         env:
           PGPASSWORD: maya-ci-password
         run: |
-          sudo apt-get update
-          sudo apt-get install --yes postgresql-client
+          postgres_container_id="$(docker ps --filter 'ancestor=pgvector/pgvector:pg16' --format '{{.ID}}' | head -n 1)"
+          if [ -z "$postgres_container_id" ]; then
+            echo "Could not locate the PostgreSQL service container."
+            docker ps --all
+            exit 1
+          fi
+          export POSTGRES_CONTAINER_ID="$postgres_container_id"
+          mkdir -p "$RUNNER_TEMP/pg-client-bin"
+          cat > "$RUNNER_TEMP/pg-client-bin/psql" <<'PSQL'
+          #!/usr/bin/env bash
+          set -euo pipefail
+          exec docker exec -i "$POSTGRES_CONTAINER_ID" psql "$@"
+          PSQL
+          chmod +x "$RUNNER_TEMP/pg-client-bin/psql"
+          echo "$RUNNER_TEMP/pg-client-bin" >> "$GITHUB_PATH"
+          export PATH="$RUNNER_TEMP/pg-client-bin:$PATH"
           psql --host 127.0.0.1 --username postgres --dbname maya_ci --set ON_ERROR_STOP=1 <<'SQL'
           create schema if not exists extensions;
           create role anon nologin;
@@ -78,9 +92,9 @@ jobs:
           SQL
           for migration in supabase/migrations/*.sql; do
             echo "Applying $migration"
-            psql --host 127.0.0.1 --username postgres --dbname maya_ci --set ON_ERROR_STOP=1 --file "$migration"
+            docker exec -i "$POSTGRES_CONTAINER_ID" psql --username postgres --dbname maya_ci --set ON_ERROR_STOP=1 --file - < "$migration"
           done
-          psql --host 127.0.0.1 --username postgres --dbname maya_ci --set ON_ERROR_STOP=1 --file supabase/tests/conversation_backfill.sql
+          docker exec -i "$POSTGRES_CONTAINER_ID" psql --username postgres --dbname maya_ci --set ON_ERROR_STOP=1 --file - < supabase/tests/conversation_backfill.sql
           bash supabase/tests/goal_plan_lease_concurrency.sh
       - name: Unit and integration tests
         run: bun run test
