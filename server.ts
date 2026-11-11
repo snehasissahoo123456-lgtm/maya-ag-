@@ -13,6 +13,8 @@ import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { WebSocketServer, WebSocket } from "ws";
 import { DeviceBridgeManager, DeviceCommandUncertainError } from "./agent-core/device-bridge-manager.ts";
 import { createDeviceRegistry } from "./agent-core/create-device-registry.ts";
+import { DeveloperChangeStore } from "./agent-core/developer-change-store.ts";
+import { createDeveloperChangeRouter } from "./agent-core/developer-change-http.ts";
 
 let activeDeviceBridgeManager: DeviceBridgeManager | undefined;
 
@@ -888,6 +890,7 @@ function randomTaskId(): string {
 }
 
 const authService = new AuthService(path.join(process.env.MAYA_DATA_DIR || path.resolve(process.cwd(), "..", "maya-data"), "sessions.json"));
+const developerChangeRepository = new DeveloperChangeStore(path.join(process.env.MAYA_DATA_DIR || path.resolve(process.cwd(), "..", "maya-data"), "developer-changes.json"));
 const platformService = new PlatformService();
 
 const watcherService = new WatcherService({
@@ -1021,6 +1024,8 @@ async function startServer() {
     (req as any).authSession = session;
     return next();
   });
+
+  app.use("/api/developer/changes", createDeveloperChangeRouter(developerChangeRepository));
 
   app.get("/api/schedules", async (req, res) => {
     const founderId = (req as any).authSession?.user?.id;
