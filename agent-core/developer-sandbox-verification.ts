@@ -60,7 +60,8 @@ export async function verifyDeveloperWorkspaceExecution(
 ): Promise<DeveloperSandboxVerificationOutcome> {
   const { execution } = input;
   if (!execution || execution.status !== "applied" || execution.change.status !== "executing" ||
-      execution.change.workspaceId !== execution.change.workspaceId || !execution.snapshotId.trim()) {
+      !(/^[a-zA-Z0-9][a-zA-Z0-9_-]{7,79}$/.test(execution.change.workspaceId)) ||
+      !(/^[a-f0-9]{40}$/i.test(input.baselineCommit)) || !execution.snapshotId.trim()) {
     throw new Error("A successfully applied Developer execution with a rollback snapshot is required.");
   }
   const maxWaitMs = input.maxWaitMs ?? REQUIRED_WAIT;
