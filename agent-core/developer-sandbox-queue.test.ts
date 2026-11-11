@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { createHash } from "node:crypto";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -64,7 +63,7 @@ test("QA passes only when all three worker commands have fresh passing evidence"
   const all = [make("typecheck", "job-typecheck"), make("test", "job-test"), make("build", "job-build")];
   assert.equal(evaluateDeveloperSandboxQA(all, now).passed, true);
   assert.equal(evaluateDeveloperSandboxQA(all.slice(0, 2), now).passed, false);
-  assert.equal(evaluateDeveloperSandboxQA([all[0], { ...all[1], status: "failed" }, all[2]], now).passed, false);
+  assert.equal(evaluateDeveloperSandboxQA([all[0], { ...all[1], status: "failed", exitCode: 1 }, all[2]], now).passed, false);
   assert.equal(evaluateDeveloperSandboxQA([{ ...all[0], finishedAt: "2026-11-09T00:00:00.000Z" }, all[1], all[2]], now).passed, false);
   assert.throws(() => evaluateDeveloperSandboxQA([all[0], all[0], all[2]], now), /Duplicate/);
 });
@@ -78,5 +77,21 @@ test("rejects symlinked queue result directories and result files", async () => 
   await fs.mkdir(outside);
   await fs.symlink(outside, path.join(f.queueRoot, "results"));
   await assert.rejects(() => collectDeveloperSandboxResult({ queueRoot: f.queueRoot }, job), /symlink|regular/i);
+  await fs.rm(f.root, { recursive: true, force: true });
+});
+
+test("rejects inconsistent passed and failed worker statuses", async () => {
+  const f = await fixture();
+  const job = await enqueueDeveloperSandboxJob({ queueRoot: f.queueRoot }, {
+    workspaceId: "workspace-001", baselineCommit: "a".repeat(40), command: "test",
+  });
+  await fs.mkdir(path.join(f.queueRoot, "results"), { recursive: true });
+  const invalid: SandboxResult = {
+    id: job.id, workspaceId: job.workspaceId, command: job.command, status: "passed",
+    exitCode: 1, timedOut: false, durationMs: 20, output: "exit 1",
+    finishedAt: "2026-11-11T14:00:10.000Z",
+  };
+  await fs.writeFile(path.join(f.queueRoot, "results", job.id + ".json"), JSON.stringify(invalid));
+  await assert.rejects(() => collectDeveloperSandboxResult({ queueRoot: f.queueRoot }, job), /does not match/i);
   await fs.rm(f.root, { recursive: true, force: true });
 });

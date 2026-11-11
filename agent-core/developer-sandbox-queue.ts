@@ -118,7 +118,9 @@ export async function collectDeveloperSandboxResult(
       typeof result.finishedAt !== "string" || !Number.isFinite(Date.parse(result.finishedAt)) ||
       typeof result.output !== "string" || result.output.length > 64_000 ||
       (result.exitCode !== null && !Number.isInteger(result.exitCode)) ||
-      typeof result.timedOut !== "boolean") {
+      typeof result.timedOut !== "boolean" ||
+      (result.status === "passed" && (result.exitCode !== 0 || result.timedOut)) ||
+      (result.status === "failed" && !result.timedOut && (result.exitCode === 0 || result.exitCode === null))) {
     throw new Error("Sandbox worker result does not match the enqueued job or its schema.");
   }
   return result;
@@ -129,7 +131,16 @@ export function evaluateDeveloperSandboxQA(
   results: readonly SandboxResult[],
   now = new Date(),
 ): DeveloperSandboxQAReport {
-  if (!Array.isArray(results) || results.some(result => !result || !DEVELOPER_SANDBOX_COMMANDS.includes(result.command as SandboxCommand))) {
+  if (!Array.isArray(results) || results.some(result => !result ||
+      !ID.test(result.id) || !ID.test(result.workspaceId) ||
+      !DEVELOPER_SANDBOX_COMMANDS.includes(result.command as SandboxCommand) ||
+      !["passed", "failed", "rejected", "interrupted"].includes(result.status) ||
+      !Number.isInteger(result.durationMs) || result.durationMs < 0 ||
+      typeof result.finishedAt !== "string" || !Number.isFinite(Date.parse(result.finishedAt)) ||
+      typeof result.output !== "string" || result.output.length > 64_000 ||
+      typeof result.timedOut !== "boolean" ||
+      (result.status === "passed" && (result.exitCode !== 0 || result.timedOut)) ||
+      (result.status === "failed" && !result.timedOut && (result.exitCode === 0 || result.exitCode === null)))) {
     throw new Error("QA evaluation requires valid fixed-command sandbox results.");
   }
   const commands = new Set<SandboxCommand>();
