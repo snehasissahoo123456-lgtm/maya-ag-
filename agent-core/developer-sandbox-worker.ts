@@ -35,13 +35,18 @@ function parseJob(v:unknown):SandboxJob {
     typeof j.createdAt!=="string"||!Number.isFinite(Date.parse(j.createdAt))) throw new Error("Invalid or unsupported sandbox job fields.");
   return j as unknown as SandboxJob;
 }
-async function workspacePath(rootInput:string,id:string) {
+async function workspacePath(rootInput:string,id:string,baselineCommit:string) {
   const root=await fs.realpath(rootInput), target=path.resolve(root,id);
   if(!inside(root,target)||target===root) throw new Error("Workspace path escapes sandbox root.");
   const st=await fs.lstat(target);
   if(!st.isDirectory()||st.isSymbolicLink()) throw new Error("Workspace must be a regular non-symlink directory.");
   const real=await fs.realpath(target);
   if(real!==target||!inside(root,real)) throw new Error("Workspace symlinks are blocked.");
+  const marker=path.join(real,".maya-baseline");
+  const markerStat=await fs.lstat(marker);
+  if(!markerStat.isFile()||markerStat.isSymbolicLink()) throw new Error("Workspace baseline marker must be a regular file.");
+  const recorded=(await fs.readFile(marker,"utf8")).trim();
+  if(recorded.toLowerCase()!==baselineCommit.toLowerCase()) throw new Error("Workspace baseline commit does not match the approved job.");
   return real;
 }
 export async function runSandboxCommand(command:SandboxCommand,cwd:string,timeoutMs=TIMEOUT) {
@@ -74,7 +79,7 @@ export async function processOneSandboxJob(o:SandboxOptions):Promise<boolean> {
   try{
     const st=await fs.lstat(claimed); if(!st.isFile()||st.isSymbolicLink()||st.size>16_384)throw new Error("Invalid or oversized job file.");
     job=parseJob(JSON.parse(await fs.readFile(claimed,"utf8")));
-    const cwd=await workspacePath(o.workspaceRoot,job.workspaceId);
+    const cwd=await workspacePath(o.workspaceRoot,job.workspaceId,job.baselineCommit);
     const r=await (o.runCommand??runSandboxCommand)(job.command,cwd,TIMEOUT);
     result={id:job.id,workspaceId:job.workspaceId,command:job.command,status:!r.timedOut&&r.exitCode===0?"passed":"failed",exitCode:r.exitCode,timedOut:r.timedOut,durationMs:r.durationMs,output:clean(r.output),finishedAt:(o.now?.()??new Date()).toISOString()};
   }catch(e){

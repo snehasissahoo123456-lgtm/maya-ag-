@@ -8,6 +8,7 @@ async function fixture(){
  const root=await fs.mkdtemp(path.join(os.tmpdir(),"maya-sandbox-"));
  const queueRoot=path.join(root,"queue"),workspaceRoot=path.join(root,"workspaces"),workspaceId="workspace-001";
  await fs.mkdir(path.join(workspaceRoot,workspaceId),{recursive:true});
+ await fs.writeFile(path.join(workspaceRoot,workspaceId,".maya-baseline"),"a".repeat(40));
  await fs.mkdir(path.join(queueRoot,"pending"),{recursive:true});
  return {root,queueRoot,workspaceRoot,workspaceId};
 }
@@ -40,5 +41,12 @@ test("rejects oversized queue entries",async()=>{
  const f=await fixture();await fs.writeFile(path.join(f.queueRoot,"pending","job.json"),"x".repeat(20_000));
  await processOneSandboxJob({queueRoot:f.queueRoot,workspaceRoot:f.workspaceRoot});
  const names=await fs.readdir(path.join(f.queueRoot,"results"));const r=JSON.parse(await fs.readFile(path.join(f.queueRoot,"results",names[0]),"utf8"));assert.equal(r.status,"rejected");
+ await fs.rm(f.root,{recursive:true,force:true});
+});
+
+test("rejects a workspace whose baseline marker differs from the requested commit",async()=>{
+ const f=await fixture();await fs.writeFile(path.join(f.workspaceRoot,f.workspaceId,".maya-baseline"),"b".repeat(40));await enqueue(f,job(f));let called=false;
+ await processOneSandboxJob({queueRoot:f.queueRoot,workspaceRoot:f.workspaceRoot,runCommand:async()=>{called=true;return{exitCode:0,timedOut:false,output:"",durationMs:1};}});
+ const r=JSON.parse(await fs.readFile(path.join(f.queueRoot,"results","job-00000001.json"),"utf8"));assert.equal(r.status,"rejected");assert.equal(called,false);
  await fs.rm(f.root,{recursive:true,force:true});
 });
