@@ -4,7 +4,7 @@ import { hostIsolationAttestationSigningBytes, type HostIsolationAttestationPayl
 
 export interface DockerHostSupervisorPolicy {
   issuer: string; workspaceId: string; baselineCommit: string; privateKeyPem: string;
-  expectedImageId: string; expectedQueueVolumeSource: string; expectedWorkspaceVolumeSource: string;
+  expectedContainerName: string; expectedImageId: string; expectedQueueVolumeSource: string; expectedWorkspaceVolumeSource: string;
   now?: () => Date; attestationTtlMs?: number;
 }
 type JsonObject = Record<string, unknown>;
@@ -18,10 +18,11 @@ const list=(v:unknown)=>Array.isArray(v)?v:[];
 /** Host-only policy checker and Ed25519 signer for the dedicated Maya QA worker. */
 export function createDockerHostIsolationAttestation(inspection:unknown,policy:DockerHostSupervisorPolicy):SignedHostIsolationAttestation {
   if(!policy||!policy.issuer.trim()||!WORKSPACE_ID.test(policy.workspaceId)||!SHA.test(policy.baselineCommit)||
-    !IMAGE_ID.test(policy.expectedImageId)||!policy.privateKeyPem.trim()||
+    !policy.expectedContainerName.trim()||!IMAGE_ID.test(policy.expectedImageId)||!policy.privateKeyPem.trim()||
     !policy.expectedQueueVolumeSource.trim()||!policy.expectedWorkspaceVolumeSource.trim())
     throw new Error("Host supervisor policy is incomplete or invalid.");
   const root=object(inspection),state=object(root.State),config=object(root.Config),host=object(root.HostConfig);
+  if(string(root.Name)!=="/"+policy.expectedContainerName)throw new Error("Inspected container name does not match the host-approved QA worker.");
   if(state.Running!==true||state.Status!=="running")throw new Error("QA worker container is not running.");
   if(string(root.Image).toLowerCase()!==policy.expectedImageId.toLowerCase())throw new Error("QA worker image ID does not match the host-approved image.");
   if(string(config.User)!=="node")throw new Error("QA worker must run as the unprivileged node user.");
