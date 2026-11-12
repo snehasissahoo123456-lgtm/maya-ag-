@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { generateKeyPairSync } from "node:crypto";
 import test from "node:test";
-import { createDockerHostIsolationAttestation } from "./developer-docker-host-supervisor.ts";
+import { createDockerHostIsolationAttestation, inspectDockerWorkerAndAttest } from "./developer-docker-host-supervisor.ts";
 import { createSignedHostIsolationVerifier } from "./developer-host-isolation-attestation.ts";
 const {publicKey,privateKey}=generateKeyPairSync("ed25519");
 const publicKeyPem=publicKey.export({type:"spki",format:"pem"}).toString();
@@ -65,4 +65,21 @@ test("rejects missing resource limits and unexpected mounts",()=>{
  assert.throws(()=>createDockerHostIsolationAttestation(x,policy),/resource limits/);
  const y=inspection();y.Mounts.push({Type:"bind",Source:"/host",Destination:"/host",RW:true});
  assert.throws(()=>createDockerHostIsolationAttestation(y,policy),/unexpected or missing mounts/);
+});
+
+
+test("collects one live Docker inspect result without a shell", async () => {
+  let received = "";
+  const attestation = await inspectDockerWorkerAndAttest("a".repeat(64), policy, async id => {
+    received = id;
+    return JSON.stringify([inspection()]);
+  });
+  assert.equal(received, "a".repeat(64));
+  assert.equal(attestation.isolated, true);
+});
+
+test("rejects malformed IDs, malformed Docker JSON and multiple inspect results", async () => {
+  await assert.rejects(inspectDockerWorkerAndAttest("not-a-container", policy, async () => "[]"), /valid Docker container ID/);
+  await assert.rejects(inspectDockerWorkerAndAttest("a".repeat(64), policy, async () => "not-json"), /invalid JSON/);
+  await assert.rejects(inspectDockerWorkerAndAttest("a".repeat(64), policy, async () => "[]"), /exactly one container/);
 });
