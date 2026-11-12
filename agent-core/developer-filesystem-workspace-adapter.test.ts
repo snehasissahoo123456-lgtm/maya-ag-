@@ -6,7 +6,6 @@ import path from "node:path";
 import test from "node:test";
 import { provisionDeveloperWorkspace } from "./developer-workspace-provisioner.ts";
 import { DeveloperFilesystemWorkspaceAdapter } from "./developer-filesystem-workspace-adapter.ts";
-import type { PreparedDeveloperPatchPackage } from "./developer-patch-package.ts";
 
 const hash = (value: string) => createHash("sha256").update(value, "utf8").digest("hex");
 const baseline = "a".repeat(40);
