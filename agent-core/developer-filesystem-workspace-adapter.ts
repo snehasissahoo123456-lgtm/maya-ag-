@@ -35,6 +35,7 @@ interface SnapshotFile {
   existed: boolean;
   content?: string;
   mode?: number;
+  contentSha256?: string;
 }
 interface StoredSnapshot {
   version: 1;
@@ -160,7 +161,7 @@ export class DeveloperFilesystemWorkspaceAdapter implements DeveloperWorkspaceAd
           if (file.expectedSha256 === null || sha256(oldContent) !== file.expectedSha256.toLowerCase()) {
             throw new Error("Existing-file precondition mismatch: " + file.path);
           }
-          prior = { path: file.path, existed: true, content: oldContent, mode: stat.mode & 0o777 };
+          prior = { path: file.path, existed: true, content: oldContent, mode: stat.mode & 0o777, contentSha256: sha256(oldContent) };
         } catch (error) {
           if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
           if (file.expectedSha256 !== null) throw new Error("Expected existing file is missing: " + file.path);
@@ -217,8 +218,19 @@ export class DeveloperFilesystemWorkspaceAdapter implements DeveloperWorkspaceAd
       const snapshot = JSON.parse(await fs.readFile(snapshotPath, "utf8")) as StoredSnapshot;
       if (snapshot.version !== 1 || snapshot.snapshotId !== snapshotId ||
           snapshot.workspaceId !== workspace.workspaceId ||
-          snapshot.baselineCommit !== workspace.baselineCommit || !Array.isArray(snapshot.files)) {
+          snapshot.baselineCommit !== workspace.baselineCommit || !Array.isArray(snapshot.files) ||
+          snapshot.files.length < 1 || snapshot.files.length > this.maxFiles) {
         throw new Error("Rollback snapshot does not match the current workspace and baseline.");
+      }
+      validateDeveloperPatch({ files: snapshot.files.map(file => file?.path), patch: "rollback-snapshot" });
+      for (const file of snapshot.files) {
+        if (typeof file.existed !== "boolean" ||
+            (file.existed && (typeof file.content !== "string" || !SHA256.test(file.contentSha256 ?? "") ||
+              sha256(file.content) !== file.contentSha256 || !Number.isInteger(file.mode) ||
+              (file.mode as number) < 0 || (file.mode as number) > 0o777)) ||
+            (!file.existed && (file.content !== undefined || file.mode !== undefined || file.contentSha256 !== undefined))) {
+          throw new Error("Rollback snapshot contains an invalid file record.");
+        }
       }
       await restoreFiles(workspace.workspacePath, snapshot.files, snapshot.files.map(file => file.path));
     } finally {
@@ -269,7 +281,7 @@ async function restoreFiles(root: string, files: SnapshotFile[], paths: string[]
     if (file.existed) {
       if (typeof file.content !== "string" || !Number.isInteger(file.mode)) throw new Error("Rollback snapshot file record is invalid.");
       const temp = path.join(path.dirname(target), ".maya-restore-" + randomUUID() + ".tmp");
-      await fs.writeFile(temp, file.content, { encoding: "utf8", flag: "wx", mode: file.mode });
+      await fs.writeFile(temp, file.content, { encoding: "utf8", flag: "wx", mode: file.mode as number });
       await fs.rename(temp, target);
     } else {
       await fs.rm(target, { force: true });
