@@ -615,6 +615,7 @@ const MAYA_FUNCTION_DECLARATIONS = [
   { name: "list_tasks", description: "List persistent tasks and their current queue state.", parametersJsonSchema: { type: "object", properties: {} } },
   { name: "memory_save", description: "Save a Founder-approved note or lesson to Maya's persistent memory.", parametersJsonSchema: { type: "object", properties: { category: { type: "string" }, title: { type: "string" }, content: { type: "string" } }, required: ["content"] } },
   { name: "memory_search", description: "Search Maya's saved memory notes.", parametersJsonSchema: { type: "object", properties: { query: { type: "string" } }, required: ["query"] } },
+  { name: "delegate_to_ceo", description: "Delegate a multi-disciplinary research or analysis objective to Maya's CEO, who coordinates up to four specialist agents using bounded read-only tools. This does not modify files, accounts, or external systems.", parametersJsonSchema: { type: "object", properties: { objective: { type: "string", maxLength: 2000 } }, required: ["objective"] } },
   { name: "run_tests", description: "Run the repository lint, test, and production build commands and return their real output.", parametersJsonSchema: { type: "object", properties: {} } },
 ];
 const IMPLEMENTED_TOOL_NAMES = new Set(MAYA_FUNCTION_DECLARATIONS.map((tool) => tool.name));
@@ -648,6 +649,52 @@ function isSensitiveWorkspacePath(filePath: string): boolean {
 
 async function executeAgentTool(name: string, args: Record<string, unknown>, founderId = "founder-primary"): Promise<unknown> {
   if (!IMPLEMENTED_TOOL_NAMES.has(name)) throw new Error(`Tool "${name}" is not implemented or enabled.`);
+  if (name === "delegate_to_ceo") {
+    const objective = typeof args.objective === "string" ? args.objective.trim() : "";
+    if (!objective || objective.length > 2000) throw new Error("CEO delegation objective must contain 1–2,000 characters.");
+    const startedAt = Date.now();
+    const runRecord = {
+      id: "ceo-run-" + randomTaskId(), founderId, objective, status: "running" as const,
+      assignments: [] as Array<{ agentId: string; task: string }>,
+      findings: [] as Array<{ agentId: string; displayName: string; role: string; output: string }>,
+      createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+    };
+    let persisted = false;
+    try {
+      await ceoRunRepository.create(runRecord);
+      persisted = true;
+      const memories = await getFounderMemories(founderId);
+      const context = formatMemoryContext(retrieveRelevantMemories(objective, memories, { limit: 5 }));
+      const result = await ceoOrchestrator.run({ objective, context, founderId });
+      const completedAt = new Date().toISOString();
+      await ceoRunRepository.update(founderId, {
+        ...runRecord, status: "completed", assignments: result.assignments,
+        findings: result.findings.map(item => ({ agentId: item.agentId, displayName: item.displayName, role: item.role, output: item.output })),
+        summary: result.summary, completedAt, updatedAt: completedAt, durationMs: Date.now() - startedAt,
+      });
+      currentAuditLogs.unshift({
+        id: "ceo-chat-" + randomTaskId(), toolName: "ceo.delegate_from_chat",
+        params: { runId: runRecord.id, assignmentCount: result.assignments.length, agentIds: result.assignments.map(item => item.agentId) },
+        status: "success", result: { executionMode: result.executionMode, findingCount: result.findings.length },
+        timestamp: completedAt, durationMs: Date.now() - startedAt,
+      });
+      currentAuditLogs = currentAuditLogs.slice(0, 500);
+      return {
+        runId: runRecord.id, objective, summary: result.summary, assignments: result.assignments,
+        findings: result.findings.map(item => ({ agentId: item.agentId, displayName: item.displayName, role: item.role, output: item.output.slice(0, 4000) })),
+        executionMode: result.executionMode, completedAt,
+        limitation: "Specialists performed bounded research and read-only analysis only. No files, accounts, or external systems were changed.",
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (persisted) {
+        try {
+          await ceoRunRepository.update(founderId, { ...runRecord, status: "failed", error: message.slice(0, 2000), updatedAt: new Date().toISOString(), durationMs: Date.now() - startedAt });
+        } catch (persistError) { console.error("[CEO] Failed to persist chat delegation failure:", persistError); }
+      }
+      throw error;
+    }
+  }
   if (name === "list_dir") {
     const dir = resolveWorkspacePath(args.path || ".");
     if (isSensitiveWorkspacePath(dir)) throw new Error("Access to sensitive workspace paths is blocked.");
@@ -2104,13 +2151,15 @@ CURRENT ACTIVE MODE: ${activeModeInfo.name.toUpperCase()} (${activeModeInfo.tagl
 PREFERRED ADDRESS FOR FOUNDER: "${currentPersona.preferredAddress}"
 SAMPLE TONE: "${activeModeInfo.samplePhrase}"
 ALWAYS speak in first-person feminine Hindi/Hinglish (karti hoon, kar rahi hoon, kar dungi, samajh gayi, sun rahi hoon, dekh lungi).
+CEO DELEGATION: For complex or multi-disciplinary research and analysis, use the delegate_to_ceo tool to coordinate up to four bounded read-only specialists. Clearly distinguish specialist analysis from real-world execution.
 MULTILINGUAL & RAPID REACTION:
 - You understand and reply in whatever language Founder Snehasis uses: Hindi, Odia (ଓଡ଼ିଆ), English, Hinglish, etc.
 - Keep responses swift, direct, structured, and action-oriented. No filler words.
 - Be explicit about what was actually executed and what is only planned.
-- Available read-only chat tools: safe workspace list/read, system information, task listing, memory search, and Gemini Google Search grounding.
+- Available chat tools: safe workspace list/read, system information, task listing, memory search, Gemini Google Search grounding, and bounded CEO delegation to up to four specialist agents for read-only research and analysis.
+- Use CEO delegation for complex or multi-disciplinary objectives that benefit from separate specialist perspectives; explain the verified findings and limitations.
 - Memory writes, task queue creation, and repository test commands require a persisted goal plan and explicit Founder approval before execution.
-- Do not claim a scheduler, PC bridge, Android control, browser automation, deployment, notifications, file writing, or multi-agent delegation is active.
+- Do not claim a scheduler, PC bridge, Android control, browser automation, deployment, notifications, or general file-writing is active.
 - Never read or reveal secrets, credentials, environment files, private keys, or tokens.
 - Ask the Founder before irreversible or externally visible actions; if an approval mechanism is not implemented for an action, do not perform it.`;
 
@@ -2180,6 +2229,7 @@ CURRENT ACTIVE MODE: ${activeModeInfo.name.toUpperCase()} (${activeModeInfo.tagl
 PREFERRED ADDRESS FOR FOUNDER: "${currentPersona.preferredAddress}"
 SAMPLE TONE: "${activeModeInfo.samplePhrase}"
 ALWAYS speak in first-person feminine Hindi/Hinglish (karti hoon, kar rahi hoon, kar dungi, samajh gayi, sun rahi hoon, dekh lungi).
+CEO DELEGATION: For complex or multi-disciplinary research and analysis, use the delegate_to_ceo tool to coordinate up to four bounded read-only specialists. Clearly distinguish specialist analysis from real-world execution.
 MULTILINGUAL & RAPID REACTION:
 - You understand and reply in whatever language Founder Snehasis uses: Hindi, Odia (ଓଡ଼ିଆ), English, Hinglish, etc.
 - Keep responses swift, direct, structured, and action-oriented. No filler words.`;
