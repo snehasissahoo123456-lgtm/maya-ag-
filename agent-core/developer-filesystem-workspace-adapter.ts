@@ -87,8 +87,11 @@ export class DeveloperFilesystemWorkspaceAdapter implements DeveloperWorkspaceAd
     const workspaceRoot = await thisRoot(path.resolve(options.workspaceRoot));
     const queueRoot = await thisRoot(path.resolve(options.queueRoot));
     const snapshots = path.join(queueRoot, "snapshots");
+    const locks = path.join(queueRoot, "locks");
     await fs.mkdir(snapshots, { recursive: true, mode: 0o700 });
+    await fs.mkdir(locks, { recursive: true, mode: 0o700 });
     await assertDirectory(snapshots);
+    await assertDirectory(locks);
     return new DeveloperFilesystemWorkspaceAdapter(options, workspaceRoot, queueRoot);
   }
 
@@ -127,8 +130,7 @@ export class DeveloperFilesystemWorkspaceAdapter implements DeveloperWorkspaceAd
     packageSha256: string;
   }): Promise<DeveloperWorkspaceApplyResult> {
     const workspace = await this.currentWorkspace();
-    if (this.locks.has(workspace.workspaceId)) throw new Error("A workspace transaction is already in progress.");
-    this.locks.add(workspace.workspaceId);
+    const releaseLock = await acquireWorkspaceLock(this.queueRoot, workspace.workspaceId, this.locks);
     try {
       if (!Array.isArray(input.files) || input.files.length < 1 || input.files.length > this.maxFiles ||
           !SHA256.test(input.packageSha256) || !input.changeId.trim()) {
@@ -200,15 +202,14 @@ export class DeveloperFilesystemWorkspaceAdapter implements DeveloperWorkspaceAd
       }
       return { snapshotId };
     } finally {
-      this.locks.delete(workspace.workspaceId);
+      await releaseLock();
     }
   }
 
   async restoreSnapshot(snapshotId: string): Promise<void> {
     if (!SNAPSHOT_ID.test(snapshotId)) throw new Error("Invalid rollback snapshot identifier.");
     const workspace = await this.currentWorkspace();
-    if (this.locks.has(workspace.workspaceId)) throw new Error("A workspace transaction is already in progress.");
-    this.locks.add(workspace.workspaceId);
+    const releaseLock = await acquireWorkspaceLock(this.queueRoot, workspace.workspaceId, this.locks);
     try {
       const snapshotPath = path.join(this.queueRoot, "snapshots", snapshotId + ".json");
       const stat = await fs.lstat(snapshotPath);
@@ -234,7 +235,7 @@ export class DeveloperFilesystemWorkspaceAdapter implements DeveloperWorkspaceAd
       }
       await restoreFiles(workspace.workspacePath, snapshot.files, snapshot.files.map(file => file.path));
     } finally {
-      this.locks.delete(workspace.workspaceId);
+      await releaseLock();
     }
   }
 }
@@ -287,4 +288,34 @@ async function restoreFiles(root: string, files: SnapshotFile[], paths: string[]
       await fs.rm(target, { force: true });
     }
   }
+}
+
+async function acquireWorkspaceLock(queueRoot: string, workspaceId: string, localLocks: Set<string>): Promise<() => Promise<void>> {
+  if (localLocks.has(workspaceId)) throw new Error("A workspace transaction is already in progress.");
+  const directory = path.join(queueRoot, "locks");
+  await assertDirectory(directory);
+  const lockPath = path.join(directory, workspaceId + ".lock");
+  let handle;
+  try {
+    handle = await fs.open(lockPath, "wx", 0o600);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "EEXIST") {
+      throw new Error("Workspace is locked by another process; stale locks require operator review.");
+    }
+    throw error;
+  }
+  localLocks.add(workspaceId);
+  try {
+    await handle.writeFile(JSON.stringify({ pid: process.pid, createdAt: new Date().toISOString() }));
+  } catch (error) {
+    await handle.close();
+    await fs.rm(lockPath, { force: true });
+    localLocks.delete(workspaceId);
+    throw error;
+  }
+  await handle.close();
+  return async () => {
+    try { await fs.rm(lockPath); }
+    finally { localLocks.delete(workspaceId); }
+  };
 }
