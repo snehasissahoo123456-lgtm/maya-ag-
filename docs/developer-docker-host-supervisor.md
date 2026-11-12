@@ -1,6 +1,6 @@
 # Docker host supervisor attestation core
 
-This module is a host-side policy checker and Ed25519 signer for a dedicated Maya QA worker. It accepts a Docker Engine inspect object, verifies the live worker configuration against an explicit host policy, and emits the signed payload consumed by the existing attestation verifier.
+This module is a host-side policy checker and Ed25519 signer for a dedicated Maya QA worker. Its Docker CLI adapter executes docker inspect with an argument array (no shell), bounds the operation, requires exactly one result, and then verifies the live worker configuration against an explicit host policy. The policy binds the exact container name, immutable image ID, queue/workspace volume sources, workspace ID and baseline commit.
 
 ## Checks
 
@@ -16,7 +16,7 @@ This module is a host-side policy checker and Ed25519 signer for a dedicated May
 
 ## Deployment boundary
 
-This is not yet a running supervisor daemon and does not connect to the Docker Engine itself. A separately operated host process must obtain the live inspect object from the local Docker Engine, load the private key from host-only protected storage, configure the exact expected image and volume sources, and publish the signed attestation through a narrowly scoped authenticated channel.
+This is not yet a running supervisor daemon or an attestation transport. A separately operated host process must call the Docker CLI adapter, load the private key from host-only protected storage, configure the exact expected container/image/volume sources, and publish the signed attestation through a narrowly scoped authenticated channel.
 
 The private key must never be copied into Maya's app or worker containers. Do not mount the Docker socket into either container. The worker must remain disabled until a host daemon, transport, durable nonce consumption, and end-to-end negative tests are deployed and independently verified.
 
