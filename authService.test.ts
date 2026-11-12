@@ -69,3 +69,70 @@ test("fails closed when the persistent session store is corrupt", () => {
     assert.throws(() => new AuthService(store), /Session store is corrupt/);
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
+
+
+test("authenticates a separately configured independent reviewer identity", () => {
+  const keys = ["MAYA_FOUNDER_PASSWORD","MAYA_FOUNDER_EMAIL","MAYA_REVIEWER_PASSWORD","MAYA_REVIEWER_EMAIL"] as const;
+  const previous = Object.fromEntries(keys.map(key => [key, process.env[key]]));
+  process.env.MAYA_FOUNDER_PASSWORD = "test-only-founder-password-123";
+  process.env.MAYA_FOUNDER_EMAIL = "founder@example.com";
+  process.env.MAYA_REVIEWER_PASSWORD = "test-only-reviewer-password-456";
+  process.env.MAYA_REVIEWER_EMAIL = "reviewer@example.com";
+  try {
+    const auth = new AuthService();
+    assert.throws(() => auth.loginWithReviewerPassword("founder@example.com", "test-only-founder-password-123"), /Invalid reviewer credentials/);
+    const session = auth.loginWithReviewerPassword("REVIEWER@example.com", "test-only-reviewer-password-456");
+    assert.equal(session.user.id, "reviewer-primary");
+    assert.equal(session.user.role, "CTO");
+    assert.equal(session.user.provider, "reviewer_password");
+    assert.equal(auth.validateSession(session.token)?.user.role, "CTO");
+  } finally {
+    for (const key of keys) {
+      const value = previous[key];
+      if (value === undefined) delete process.env[key]; else process.env[key] = value;
+    }
+  }
+});
+
+test("rejects reviewer credentials that reuse Founder identity or password", () => {
+  const keys = ["MAYA_FOUNDER_PASSWORD","MAYA_FOUNDER_EMAIL","MAYA_REVIEWER_PASSWORD","MAYA_REVIEWER_EMAIL"] as const;
+  const previous = Object.fromEntries(keys.map(key => [key, process.env[key]]));
+  process.env.MAYA_FOUNDER_PASSWORD = "test-only-founder-password-123";
+  process.env.MAYA_FOUNDER_EMAIL = "founder@example.com";
+  process.env.MAYA_REVIEWER_PASSWORD = "test-only-founder-password-123";
+  process.env.MAYA_REVIEWER_EMAIL = "reviewer@example.com";
+  try {
+    assert.throws(() => new AuthService().loginWithReviewerPassword("reviewer@example.com", "test-only-founder-password-123"), /must be distinct/);
+  } finally {
+    for (const key of keys) {
+      const value = previous[key];
+      if (value === undefined) delete process.env[key]; else process.env[key] = value;
+    }
+  }
+});
+
+test("persists and restores reviewer token hashes without storing raw session tokens", () => {
+  const keys = ["MAYA_FOUNDER_PASSWORD","MAYA_FOUNDER_EMAIL","MAYA_REVIEWER_PASSWORD","MAYA_REVIEWER_EMAIL"] as const;
+  const previous = Object.fromEntries(keys.map(key => [key, process.env[key]]));
+  process.env.MAYA_FOUNDER_PASSWORD = "test-only-founder-password-123";
+  process.env.MAYA_FOUNDER_EMAIL = "founder@example.com";
+  process.env.MAYA_REVIEWER_PASSWORD = "test-only-reviewer-password-456";
+  process.env.MAYA_REVIEWER_EMAIL = "reviewer@example.com";
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "maya-reviewer-session-"));
+  const store = path.join(dir, "sessions.json");
+  try {
+    const issued = new AuthService(store).loginWithReviewerPassword("reviewer@example.com", "test-only-reviewer-password-456");
+    const disk = fs.readFileSync(store, "utf8");
+    assert.equal(disk.includes(issued.token), false);
+    assert.match(disk, /"tokenHash": "[a-f0-9]{64}"/);
+    const restored = new AuthService(store).validateSession(issued.token);
+    assert.equal(restored?.user.role, "CTO");
+    assert.equal(restored?.user.id, "reviewer-primary");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+    for (const key of keys) {
+      const value = previous[key];
+      if (value === undefined) delete process.env[key]; else process.env[key] = value;
+    }
+  }
+});
