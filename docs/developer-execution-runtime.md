@@ -30,6 +30,10 @@ The runtime deliberately does not infer isolation from Compose YAML, environment
 
 This module does not start a worker, create a supervisor attestation, execute arbitrary shell commands, install dependencies over a network, merge GitHub branches, deploy, or bypass independent Reviewer and Founder approval.
 
+## Founder readiness endpoint
+
+The authenticated application server exposes `GET /api/developer/runtime/status`. It reports the current Founder-scoped change counts and explicitly lists runtime blockers. This endpoint is diagnostic only; it does not enable execution or attest isolation.
+
 ## Current deployment status
 
 The runtime composition is a library and is not enabled by the application server yet. Production activation is blocked until a real host/container supervisor and durable shared storage are integrated and verified. The sandbox worker's Docker profile is configuration, not isolation proof.
