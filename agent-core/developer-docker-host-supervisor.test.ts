@@ -7,7 +7,7 @@ const {publicKey,privateKey}=generateKeyPairSync("ed25519");
 const publicKeyPem=publicKey.export({type:"spki",format:"pem"}).toString();
 const privateKeyPem=privateKey.export({type:"pkcs8",format:"pem"}).toString();
 const policy={
- issuer:"maya-host-supervisor-test",workspaceId:"workspace-123456",baselineCommit:"a".repeat(40),privateKeyPem,
+ issuer:"maya-host-supervisor-test",expectedContainerName:"maya-developer-sandbox-1",workspaceId:"workspace-123456",baselineCommit:"a".repeat(40),privateKeyPem,
  expectedImageId:"sha256:"+"b".repeat(64),
  expectedQueueVolumeSource:"/var/lib/docker/volumes/maya-queue/_data",
  expectedWorkspaceVolumeSource:"/var/lib/docker/volumes/maya-workspaces/_data",
@@ -15,7 +15,7 @@ const policy={
 };
 function inspection(){
  return {
-  Image:policy.expectedImageId,State:{Running:true,Status:"running"},
+  Name:"/maya-developer-sandbox-1",Image:policy.expectedImageId,State:{Running:true,Status:"running"},
   Config:{User:"node",Env:["NODE_ENV=test","MAYA_DEVELOPER_SANDBOX_QUEUE_DIR=/developer-queue"]},
   HostConfig:{
    NetworkMode:"none",ReadonlyRootfs:true,Privileged:false,PidMode:"",IpcMode:"",CapAdd:[] as string[],CapDrop:["ALL"] as string[],
@@ -82,4 +82,9 @@ test("rejects malformed IDs, malformed Docker JSON and multiple inspect results"
   await assert.rejects(inspectDockerWorkerAndAttest("not-a-container", policy, async () => "[]"), /valid Docker container ID/);
   await assert.rejects(inspectDockerWorkerAndAttest("a".repeat(64), policy, async () => "not-json"), /invalid JSON/);
   await assert.rejects(inspectDockerWorkerAndAttest("a".repeat(64), policy, async () => "[]"), /exactly one container/);
+});
+
+test("rejects a different container with otherwise identical settings",()=>{
+ const x=inspection();x.Name="/untrusted-container";
+ assert.throws(()=>createDockerHostIsolationAttestation(x,policy),/container name/);
 });
