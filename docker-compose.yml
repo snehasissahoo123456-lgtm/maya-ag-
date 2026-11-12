@@ -62,6 +62,8 @@ services:
       NODE_ENV: test
       MAYA_DEVELOPER_SANDBOX_QUEUE_DIR: /developer-queue
       MAYA_DEVELOPER_SANDBOX_WORKSPACE_DIR: /developer-workspaces
+      MAYA_DEVELOPER_DEPENDENCY_SOURCE_DIR: /app/node_modules
+      MAYA_DEVELOPER_DEPENDENCY_MANIFEST: /app/.maya-dependency-manifest.json
     volumes:
       - maya-developer-queue:/developer-queue
       - maya-developer-workspaces:/developer-workspaces
