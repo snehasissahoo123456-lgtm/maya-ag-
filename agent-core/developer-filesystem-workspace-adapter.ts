@@ -104,7 +104,9 @@ export class DeveloperFilesystemWorkspaceAdapter implements DeveloperWorkspaceAd
     await assertDirectory(workspacePath);
     const real = await fs.realpath(workspacePath);
     if (real !== workspacePath || !inside(this.workspaceRoot, real)) throw new Error("Workspace path resolves outside its enrolled root.");
-    const baselinePath = path.join(this.queueRoot, "baselines", workspaceId + ".sha");
+    const baselineDirectory = path.join(this.queueRoot, "baselines");
+    await assertDirectory(baselineDirectory);
+    const baselinePath = path.join(baselineDirectory, workspaceId + ".sha");
     const baselineStat = await fs.lstat(baselinePath);
     if (!baselineStat.isFile() || baselineStat.isSymbolicLink() || baselineStat.size > 64) {
       throw new Error("Workspace baseline record is invalid.");
@@ -299,7 +301,7 @@ async function acquireWorkspaceLock(queueRoot: string, workspaceId: string, loca
   const directory = path.join(queueRoot, "locks");
   await assertDirectory(directory);
   const lockPath = path.join(directory, workspaceId + ".lock");
-  let handle;
+  let handle: Awaited<ReturnType<typeof fs.open>>;
   try {
     handle = await fs.open(lockPath, "wx", 0o600);
   } catch (error) {
