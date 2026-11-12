@@ -999,6 +999,7 @@ async function startServer() {
   const publicApiPaths = new Set([
     "/health",
     "/auth/founder-login",
+    "/auth/reviewer-login",
     "/auth/send-otp",
     "/auth/verify-otp",
     "/auth/session",
@@ -1020,6 +1021,13 @@ async function startServer() {
     const session = authService.validateSession(bearer || cookieToken);
     if (!session) {
       return res.status(401).json({ success: false, error: "Authentication required. No verified session is active." });
+    }
+    // CTO/Admin sessions are restricted to the explicit independent-review endpoint.
+    // All other application APIs remain Founder-only until separately authorized.
+    const reviewerRoute = req.method === "POST" && /^\/developer\/changes\/[^/]+\/review$/.test(req.path);
+    if (session.user.role !== "Founder" &&
+        !((session.user.role === "CTO" || session.user.role === "Admin") && reviewerRoute)) {
+      return res.status(403).json({ success: false, error: "This authenticated role is not authorized for the requested API." });
     }
     (req as any).authSession = session;
     return next();
