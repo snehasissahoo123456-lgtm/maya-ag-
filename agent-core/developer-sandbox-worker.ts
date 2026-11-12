@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
+import { seedOfflineWorkspaceDependencies } from "./developer-offline-dependency-seeder.ts";
 
 export type SandboxCommand = "typecheck" | "test" | "build";
 export interface SandboxJob { id:string; workspaceId:string; baselineCommit:string; command:SandboxCommand; createdAt:string; }
@@ -9,6 +10,8 @@ export interface SandboxResult { id:string; workspaceId:string; command:SandboxC
 export interface SandboxOptions {
   queueRoot:string; workspaceRoot:string;
   runCommand?:(command:SandboxCommand,cwd:string,timeoutMs:number)=>Promise<{exitCode:number|null;timedOut:boolean;output:string;durationMs:number}>;
+  dependencySourceDir?:string;
+  dependencyManifestPath?:string;
   now?:()=>Date;
 }
 const ID=/^[a-zA-Z0-9][a-zA-Z0-9_-]{7,79}$/;
@@ -108,6 +111,12 @@ export async function processOneSandboxJob(o:SandboxOptions):Promise<boolean> {
     const st=await fs.lstat(claimed); if(!st.isFile()||st.isSymbolicLink()||st.size>16_384)throw new Error("Invalid or oversized job file.");
     job=parseJob(JSON.parse(await fs.readFile(claimed,"utf8")));
     const cwd=await workspacePath(o.workspaceRoot,job.workspaceId,job.baselineCommit,root);
+    const dependencySourceDir=o.dependencySourceDir??process.env.MAYA_DEVELOPER_DEPENDENCY_SOURCE_DIR;
+    const dependencyManifestPath=o.dependencyManifestPath??process.env.MAYA_DEVELOPER_DEPENDENCY_MANIFEST;
+    if (dependencySourceDir || dependencyManifestPath || !o.runCommand) {
+      if (!dependencySourceDir || !dependencyManifestPath) throw new Error("Offline dependency seeding is not configured; refusing to run QA.");
+      await seedOfflineWorkspaceDependencies({workspaceRoot:cwd,sourceNodeModules:dependencySourceDir,manifestPath:dependencyManifestPath});
+    }
     const r=await (o.runCommand??runSandboxCommand)(job.command,cwd,TIMEOUT);
     result={id:job.id,workspaceId:job.workspaceId,command:job.command,status:!r.timedOut&&r.exitCode===0?"passed":"failed",exitCode:r.exitCode,timedOut:r.timedOut,durationMs:r.durationMs,output:clean(r.output),finishedAt:(o.now?.()??new Date()).toISOString()};
   }catch(e){

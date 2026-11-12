@@ -7,6 +7,7 @@ RUN bun install --frozen-lockfile
 
 COPY . .
 RUN bun run build
+RUN bun -e 'import { createHash } from "node:crypto"; import { readFileSync, writeFileSync } from "node:fs"; const hash = (file) => createHash("sha256").update(readFileSync(file)).digest("hex"); writeFileSync(".maya-dependency-manifest.json", JSON.stringify({ version: 1, packageJsonSha256: hash("package.json"), bunLockSha256: hash("bun.lock") }));'
 
 FROM node:22-bookworm-slim AS runtime
 ENV NODE_ENV=production
@@ -15,6 +16,7 @@ ENV MAYA_DATA_DIR=/data
 WORKDIR /app
 
 COPY --from=build --chown=node:node /app/node_modules ./node_modules
+COPY --from=build --chown=node:node /app/.maya-dependency-manifest.json ./.maya-dependency-manifest.json
 COPY --from=build --chown=node:node /app/dist ./dist
 COPY --chown=node:node package.json ./package.json
 # Keep the source workspace available for read-only scheduled analysis tools.
