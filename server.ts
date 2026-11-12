@@ -1035,6 +1035,42 @@ async function startServer() {
 
   app.use("/api/developer/changes", createDeveloperChangeRouter(developerChangeRepository));
 
+  app.get("/api/developer/runtime/status", async (req, res) => {
+    const founderId = (req as any).authSession?.user?.id;
+    if (!founderId) return res.status(401).json({ success: false, error: "Verified Founder session required." });
+    try {
+      const changes = await developerChangeRepository.list({ founderId, limit: 500 });
+      const counts = Object.fromEntries(
+        ["draft", "submitted", "reviewed", "approved", "executing", "verifying", "completed", "rejected", "rolled_back"]
+          .map(status => [status, changes.filter(change => change.status === status).length]),
+      );
+      return res.json({
+        success: true,
+        runtime: {
+          configured: false,
+          enabled: false,
+          readyToApply: false,
+          executionEnabled: false,
+          qaEnabled: false,
+          workerEnabled: false,
+        },
+        changes: { total: changes.length, counts },
+        blockers: [
+          "A trusted host/container supervisor attestation is not integrated; isolation cannot be proven by the application server.",
+          "The Developer execution runtime is not enabled in server.ts.",
+          "The no-network sandbox worker remains opt-in and is not started by the application.",
+          "Workspace provisioning and a complete buildable baseline are not yet connected to the Founder change workflow.",
+          "Production activation requires durable shared storage and end-to-end runtime verification.",
+        ],
+      });
+    } catch (error) {
+      return res.status(500).json({
+        success: false,
+        error: error instanceof Error ? error.message : "Unable to read Developer runtime status.",
+      });
+    }
+  });
+
   app.get("/api/schedules", async (req, res) => {
     const founderId = (req as any).authSession?.user?.id;
     if (!founderId) return res.status(401).json({ success: false, error: "Verified Founder session required." });
