@@ -132,6 +132,10 @@ export class DeveloperFilesystemWorkspaceAdapter implements DeveloperWorkspaceAd
     const workspace = await this.currentWorkspace();
     const releaseLock = await acquireWorkspaceLock(this.queueRoot, workspace.workspaceId, this.locks);
     try {
+      const verified = await this.options.isolation.verify();
+      if (!verified?.isolated || verified.networkAccess || verified.secretsMounted) {
+        throw new Error("Workspace isolation must be re-verified immediately before applying files.");
+      }
       if (!Array.isArray(input.files) || input.files.length < 1 || input.files.length > this.maxFiles ||
           !SHA256.test(input.packageSha256) || !input.changeId.trim()) {
         throw new Error("Workspace apply request is invalid.");
