@@ -18,7 +18,7 @@ function inspection(){
   Image:policy.expectedImageId,State:{Running:true,Status:"running"},
   Config:{User:"node",Env:["NODE_ENV=test","MAYA_DEVELOPER_SANDBOX_QUEUE_DIR=/developer-queue"]},
   HostConfig:{
-   NetworkMode:"none",ReadonlyRootfs:true,Privileged:false,PidMode:"",IpcMode:"",CapAdd:[],CapDrop:["ALL"],
+   NetworkMode:"none",ReadonlyRootfs:true,Privileged:false,PidMode:"",IpcMode:"",CapAdd:[] as string[],CapDrop:["ALL"] as string[],
    SecurityOpt:["no-new-privileges:true"],Devices:[] as unknown[],Binds:[] as string[],PidsLimit:128,Memory:2147483648,NanoCpus:2000000000,
    Tmpfs:{"/tmp":"rw,noexec,nosuid,size=134217728"},
   },
