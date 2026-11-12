@@ -65,6 +65,12 @@ export class FileHostIsolationNonceStore {
       throw error;
     }
     fs.closeSync(fd);
+    // Persist the directory entry as well as the file contents on POSIX hosts.
+    // Windows does not support opening directories for fsync through this API.
+    if (process.platform !== "win32") {
+      const directoryFd = fs.openSync(this.directory, "r");
+      try { fs.fsyncSync(directoryFd); } finally { fs.closeSync(directoryFd); }
+    }
     return true;
   }
 }
