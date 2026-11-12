@@ -9,6 +9,13 @@ test("allows read-only chat tools through the injected server executor", async (
   assert.deepEqual(calls, ["read_file"]);
 });
 
+test("allows bounded CEO delegation through the read-only chat tool policy", async () => {
+  const calls: string[] = [];
+  const execute = createChatToolExecutor(async (name) => { calls.push(name); return { delegated: true }; });
+  assert.deepEqual(await execute("delegate_to_ceo", { objective: "Research the launch strategy" }), { delegated: true });
+  assert.deepEqual(calls, ["delegate_to_ceo"]);
+});
+
 test("blocks memory writes, queued tasks, and command execution without approval", async () => {
   const execute = createChatToolExecutor(async () => ({ executed: true }));
   for (const name of ["memory_save", "schedule_task", "run_tests"]) {
