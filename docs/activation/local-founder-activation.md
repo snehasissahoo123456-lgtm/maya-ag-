@@ -16,6 +16,8 @@ Set:
 - `MAYA_FOUNDER_PASSWORD` to a strong, unique local password.
 - `GEMINI_API_KEY` to the server-side Gemini API key.
 
+An optional separate reviewer identity can be configured with `MAYA_REVIEWER_EMAIL` and `MAYA_REVIEWER_PASSWORD` (at least 16 characters). It must use a different email and password from the Founder. The reviewer signs in through `POST /api/auth/reviewer-login`; this creates a distinct CTO-role session only. It does not yet grant Developer review or execution API access; those permissions must be wired and tested separately.
+
 Keep `.env` local. Never commit it, paste secrets into GitHub issues/PRs, or put the Gemini key in browser code. The launcher checks that the values exist but never prints them.
 
 ## 2. Install and start
