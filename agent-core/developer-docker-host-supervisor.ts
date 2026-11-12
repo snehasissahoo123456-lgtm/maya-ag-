@@ -1,3 +1,4 @@
+import { execFile } from "node:child_process";
 import { randomBytes, createPrivateKey, sign } from "node:crypto";
 import { hostIsolationAttestationSigningBytes, type HostIsolationAttestationPayload, type SignedHostIsolationAttestation } from "./developer-host-isolation-attestation.ts";
 
@@ -59,4 +60,37 @@ export function createDockerHostIsolationAttestation(inspection:unknown,policy:D
   const key=createPrivateKey(policy.privateKeyPem);
   if(key.asymmetricKeyType!=="ed25519")throw new Error("Host supervisor signing key must be Ed25519.");
   return {...payload,signature:sign(null,hostIsolationAttestationSigningBytes(payload),key).toString("base64url")};
+}
+
+
+export type DockerInspectRunner = (containerId: string) => Promise<string>;
+
+/** Query the local Docker CLI without a shell, then attest only its live inspect result. */
+export async function inspectDockerWorkerAndAttest(
+  containerId: string,
+  policy: DockerHostSupervisorPolicy,
+  runner: DockerInspectRunner = (id) => new Promise((resolve, reject) => {
+    execFile("docker", ["inspect", id], {
+      timeout: 5_000,
+      maxBuffer: 1024 * 1024,
+      windowsHide: true,
+      encoding: "utf8",
+    }, (error, stdout) => {
+      if (error) reject(new Error("Docker inspect failed; no host attestation was issued."));
+      else resolve(stdout);
+    });
+  }),
+): Promise<SignedHostIsolationAttestation> {
+  if (typeof containerId !== "string" || !/^[a-f0-9]{12,64}$/i.test(containerId)) {
+    throw new Error("A valid Docker container ID is required.");
+  }
+  const raw = await runner(containerId);
+  let parsed: unknown;
+  try { parsed = JSON.parse(raw); } catch {
+    throw new Error("Docker inspect returned invalid JSON; no host attestation was issued.");
+  }
+  if (!Array.isArray(parsed) || parsed.length !== 1) {
+    throw new Error("Docker inspect must return exactly one container.");
+  }
+  return createDockerHostIsolationAttestation(parsed[0], policy);
 }
