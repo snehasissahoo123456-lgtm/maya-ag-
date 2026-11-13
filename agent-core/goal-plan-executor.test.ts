@@ -113,3 +113,40 @@ test("enforces sensitive-tool approvals even if a model flag is false", async ()
     assert.equal(resumed.status, "completed");
   } finally { fs.rmSync(ctx.directory, { recursive: true, force: true }); }
 });
+
+
+test("creates an empty store only when the goal-plan file is genuinely missing", async () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "maya-plan-store-missing-"));
+  try {
+    const store = new GoalPlanStore(directory);
+    assert.deepEqual(await store.list("founder-a"), []);
+    const created = await store.create("founder-a", sample);
+    assert.equal((await store.get("founder-a", created.id))?.id, created.id);
+  } finally { fs.rmSync(directory, { recursive: true, force: true }); }
+});
+
+test("fails closed on corrupt JSON without replacing the original goal-plan file", async () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "maya-plan-store-corrupt-"));
+  const filePath = path.join(directory, "goal-plans.json");
+  const corrupt = "{ this is not valid JSON";
+  fs.writeFileSync(filePath, corrupt, "utf8");
+  try {
+    const store = new GoalPlanStore(directory);
+    await assert.rejects(store.list("founder-a"), /invalid JSON.*refusing to overwrite/i);
+    await assert.rejects(store.create("founder-a", sample), /invalid JSON.*refusing to overwrite/i);
+    assert.equal(fs.readFileSync(filePath, "utf8"), corrupt);
+  } finally { fs.rmSync(directory, { recursive: true, force: true }); }
+});
+
+test("fails closed on unsupported or malformed goal-plan storage instead of silently dropping records", async () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "maya-plan-store-schema-"));
+  const filePath = path.join(directory, "goal-plans.json");
+  try {
+    fs.writeFileSync(filePath, JSON.stringify({ version: 2, plans: [] }), "utf8");
+    const store = new GoalPlanStore(directory);
+    await assert.rejects(store.list("founder-a"), /unsupported or invalid format/i);
+    fs.writeFileSync(filePath, JSON.stringify({ version: 1, plans: [{ id: "plan-1", founderId: "founder-a" }] }), "utf8");
+    await assert.rejects(store.create("founder-a", sample), /malformed plan record/i);
+    assert.equal(JSON.parse(fs.readFileSync(filePath, "utf8")).plans[0].id, "plan-1");
+  } finally { fs.rmSync(directory, { recursive: true, force: true }); }
+});
