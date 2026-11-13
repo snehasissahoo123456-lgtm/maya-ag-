@@ -118,6 +118,7 @@ export class DeveloperChangeExecutionCoordinator {
     });
     const persisted: DeveloperChangeRequest = {
       ...result.change,
+      execution: { ...result.change.execution!, taskId: input.taskId, packageSha256: result.packageSha256 },
       rollbackSnapshotId: result.snapshotId,
       updatedAt: this.timestamp().toISOString(),
     };
