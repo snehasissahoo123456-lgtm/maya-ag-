@@ -3,7 +3,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import {processOneSandboxJob} from "./developer-sandbox-worker.ts";
+import {processOneSandboxJob,recoverInterruptedSandboxJobs} from "./developer-sandbox-worker.ts";
 async function fixture(){
  const root=await fs.mkdtemp(path.join(os.tmpdir(),"maya-sandbox-"));
  const queueRoot=path.join(root,"queue"),workspaceRoot=path.join(root,"workspaces"),workspaceId="workspace-001";
@@ -78,5 +78,22 @@ test("rejects symlinks that resolve outside the workspace",async()=>{
  await enqueue(f,job(f));let called=false;
  await processOneSandboxJob({queueRoot:f.queueRoot,workspaceRoot:f.workspaceRoot,runCommand:async()=>{called=true;return{exitCode:0,timedOut:false,output:"",durationMs:1};}});
  const r=JSON.parse(await fs.readFile(path.join(f.queueRoot,"results","job-00000001.json"),"utf8"));assert.equal(r.status,"rejected");assert.equal(called,false);
+ await fs.rm(f.root,{recursive:true,force:true});
+});
+
+test("recovers an interrupted job under its original identity so QA can collect it",async()=>{
+ const f=await fixture();
+ const running=path.join(f.queueRoot,"running");
+ await fs.mkdir(running,{recursive:true});
+ await fs.writeFile(path.join(running,"claim-123.json"),JSON.stringify(job(f)));
+ const recovered=await recoverInterruptedSandboxJobs(f.queueRoot,()=>new Date("2026-11-13T08:00:00.000Z"));
+ assert.equal(recovered.length,1);
+ assert.equal(recovered[0].id,"job-00000001");
+ assert.equal(recovered[0].workspaceId,f.workspaceId);
+ assert.equal(recovered[0].command,"test");
+ assert.equal(recovered[0].status,"interrupted");
+ const saved=JSON.parse(await fs.readFile(path.join(f.queueRoot,"results","job-00000001.json"),"utf8"));
+ assert.equal(saved.id,"job-00000001");
+ assert.equal(await fs.readdir(running).then(x=>x.length),0);
  await fs.rm(f.root,{recursive:true,force:true});
 });
