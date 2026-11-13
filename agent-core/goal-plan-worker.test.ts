@@ -261,3 +261,85 @@ test("worker storage guard permits Supabase only with atomic claim, renewal and 
   assertGoalPlanWorkerStorage(leasedStore, "supabase");
   assert.throws(() => assertGoalPlanWorkerStorage(new GoalPlanStore(), "supabase"), /atomic claim, lease renewal and release/i);
 });
+
+
+test("waits for an in-flight lease renewal before releasing the plan claim", async () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "maya-plan-renew-release-order-"));
+  try {
+    const store = new GoalPlanStore(directory);
+    const created = await store.create("founder-a", plan([readStep]));
+    await store.save("founder-a", { ...created, status: "running" });
+    let claimed = false;
+    let renewalStarted = false;
+    let renewalFinished = false;
+    let released = false;
+    const repository = {
+      create: store.create.bind(store), list: store.list.bind(store), get: store.get.bind(store), save: store.save.bind(store),
+      claimNext: async (founderId: string) => {
+        if (claimed) return undefined;
+        claimed = true;
+        return store.get(founderId, created.id);
+      },
+      renewClaim: async () => {
+        renewalStarted = true;
+        await new Promise(resolve => setTimeout(resolve, 80));
+        renewalFinished = true;
+        return true;
+      },
+      releaseClaim: async () => {
+        assert.equal(renewalFinished, true, "claim release must wait for any in-flight renewal");
+        released = true;
+      },
+    };
+    const executor = new GoalPlanExecutor(store, async () => {
+      await new Promise(resolve => setTimeout(resolve, 1_800));
+      return { ok: true };
+    });
+    const worker = new GoalPlanWorker(repository, executor, "founder-a", 3000, 5, "renew-release-worker", 5_000);
+    const result = await worker.runOnce();
+    assert.equal(result.completed, 1);
+    assert.equal(renewalStarted, true);
+    assert.equal(renewalFinished, true);
+    assert.equal(released, true);
+  } finally { fs.rmSync(directory, { recursive: true, force: true }); }
+});
+
+test("waits for an in-flight renewal result before persisting a step or starting the next one", async () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "maya-plan-renew-loss-race-"));
+  try {
+    const store = new GoalPlanStore(directory);
+    const secondStep = { ...readStep, id: "second_read", title: "Second read", dependsOn: ["read_step"] };
+    const created = await store.create("founder-a", plan([readStep, secondStep]));
+    await store.save("founder-a", { ...created, status: "running" });
+    let claimed = false;
+    let executions = 0;
+    let released = false;
+    const repository = {
+      create: store.create.bind(store), list: store.list.bind(store), get: store.get.bind(store), save: store.save.bind(store),
+      claimNext: async (founderId: string) => {
+        if (claimed) return undefined;
+        claimed = true;
+        return store.get(founderId, created.id);
+      },
+      renewClaim: async () => {
+        await new Promise(resolve => setTimeout(resolve, 80));
+        return false;
+      },
+      releaseClaim: async () => { released = true; },
+    };
+    const executor = new GoalPlanExecutor(store, async () => {
+      executions++;
+      await new Promise(resolve => setTimeout(resolve, 1_800));
+      return { ok: true };
+    });
+    const worker = new GoalPlanWorker(repository, executor, "founder-a", 3000, 5, "renew-loss-race-worker", 5_000);
+    const result = await worker.runOnce();
+    assert.equal(result.failed, 1);
+    assert.equal(executions, 1, "the second step must not start after renewal reports lease loss");
+    assert.equal(released, false, "a worker that lost its lease must not release the successor's claim");
+    const persisted = await store.get("founder-a", created.id);
+    assert.equal(persisted?.status, "running");
+    assert.equal(persisted?.stepStates.read_step.status, "running", "stale results must not be persisted after lease loss");
+    assert.equal(persisted?.stepStates.second_read.status, "queued");
+  } finally { fs.rmSync(directory, { recursive: true, force: true }); }
+});
