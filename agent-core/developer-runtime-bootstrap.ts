@@ -9,6 +9,9 @@ import { createHostSupervisorClient } from "./developer-host-supervisor-client.t
 
 const WORKSPACE_ID = /^[a-zA-Z0-9][a-zA-Z0-9_-]{7,79}$/;
 const GIT_SHA = /^[a-f0-9]{40}$/i;
+const samePath = (left: string, right: string) => process.platform === "win32"
+  ? path.normalize(left).toLowerCase() === path.normalize(right).toLowerCase()
+  : path.normalize(left) === path.normalize(right);
 
 export interface DeveloperWorkspaceBinding {
   workspaceId: string;
@@ -47,8 +50,8 @@ export async function readDeveloperWorkspaceBinding(
       !queueRootStat.isDirectory() || queueRootStat.isSymbolicLink()) {
     throw new Error("Developer workspace and queue roots must be regular directories, not symlinks.");
   }
-  if (await fs.realpath(workspaceRoot) !== workspaceRoot ||
-      await fs.realpath(queueRoot) !== queueRoot) {
+  if (!samePath(await fs.realpath(workspaceRoot), workspaceRoot) ||
+      !samePath(await fs.realpath(queueRoot), queueRoot)) {
     throw new Error("Developer runtime roots cannot resolve through symlinks.");
   }
 
@@ -61,14 +64,14 @@ export async function readDeveloperWorkspaceBinding(
   const workspacePath = path.join(workspaceRoot, workspaceId);
   const workspaceStat = await fs.lstat(workspacePath);
   if (!workspaceStat.isDirectory() || workspaceStat.isSymbolicLink() ||
-      await fs.realpath(workspacePath) !== workspacePath) {
+      !samePath(await fs.realpath(workspacePath), workspacePath)) {
     throw new Error("Enrolled Developer workspace must be a regular non-symlink directory.");
   }
 
   const baselineDirectory = path.join(queueRoot, "baselines");
   const baselineDirectoryStat = await fs.lstat(baselineDirectory);
   if (!baselineDirectoryStat.isDirectory() || baselineDirectoryStat.isSymbolicLink() ||
-      await fs.realpath(baselineDirectory) !== baselineDirectory) {
+      !samePath(await fs.realpath(baselineDirectory), baselineDirectory)) {
     throw new Error("Developer baseline directory must be a regular non-symlink directory.");
   }
   const baselinePath = path.join(baselineDirectory, workspaceId + ".sha");
