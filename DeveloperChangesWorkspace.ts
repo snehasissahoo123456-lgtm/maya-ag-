@@ -31,7 +31,8 @@ export class MayaDeveloperChangesWorkspace extends LitElement {
   @state() private reviewDecision: "approved" | "changes_requested" = "approved";
   @state() private packageFilesText = "";
   @state() private preparedPackageText = "";
-  @state() private approvalId = "";\n  @state() private approvalTaskId = "";
+  @state() private approvalId = "";
+  @state() private approvalTaskId = "";
   @state() private approvalStatus = "";
   @state() private executionText = "";
   @state() private verificationText = "";
