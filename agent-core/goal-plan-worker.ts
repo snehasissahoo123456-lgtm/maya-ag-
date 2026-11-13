@@ -24,7 +24,8 @@ export interface GoalPlanWorkerStatus {
 }
 
 /**
- * Single-process background runner for explicitly started Founder plans.
+ * Bounded background runner for explicitly started Founder plans. File storage is single-process;
+ * database-backed repositories coordinate workers through atomic, renewable Founder-scoped leases.
  * Interrupted in-flight steps are parked as failed for review; they are never replayed.
  * Database-backed workers renew their Founder-scoped lease while a plan executes.
  */
