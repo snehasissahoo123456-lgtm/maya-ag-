@@ -5,7 +5,8 @@ import os from "node:os";
 import path from "node:path";
 import { GoalPlanStore } from "./goal-plan-store.ts";
 import { GoalPlanExecutor } from "./goal-plan-executor.ts";
-import { GoalPlanWorker } from "./goal-plan-worker.ts";
+import { GoalPlanWorker, assertGoalPlanWorkerStorage } from "./goal-plan-worker.ts";
+import { SupabaseGoalPlanStore } from "./supabase-goal-plan-store.ts";
 import type { GoalPlan } from "./goal-planner.ts";
 
 function plan(steps: GoalPlan["steps"]): GoalPlan {
@@ -245,4 +246,18 @@ test("worker stops before the next step and does not write stale state after lea
     assert.equal(persisted?.stepStates.read_step.status, "running");
     assert.equal(persisted?.stepStates.second_read.status, "queued");
   } finally { fs.rmSync(directory, { recursive: true, force: true }); }
+});
+
+
+test("worker storage guard permits single-instance file storage", () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "maya-plan-storage-guard-"));
+  try {
+    assertGoalPlanWorkerStorage(new GoalPlanStore(directory), "file");
+  } finally { fs.rmSync(directory, { recursive: true, force: true }); }
+});
+
+test("worker storage guard permits Supabase only with atomic claim, renewal and release", () => {
+  const leasedStore = new SupabaseGoalPlanStore("https://project.supabase.co", "service-secret", async () => new Response("[]", { status: 200 }));
+  assertGoalPlanWorkerStorage(leasedStore, "supabase");
+  assert.throws(() => assertGoalPlanWorkerStorage(new GoalPlanStore(), "supabase"), /atomic claim, lease renewal and release/i);
 });
