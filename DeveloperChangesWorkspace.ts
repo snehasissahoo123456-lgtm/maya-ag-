@@ -250,13 +250,13 @@ export class MayaDeveloperChangesWorkspace extends LitElement {
             ${change.status==="approved"?html`
               <label class="muted">Proposed file contents · JSON array<textarea .value=${this.packageFilesText} @input=${(e:Event)=>this.packageFilesText=(e.target as HTMLTextAreaElement).value} placeholder='[{"path":"agent-core/example.ts","content":"...","expectedSha256":null}]'></textarea></label>
               <button class="btn primary" @click=${()=>this.requestApplyApproval(change)} ?disabled=${this.busy}>Prepare package and request apply approval</button>`:""}
-            ${this.preparedPackageText?html`
-              <div class="step space-y-2"><p class="muted">Package SHA-256: <code>${pkg?.packageSha256||"invalid package"}</code></p>
-                <p class="muted">Approval ID: <code>${this.approvalId||"not available"}</code> · Status: ${this.approvalStatus||"unknown"}</p>
-                <label class="muted">Exact package JSON · preserve unchanged<textarea .value=${this.preparedPackageText} @input=${(e:Event)=>this.preparedPackageText=(e.target as HTMLTextAreaElement).value}></textarea></label>
-                ${this.approvalStatus==="pending"?html`<div class="flex gap-2"><button class="btn primary" @click=${()=>this.decideApply(true)} ?disabled=${this.busy}>Approve exact package</button><button class="btn danger" @click=${()=>this.decideApply(false)} ?disabled=${this.busy}>Reject package</button></div>`:""}
-                ${this.approvalStatus==="approved"&&change.status==="approved"?html`<button class="btn primary" @click=${()=>this.executePackage()} ?disabled=${this.busy}>Apply approved package to isolated workspace</button>`:""}
-              </div>`:""}
+            <div class="step space-y-2">
+              <p class="muted">Package SHA-256: <code>${pkg?.packageSha256||"not loaded"}</code></p>
+              <p class="muted">Approval ID: <code>${this.approvalId||"not loaded"}</code> · Status: ${this.approvalStatus||"unknown"}</p>
+              <label class="muted">Exact package JSON · paste the unchanged package here after a page refresh<textarea .value=${this.preparedPackageText} @input=${(e:Event)=>this.preparedPackageText=(e.target as HTMLTextAreaElement).value} placeholder='Paste the exact JSON package returned by the server.'></textarea></label>
+              ${this.approvalStatus==="pending"?html`<div class="flex gap-2"><button class="btn primary" @click=${()=>this.decideApply(true)} ?disabled=${this.busy}>Approve exact package</button><button class="btn danger" @click=${()=>this.decideApply(false)} ?disabled=${this.busy}>Reject package</button></div>`:""}
+              ${this.approvalStatus==="approved"&&change.status==="approved"?html`<button class="btn primary" @click=${()=>this.executePackage()} ?disabled=${this.busy||!pkg}>Apply approved package to isolated workspace</button>`:""}
+            </div>
             ${change.status==="executing"||change.status==="verifying"?html`<button class="btn primary" @click=${()=>this.verifyPackage()} ?disabled=${this.busy||!this.preparedPackageText}>Run independent QA verification</button>`:""}
             ${this.executionText?html`<details open><summary class="text-xs text-indigo-300">Execution result</summary><pre>${this.executionText}</pre></details>`:""}
             ${this.verificationText?html`<details open><summary class="text-xs text-indigo-300">QA evidence</summary><pre>${this.verificationText}</pre></details>`:""}
