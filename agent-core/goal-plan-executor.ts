@@ -38,8 +38,7 @@ export class GoalPlanExecutor {
     const step = plan.plan.steps.find(item => item.id === stepId);
     if (!step) throw new Error("Plan step not found.");
     if (!requiresApproval(step)) throw new Error("This step does not require Founder approval.");
-    if (plan.status === "running" && plan.stepStates[stepId]?.status !== "awaiting_approval") throw new Error("A running plan can only approve the exact step currently awaiting approval.");
-    if (plan.stepStates[stepId].status === "completed") throw new Error("Completed steps cannot be re-approved.");
+    if (plan.status !== "awaiting_approval" || plan.stepStates[stepId]?.status !== "awaiting_approval") throw new Error("Only the exact step currently awaiting Founder approval can be approved.");
     plan.stepStates[stepId].approvedDigest = stepDigest(step);
     if (plan.status === "awaiting_approval") plan.status = "running";
     await this.store.save(founderId, plan);

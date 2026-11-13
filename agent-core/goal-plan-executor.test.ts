@@ -44,6 +44,42 @@ test("executes safe steps, pauses for approval, then resumes sequentially with e
   } finally { fs.rmSync(ctx.directory, { recursive: true, force: true }); }
 });
 
+
+test("cannot pre-approve a later mutation while the current mutation is awaiting approval", async () => {
+  const laterMutation: GoalPlan = {
+    ...sample,
+    steps: [
+      sample.steps[0],
+      { id: "first_write", title: "Save first note", tool: "memory_save", args: { content: "first" }, dependsOn: ["inspect"], expectedResult: "First note saved", requiresFounderApproval: true },
+      { id: "second_write", title: "Schedule follow-up", tool: "schedule_task", args: { title: "Follow up" }, dependsOn: ["first_write"], expectedResult: "Follow-up scheduled", requiresFounderApproval: true },
+    ],
+  };
+  const calls: string[] = [];
+  const ctx = await setup(laterMutation, async tool => { calls.push(tool); return { ok: true, tool }; });
+  try {
+    const firstPause = await ctx.executor.execute("founder-a", ctx.saved.id);
+    assert.equal(firstPause.status, "awaiting_approval");
+    assert.equal(firstPause.stepStates.first_write.status, "awaiting_approval");
+    assert.equal(firstPause.stepStates.second_write.status, "queued");
+    await assert.rejects(
+      ctx.executor.approveStep("founder-a", ctx.saved.id, "second_write"),
+      /exact step currently awaiting Founder approval/i,
+    );
+
+    await ctx.executor.approveStep("founder-a", ctx.saved.id, "first_write");
+    const secondPause = await ctx.executor.execute("founder-a", ctx.saved.id);
+    assert.equal(secondPause.status, "awaiting_approval");
+    assert.equal(secondPause.stepStates.first_write.status, "completed");
+    assert.equal(secondPause.stepStates.second_write.status, "awaiting_approval");
+    assert.deepEqual(calls, ["read_file", "memory_save"]);
+
+    await ctx.executor.approveStep("founder-a", ctx.saved.id, "second_write");
+    const completed = await ctx.executor.execute("founder-a", ctx.saved.id);
+    assert.equal(completed.status, "completed");
+    assert.deepEqual(calls, ["read_file", "memory_save", "schedule_task"]);
+  } finally { fs.rmSync(ctx.directory, { recursive: true, force: true }); }
+});
+
 test("does not execute another Founder's plan or approve read-only steps", async () => {
   const ctx = await setup(sample, async () => ({ ok: true }));
   try {
