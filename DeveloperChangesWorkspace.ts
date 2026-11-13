@@ -34,6 +34,7 @@ export class MayaDeveloperChangesWorkspace extends LitElement {
   @state() private approvalId = "";
   @state() private approvalTaskId = "";
   @state() private approvalStatus = "";
+  @state() private approvalExpiresAt = "";
   @state() private executionText = "";
   @state() private verificationText = "";
   @state() private busy = false;
@@ -57,6 +58,66 @@ export class MayaDeveloperChangesWorkspace extends LitElement {
 
   override createRenderRoot(): HTMLElement { return this; }
   override connectedCallback() { super.connectedCallback(); void this.refresh(); }
+
+  private readonly recoveryKey = "maya.developer-change-session.v1";
+  private persistRecovery() {
+    try {
+      const records = JSON.parse(sessionStorage.getItem(this.recoveryKey) || "{}");
+      const all = records && typeof records === "object" && !Array.isArray(records) ? records : {};
+      if (!this.selected) return;
+      if (!this.approvalId || !this.approvalTaskId || !this.preparedPackageText) {
+        delete all[this.selected.id];
+      } else {
+        all[this.selected.id] = {
+          approvalId: this.approvalId,
+          taskId: this.approvalTaskId,
+          status: this.approvalStatus,
+          expiresAt: this.approvalExpiresAt,
+          packageText: this.preparedPackageText,
+          savedAt: new Date().toISOString(),
+        };
+      }
+      sessionStorage.setItem(this.recoveryKey, JSON.stringify(all));
+    } catch {
+      this.error = "This browser session cannot save Developer approval recovery data. Keep the exact package JSON securely before refreshing.";
+    }
+  }
+  private restoreRecovery(changeId: string) {
+    try {
+      const records = JSON.parse(sessionStorage.getItem(this.recoveryKey) || "{}");
+      const record = records && typeof records === "object" ? records[changeId] : undefined;
+      if (!record || typeof record !== "object" ||
+          typeof record.approvalId !== "string" || typeof record.taskId !== "string" ||
+          typeof record.packageText !== "string" || typeof record.status !== "string" ||
+          typeof record.expiresAt !== "string") return;
+      const savedAt = Date.parse(record.savedAt);
+      if (!Number.isFinite(savedAt) || Date.now() - savedAt > 60 * 60 * 1000 ||
+          !Number.isFinite(Date.parse(record.expiresAt)) || Date.parse(record.expiresAt) <= Date.now()) {
+        delete records[changeId];
+        sessionStorage.setItem(this.recoveryKey, JSON.stringify(records));
+        return;
+      }
+      const pkg = JSON.parse(record.packageText);
+      if (!pkg || pkg.changeId !== changeId || typeof pkg.packageSha256 !== "string" || !Array.isArray(pkg.files)) return;
+      this.approvalId = record.approvalId;
+      this.approvalTaskId = record.taskId;
+      this.approvalStatus = record.status;
+      this.approvalExpiresAt = record.expiresAt;
+      this.preparedPackageText = record.packageText;
+    } catch {
+      this.error = "Saved Developer approval recovery data is invalid; prepare a new exact package if the existing approval has expired.";
+    }
+  }
+  private clearRecovery(changeId: string) {
+    try {
+      const records = JSON.parse(sessionStorage.getItem(this.recoveryKey) || "{}");
+      if (records && typeof records === "object") {
+        delete records[changeId];
+        sessionStorage.setItem(this.recoveryKey, JSON.stringify(records));
+      }
+    } catch {}
+  }
+
 
   private async request(url: string, init: RequestInit = {}) {
     return fetch(url, { ...init, credentials:"same-origin", headers:{ "content-type":"application/json", ...(init.headers || {}) } });
@@ -89,6 +150,7 @@ export class MayaDeveloperChangesWorkspace extends LitElement {
       this.approvalStatus = "";
       this.executionText = "";
       this.verificationText = "";
+      this.restoreRecovery(id);
     }
     const response = await this.request("/api/developer/changes/" + encodeURIComponent(id));
     const data = await response.json();
@@ -148,6 +210,8 @@ export class MayaDeveloperChangesWorkspace extends LitElement {
       this.preparedPackageText=JSON.stringify(data.package,null,2);
       this.approvalId=data.approval.id;
       this.approvalStatus=data.approval.status;
+      this.approvalExpiresAt=data.approval.expiresAt;
+      this.persistRecovery();
       this.notice="Exact package prepared and approval requested. No files have been applied.";
     });
   }
@@ -156,6 +220,7 @@ export class MayaDeveloperChangesWorkspace extends LitElement {
     await this.withBusy(async()=>{
       const data=await this.post("/api/developer/changes/"+encodeURIComponent(change.id)+"/apply-approval/"+encodeURIComponent(this.approvalId)+"/decision",{approved});
       this.approvalStatus=data.approval.status;
+      this.persistRecovery();
       this.notice=approved?"Exact package approved. Execution has not started.":"Exact package rejected. No files were applied.";
     });
   }
@@ -172,6 +237,8 @@ export class MayaDeveloperChangesWorkspace extends LitElement {
         taskId:this.approvalTaskId,approvalId:this.approvalId,package:pkg,
       });
       this.executionText=JSON.stringify(data.execution,null,2);
+      this.clearRecovery(change.id);
+      this.approvalId="";this.approvalTaskId="";this.approvalStatus="";this.approvalExpiresAt="";this.preparedPackageText="";
       this.notice="Execution request completed. Independent QA is still required.";
       await this.refresh();await this.loadDetail(change.id);
     });
@@ -182,6 +249,7 @@ export class MayaDeveloperChangesWorkspace extends LitElement {
       const pkg=this.readPackage();
       const data=await this.post("/api/developer/changes/"+encodeURIComponent(change.id)+"/verify",{package:pkg});
       this.verificationText=JSON.stringify(data.verification,null,2);
+      if (data.verification.passed || data.verification.status === "rolled_back") this.clearRecovery(change.id);
       this.notice=data.verification.passed?"QA passed.":"QA did not pass; inspect evidence and rollback state.";
       await this.refresh();await this.loadDetail(change.id);
     });
