@@ -1134,7 +1134,7 @@ async function startServer() {
     return next();
   });
 
-  app.use("/api/developer/changes", createDeveloperChangeRouter(developerChangeRepository, { runtime: developerRuntimeBootstrapResult.runtime }));
+  app.use("/api/developer/changes", createDeveloperChangeRouter(developerChangeRepository, { runtime: developerRuntimeBootstrapResult.runtime, approvals: approvalRepository }));
 
   app.get("/api/developer/runtime/status", async (req, res) => {
     const founderId = (req as any).authSession?.user?.id;
