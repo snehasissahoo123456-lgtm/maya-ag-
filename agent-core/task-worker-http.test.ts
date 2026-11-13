@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { spawn, type ChildProcess } from "node:child_process";
+import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { createServer } from "node:net";
 import fs from "node:fs";
 import os from "node:os";
@@ -239,6 +239,10 @@ test("real HTTP worker writes to an enrolled local PC only after exact Founder a
   const deviceWorkspace = fs.mkdtempSync(path.join(os.tmpdir(), "maya-device-write-workspace-"));
   const targetPath = path.join(deviceWorkspace, "notes.md");
   fs.writeFileSync(targetPath, "Original local PC contents", "utf8");
+  const gitInit = spawnSync("git", ["init", "-q"], { cwd: deviceWorkspace, encoding: "utf8", windowsHide: true });
+  assert.equal(gitInit.status, 0, gitInit.stderr);
+  const gitAdd = spawnSync("git", ["add", "notes.md"], { cwd: deviceWorkspace, encoding: "utf8", windowsHide: true });
+  assert.equal(gitAdd.status, 0, gitAdd.stderr);
   const password = "test-founder-password-2026-device-write";
   const child = spawn(process.execPath, ["--import", "tsx", "server.ts"], {
     cwd: process.cwd(),
@@ -295,7 +299,7 @@ test("real HTTP worker writes to an enrolled local PC only after exact Founder a
     socket.on("message", async raw => {
       let message: any;
       try { message = JSON.parse(raw.toString()); } catch { return; }
-      if (message.type !== "command" || !["workspace.read_file", "workspace.write_file", "workspace.create_file", "workspace.create_directory"].includes(message.command)) return;
+      if (message.type !== "command" || !["workspace.read_file", "workspace.git_status", "workspace.write_file", "workspace.create_file", "workspace.create_directory"].includes(message.command)) return;
       try {
         const result = await executeLocalBridgeCommand(deviceWorkspace, message.command, message.args || {});
         socket?.send(JSON.stringify({ type: "command_result", requestId: message.requestId, success: true, result }));
@@ -331,6 +335,35 @@ test("real HTTP worker writes to an enrolled local PC only after exact Founder a
     assert.equal(readFinished.capability, "device.workspace.read_file");
     assert.equal(readFinished.result.content, "Original local PC contents");
     assert.match(readFinished.task.verificationEvidence[0].reference, /^sha256:[a-f0-9]{64}$/);
+
+    const gitTaskResponse = await fetch(baseUrl + "/api/control-plane/tasks", {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie },
+      body: JSON.stringify({
+        instruction: "Inspect Git status on my paired PC",
+        capability: "device.workspace.git_status",
+        deviceId: paired.device.id,
+        path: ".",
+      }),
+    });
+    assert.equal(gitTaskResponse.status, 201, `Git status task creation failed. Server output:\n${logs}`);
+    const gitTask = await gitTaskResponse.json() as any;
+    assert.equal(gitTask.task.requiresApproval, false);
+    const gitTaskId = gitTask.task.id;
+    const gitDeadline = Date.now() + 12_000;
+    let gitFinished: any = null;
+    while (Date.now() < gitDeadline) {
+      const response = await fetch(baseUrl + "/api/control-plane/tasks", { headers: { cookie } });
+      const data = await response.json() as any;
+      gitFinished = data.tasks.find((item: any) => item.task.id === gitTaskId);
+      if (gitFinished?.task.status === "completed" || gitFinished?.task.status === "failed") break;
+      await new Promise(resolve => setTimeout(resolve, 150));
+    }
+    assert.equal(gitFinished?.task.status, "completed", `Paired-PC Git status task did not complete. Server output:\n${logs}`);
+    assert.equal(gitFinished.capability, "device.workspace.git_status");
+    assert.ok(gitFinished.result.changes.some((change: any) => change.path === "notes.md"));
+    assert.equal("diff" in gitFinished.result, false);
+    assert.match(gitFinished.task.verificationEvidence[0].reference, /^sha256:[a-f0-9]{64}$/);
 
     const replacement = "Founder-approved local device replacement";
     const created = await fetch(baseUrl + "/api/control-plane/tasks", {

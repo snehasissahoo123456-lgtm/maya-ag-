@@ -193,6 +193,20 @@ taskCapabilityRegistry.register({
   verification: "Read the requested local device file and record its SHA-256 digest as execution evidence.",
 });
 taskCapabilityRegistry.register({
+  name: "device.workspace.git_status",
+  description: "Inspect the branch and tracked-file change summary of an enrolled local Git workspace without exposing diffs.",
+  risk: "low",
+  allowedRoles: ["founder", "worker"],
+  requiredScopes: ["device:read"],
+  arguments: {
+    deviceId: { type: "string", required: true, maxLength: 128 },
+    path: { type: "string", required: true, maxLength: 1024 },
+  },
+  timeoutMs: 10_000,
+  requiresApproval: false,
+  verification: "Read a bounded Git status summary from the enrolled local workspace and record its SHA-256 digest.",
+});
+taskCapabilityRegistry.register({
   name: "workspace.write_file",
   description: "Atomically replace the contents of an existing non-sensitive workspace file.",
   risk: "high",
@@ -296,6 +310,30 @@ const taskOrchestrator = new TaskOrchestrator(
           evidence: {
             kind: "device-workspace-file-sha256",
             description: "Read the requested non-sensitive local device file and calculated its SHA-256 digest.",
+            reference: "sha256:" + digest,
+            observedAt: new Date().toISOString(),
+          },
+        };
+      }
+      if (capability === "device.workspace.git_status") {
+        const manager = activeDeviceBridgeManager;
+        if (!manager) throw new Error("Local device bridge is not available.");
+        const result = await manager.executeCommand({
+          deviceId: String(args.deviceId || ""),
+          founderId: "founder-primary",
+          command: "workspace.git_status",
+          args: { path: String(args.path || ".") },
+        }) as { repository?: unknown; branch?: unknown; changes?: unknown[]; changeCount?: unknown; truncated?: unknown };
+        if (typeof result?.branch !== "string" || !Array.isArray(result.changes) ||
+            typeof result.changeCount !== "number" || typeof result.truncated !== "boolean") {
+          throw new Error("Local device returned an invalid Git status result.");
+        }
+        const digest = createHash("sha256").update(JSON.stringify(result), "utf8").digest("hex");
+        return {
+          result,
+          evidence: {
+            kind: "device-workspace-git-status-sha256",
+            description: "Read the bounded Git branch and tracked-file change summary without reading diffs.",
             reference: "sha256:" + digest,
             observedAt: new Date().toISOString(),
           },
@@ -1363,7 +1401,7 @@ async function startServer() {
     const deviceId = typeof req.body?.deviceId === "string" ? req.body.deviceId : "";
     const content = req.body?.content;
     if (!instruction || instruction.length > 1000) return res.status(400).json({ success: false, error: "Instruction must contain 1–1000 characters." });
-    if (!["workspace.read_file", "device.workspace.read_file", "workspace.write_file", "device.workspace.write_file", "device.workspace.create_file", "device.workspace.create_directory"].includes(capability)) return res.status(400).json({ success: false, error: "Capability is not enabled for the task control plane." });
+    if (!["workspace.read_file", "device.workspace.read_file", "device.workspace.git_status", "workspace.write_file", "device.workspace.write_file", "device.workspace.create_file", "device.workspace.create_directory"].includes(capability)) return res.status(400).json({ success: false, error: "Capability is not enabled for the task control plane." });
     if (!filePath || filePath.length > 1024) return res.status(400).json({ success: false, error: "A workspace-relative file path of 1–1024 characters is required." });
     const requiresFileContent = ["workspace.write_file", "device.workspace.write_file", "device.workspace.create_file"].includes(capability);
     if (requiresFileContent && (typeof content !== "string" || Buffer.byteLength(content, "utf8") > 100_000)) return res.status(400).json({ success: false, error: "File content must be text no larger than 100 KB." });
@@ -1376,12 +1414,12 @@ async function startServer() {
       }
       const scopes = capability === "workspace.write_file"
         ? ["workspace:read", "workspace:write"]
-        : capability === "device.workspace.read_file" ? ["device:read"]
+        : ["device.workspace.read_file", "device.workspace.git_status"].includes(capability) ? ["device:read"]
           : capability.startsWith("device.workspace.") ? ["device:write"] : ["workspace:read"];
       const actor = { id: founderId, founderId, role: "founder" as const, scopes };
       const args = capability === "workspace.write_file"
         ? { path: filePath, content }
-        : ["device.workspace.read_file", "device.workspace.create_directory"].includes(capability)
+        : ["device.workspace.read_file", "device.workspace.git_status", "device.workspace.create_directory"].includes(capability)
           ? { deviceId, path: filePath }
           : capability.startsWith("device.workspace.")
             ? { deviceId, path: filePath, content }
