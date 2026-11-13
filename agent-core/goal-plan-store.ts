@@ -60,11 +60,45 @@ export class GoalPlanStore implements GoalPlanRepository {
     this.write(state);
   }
   private read(): PlanFile {
+    let contents: string;
     try {
-      const parsed = JSON.parse(fs.readFileSync(this.filePath, "utf8"));
-      if (parsed?.version !== 1 || !Array.isArray(parsed.plans)) return { version: 1, plans: [] };
-      return { version: 1, plans: parsed.plans.filter((item: any) => item && typeof item.id === "string" && typeof item.founderId === "string" && item.plan && item.stepStates) };
-    } catch { return { version: 1, plans: [] }; }
+      contents = fs.readFileSync(this.filePath, "utf8");
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException)?.code === "ENOENT") return { version: 1, plans: [] };
+      throw new Error("Goal-plan storage is unreadable; refusing to continue without risking Founder plan history.", { cause: error });
+    }
+
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(contents);
+    } catch (error) {
+      throw new Error("Goal-plan storage contains invalid JSON; refusing to overwrite potentially recoverable Founder plan history.", { cause: error });
+    }
+    if (!parsed || typeof parsed !== "object" || (parsed as any).version !== 1 || !Array.isArray((parsed as any).plans)) {
+      throw new Error("Goal-plan storage has an unsupported or invalid format; refusing to overwrite Founder plan history.");
+    }
+
+    const validStatuses = new Set(["proposed", "running", "awaiting_approval", "completed", "failed"]);
+    const validStepStatuses = new Set(["queued", "awaiting_approval", "running", "completed", "failed"]);
+    for (const item of (parsed as PlanFile).plans) {
+      if (!item || typeof item !== "object" ||
+          typeof item.id !== "string" || !item.id ||
+          typeof item.founderId !== "string" || !item.founderId ||
+          !item.plan || typeof item.plan !== "object" || !Array.isArray(item.plan.steps) ||
+          !validStatuses.has(item.status) ||
+          !Number.isFinite(Date.parse(item.createdAt)) ||
+          !Number.isFinite(Date.parse(item.updatedAt)) ||
+          !item.stepStates || typeof item.stepStates !== "object" || Array.isArray(item.stepStates)) {
+        throw new Error("Goal-plan storage contains a malformed plan record; refusing to discard or overwrite it.");
+      }
+      for (const [stepId, state] of Object.entries(item.stepStates)) {
+        if (!stepId || !state || typeof state !== "object" ||
+            !validStepStatuses.has((state as any).status)) {
+          throw new Error("Goal-plan storage contains a malformed step state; refusing to discard or overwrite it.");
+        }
+      }
+    }
+    return { version: 1, plans: (parsed as PlanFile).plans };
   }
   private write(state: PlanFile): void {
     fs.mkdirSync(this.directory, { recursive: true, mode: 0o700 });
