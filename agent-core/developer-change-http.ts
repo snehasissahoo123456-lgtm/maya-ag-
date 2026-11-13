@@ -175,7 +175,8 @@ export function createDeveloperChangeRouter(repository: DeveloperChangeRepositor
         return { path: file.path, content: file.content, expectedSha256: file.expectedSha256 };
       });
       const pkg = prepareDeveloperPatchPackage({
-        change, baselineCommit: readiness.baselineCommit, files,
+        change, baselineCommit: readiness.baselineCommit,
+        files: [...files].sort((left, right) => left.path.localeCompare(right.path)),
       });
       const approval = await runtime.requestApplyApproval({
         changeId: change.id, founderId: owner, taskId: body.taskId, pkg,
