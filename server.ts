@@ -157,7 +157,7 @@ import { createConversationRepository } from "./agent-core/create-conversation-r
 import { validateGoalPlan, type PlannerToolContract } from "./agent-core/goal-planner.ts";
 import { createGoalPlanRepository } from "./agent-core/create-goal-plan-repository.ts";
 import { GoalPlanExecutor } from "./agent-core/goal-plan-executor.ts";
-import { GoalPlanWorker } from "./agent-core/goal-plan-worker.ts";
+import { GoalPlanWorker, assertGoalPlanWorkerStorage } from "./agent-core/goal-plan-worker.ts";
 import { retrieveRelevantMemories, formatMemoryContext } from "./agent-core/memory-retrieval.ts";
 import { createChatToolExecutor } from "./agent-core/chat-tool-policy.ts";
 import { SpecialistRuntime, listRunnableSpecialists } from "./agent-core/specialist-runtime.ts";
@@ -765,8 +765,8 @@ async function executeAgentTool(name: string, args: Record<string, unknown>, fou
 const goalPlanStore = createGoalPlanRepository();
 const goalPlanExecutor = new GoalPlanExecutor(goalPlanStore, executeAgentTool);
 const goalPlanWorkerEnabled = process.env.MAYA_PLAN_WORKER_ENABLED === "true";
-if (goalPlanWorkerEnabled && (process.env.MAYA_STORAGE_DRIVER || "file").toLowerCase() !== "file") {
-  throw new Error("MAYA_PLAN_WORKER_ENABLED currently requires single-instance file storage. Supabase lease primitives exist, but activation remains blocked until lease renewal and live multi-instance validation are complete.");
+if (goalPlanWorkerEnabled) {
+  assertGoalPlanWorkerStorage(goalPlanStore, process.env.MAYA_STORAGE_DRIVER || "file");
 }
 const goalPlanWorker = new GoalPlanWorker(
   goalPlanStore, goalPlanExecutor, "founder-primary",
@@ -1382,7 +1382,7 @@ async function startServer() {
   app.post("/api/agent/plans/:id/start", async (req, res): Promise<any> => {
     const founderId = (req as any).authSession?.user?.id;
     if (!founderId) return res.status(401).json({ success: false, error: "Verified Founder session required." });
-    if (!goalPlanWorkerEnabled) return res.status(503).json({ success: false, error: "Background goal-plan worker is disabled. Set MAYA_PLAN_WORKER_ENABLED=true on a single-instance file-storage server." });
+    if (!goalPlanWorkerEnabled) return res.status(503).json({ success: false, error: "Background goal-plan worker is disabled. Set MAYA_PLAN_WORKER_ENABLED=true on a single-instance file server or a Supabase server with atomic lease support." });
     try {
       const existing = await goalPlanStore.get(founderId, req.params.id);
       if (!existing) return res.status(404).json({ success: false, error: "Plan not found." });
