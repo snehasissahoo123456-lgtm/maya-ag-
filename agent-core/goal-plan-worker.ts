@@ -89,22 +89,24 @@ export class GoalPlanWorker {
           if (!plan) break;
           result.scanned++;
           let leaseLost = false;
-          let renewalInFlight = false;
-          const renew = async () => {
-            if (leaseLost || renewalInFlight) return;
-            renewalInFlight = true;
-            try {
-              const renewed = await this.repository.renewClaim!(this.founderId, plan.id, this.workerId, this.leaseMs);
-              if (!renewed) {
+          let renewalPromise: Promise<void> | undefined;
+          const renew = (): Promise<void> | undefined => {
+            if (leaseLost || renewalPromise) return renewalPromise;
+            renewalPromise = (async () => {
+              try {
+                const renewed = await this.repository.renewClaim!(this.founderId, plan.id, this.workerId, this.leaseMs);
+                if (!renewed) {
+                  leaseLost = true;
+                  this.status = { ...this.status, lastError: "Goal-plan lease was lost; no further steps will be started." };
+                }
+              } catch (error) {
                 leaseLost = true;
-                this.status = { ...this.status, lastError: "Goal-plan lease was lost; no further steps will be started." };
+                this.status = { ...this.status, lastError: "Goal-plan lease renewal failed; execution will stop after the current tool returns: " + (error instanceof Error ? error.message : String(error)) };
+              } finally {
+                renewalPromise = undefined;
               }
-            } catch (error) {
-              leaseLost = true;
-              this.status = { ...this.status, lastError: "Goal-plan lease renewal failed; execution will stop after the current tool returns: " + (error instanceof Error ? error.message : String(error)) };
-            } finally {
-              renewalInFlight = false;
-            }
+            })();
+            return renewalPromise;
           };
           const heartbeat = setInterval(() => { void renew(); }, Math.max(1_000, Math.floor(this.leaseMs / 3)));
           heartbeat.unref?.();
@@ -121,6 +123,9 @@ export class GoalPlanWorker {
             }
             result.resumed++;
             const assertLease = async () => {
+              // A renewal may be in flight when a tool returns. Resolve it before the
+              // executor persists results or starts another step under a stale lease.
+              if (renewalPromise) await renewalPromise;
               if (leaseLost) throw new Error("Goal-plan lease was lost; execution stopped before the next step.");
             };
             const updated = await this.executor.execute(this.founderId, plan.id, assertLease);
@@ -131,6 +136,9 @@ export class GoalPlanWorker {
             this.status = { ...this.status, lastError: error instanceof Error ? error.message : String(error) };
           } finally {
             clearInterval(heartbeat);
+            // Never race release against an outstanding renewal request. If renewal
+            // failed or the lease was lost, do not release a claim owned by a successor.
+            if (renewalPromise) await renewalPromise;
             if (!leaseLost) await this.repository.releaseClaim(this.founderId, plan.id, this.workerId);
           }
         }
