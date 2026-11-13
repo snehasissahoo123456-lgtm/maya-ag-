@@ -33,7 +33,7 @@ The compose file publishes only `127.0.0.1:3000`. Put a TLS reverse proxy in fro
 
 Workers are opt-in and disabled by default.
 
-- `MAYA_TASK_WORKER_ENABLED=true`: executes registered low-risk workspace reads and exact-Founder-approved replacement of existing server-workspace or enrolled local-device text files. Local device writes require the paired device to be online and the local bridge to be running.
+- `MAYA_TASK_WORKER_ENABLED=true`: executes registered low-risk workspace reads and exact-Founder-approved replacement of existing server-workspace text files and replacement or exclusive creation of local-device text files in existing directories. Local device writes require the paired device to be online and the local bridge to be running.
 - `MAYA_SCHEDULE_WORKER_ENABLED=true`: enqueues due one-time/hourly/24-hour/7-day read-only file jobs. It requires the task worker to be enabled.
 - `MAYA_PLAN_WORKER_ENABLED=true`: runs explicitly started Founder-approved goal plans. This worker currently requires file storage and one server instance; do not enable it with Supabase or multiple replicas.
 

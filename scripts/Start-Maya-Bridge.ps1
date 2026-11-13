@@ -15,5 +15,5 @@ if (-not (Test-Path $Credentials) -and -not $env:MAYA_PAIRING_CODE) {
 
 Write-Host "Starting Maya local device bridge."
 Write-Host "Workspace root: $env:MAYA_WORKSPACE_ROOT"
-Write-Host "Direct commands are read-only. Existing-file replacement is available only through a separate exact-Founder-approved task."
+Write-Host "Direct commands are read-only. Existing-file replacement and new text-file creation are available only through a separate exact-Founder-approved task."
 node --import tsx local-bridge.ts

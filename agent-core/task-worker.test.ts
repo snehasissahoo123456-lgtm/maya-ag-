@@ -80,6 +80,21 @@ function setup(
     requiresApproval: true,
     verification: "Read back the local file and verify its SHA-256 digest.",
   });
+  registry.register({
+    name: "device.workspace.create_file",
+    description: "Create a new local device workspace file after Founder approval.",
+    risk: "high",
+    allowedRoles: ["founder", "worker"],
+    requiredScopes: ["device:write"],
+    arguments: {
+      deviceId: { type: "string", required: true, maxLength: 128 },
+      path: { type: "string", required: true, maxLength: 1024 },
+      content: { type: "string", required: true, maxLength: 100_000 },
+    },
+    timeoutMs: 5000,
+    requiresApproval: true,
+    verification: "Verify the newly created local file with SHA-256.",
+  });
   const approvals = new ApprovalLedger();
   const orchestrator = new TaskOrchestrator(repository, registry, approvals, { run });
   const worker = new TaskWorker(repository, orchestrator, registry, { founderId: "founder-primary", pollIntervalMs: 1000, isDeviceAvailable }, approvals);
@@ -392,4 +407,29 @@ test("startup recovery can run while the background worker remains disabled", as
   assert.equal(await worker.recoverInterrupted(), 1);
   assert.equal(worker.getStatus().enabled, false);
   assert.equal((await repository.get("worker-startup-recovery-disabled"))?.task.status, "requires_recovery");
+});
+
+
+test("worker creates a new local PC file only after exact Founder approval", async () => {
+  let executedArgs: Record<string, unknown> | undefined;
+  const { orchestrator, worker, repository, approvals } = setup(async input => {
+    executedArgs = input.args;
+    return {
+      result: { created: true, verified: true, sha256: "e".repeat(64) },
+      evidence: { kind: "device-create-sha256", description: "Local file creation verified.", reference: "sha256:" + "e".repeat(64), observedAt: new Date().toISOString() },
+    };
+  });
+  const deviceFounder = { ...founder, scopes: ["device:write"] };
+  const args = { deviceId: "device-123", path: "reports/new.md", content: "Exact approved new file" };
+  await orchestrator.enqueue({
+    id: "worker-device-create-1", founderId: "founder-primary", instruction: "Create a local PC report",
+    capability: "device.workspace.create_file", args, actor: deviceFounder,
+  });
+  const pending = await orchestrator.requestApproval("worker-device-create-1", deviceFounder);
+  await orchestrator.decideApproval({ approvalId: pending.approvalId, approved: true, actor: founder });
+  const result = await worker.runOnce();
+  assert.equal(result.executed, 1);
+  assert.deepEqual(executedArgs, args);
+  assert.equal((await repository.get("worker-device-create-1"))?.task.status, "completed");
+  assert.equal((await approvals.listForFounder("founder-primary")).find(item => item.id === pending.approvalId)?.status, "consumed");
 });

@@ -15,9 +15,12 @@ function isWithinRoot(root: string, target: string): boolean {
 function isSensitive(target: string): boolean {
   const parts = target.split(path.sep).map(part => part.toLowerCase());
   const base = path.basename(target).toLowerCase();
-  return parts.some(part => [".git", "node_modules", "secrets", "credentials", ".maya"].includes(part)) ||
+  return parts.some(part => [".git", "node_modules", "secrets", "credentials", ".maya", ".ssh", ".aws", ".gnupg", ".kube", ".azure"].includes(part)) ||
     base === ".env" || base.startsWith(".env.") || base === ".npmrc" || base === ".netrc" ||
-    base === "id_rsa" || base.endsWith(".pem") || base.endsWith(".key") || base.endsWith(".p12") || base.endsWith(".pfx");
+    base === "id_rsa" || base === "id_ed25519" || base === "authorized_keys" || base === "known_hosts" ||
+    base.includes("credential") || base.includes("service-account") ||
+    base.endsWith(".pem") || base.endsWith(".key") || base.endsWith(".p8") || base.endsWith(".p12") ||
+    base.endsWith(".pfx") || base.endsWith(".jks") || base.endsWith(".keystore");
 }
 function resolveAllowedPath(root: string, relativePath: unknown): string {
   if (typeof relativePath !== "string" || relativePath.length > 1024) throw new Error("A valid relative path is required.");
@@ -45,8 +48,43 @@ function resolveAllowedPath(root: string, relativePath: unknown): string {
   }
 }
 
+function resolveCreatablePath(root: string, relativePath: unknown): string {
+  if (typeof relativePath !== "string" || !relativePath.trim() || relativePath.length > 1024 || path.isAbsolute(relativePath)) {
+    throw new Error("A valid workspace-relative new-file path is required.");
+  }
+  const realRoot = fs.realpathSync(root);
+  const lexicalTarget = path.resolve(realRoot, relativePath);
+  if (!isWithinRoot(realRoot, lexicalTarget) || lexicalTarget === realRoot) throw new Error("New-file path escapes or equals the workspace root.");
+  const parent = path.dirname(lexicalTarget);
+  const relativeParent = path.relative(realRoot, parent);
+  let cursor = realRoot;
+  try {
+    for (const segment of relativeParent.split(path.sep).filter(Boolean)) {
+      cursor = path.join(cursor, segment);
+      const stat = fs.lstatSync(cursor);
+      if (stat.isSymbolicLink()) throw new Error("Symbolic links are blocked in the enrolled workspace.");
+      if (!stat.isDirectory()) throw new Error("New-file parent must be an existing directory.");
+    }
+    const realParent = fs.realpathSync(parent);
+    if (!isWithinRoot(realRoot, realParent)) throw new Error("New-file parent escapes the configured workspace root.");
+    const target = path.join(realParent, path.basename(lexicalTarget));
+    if (isSensitive(target)) throw new Error("Creation in sensitive workspace paths is blocked.");
+    try {
+      fs.lstatSync(target);
+      throw new Error("Target file already exists; create-file never overwrites.");
+    } catch (error) {
+      if (error instanceof Error && error.message.includes("already exists")) throw error;
+      if ((error as NodeJS.ErrnoException)?.code !== "ENOENT") throw error;
+    }
+    return target;
+  } catch (error) {
+    if (error instanceof Error && ["Symbolic links", "escapes", "sensitive", "existing directory", "already exists"].some(marker => error.message.includes(marker))) throw error;
+    throw new Error("New-file parent does not exist or cannot be resolved.");
+  }
+}
+
 export async function executeLocalBridgeCommand(rootInput: string, command: string, args: Record<string, unknown> = {}): Promise<unknown> {
-  const root = path.resolve(rootInput);
+  const root = fs.realpathSync(path.resolve(rootInput));
   if (command === "system.info") {
     return { node: process.version, platform: process.platform, architecture: process.arch, hostname: os.hostname(), uptimeSeconds: Math.floor(os.uptime()), memory: os.totalmem() };
   }
@@ -65,6 +103,24 @@ export async function executeLocalBridgeCommand(rootInput: string, command: stri
     if (!stat.isFile() || stat.isSymbolicLink()) throw new Error("Only regular non-symlink files can be read.");
     if (stat.size > 50_000) throw new Error("File exceeds the 50 KB read limit.");
     return { path: path.relative(root, file), content: fs.readFileSync(file, "utf8") };
+  }
+  if (command === "workspace.create_file") {
+    const file = resolveCreatablePath(root, args.path);
+    const content = args.content;
+    if (typeof content !== "string" || content.includes("\u0000") || Buffer.byteLength(content, "utf8") > 100_000) {
+      throw new Error("New-file content must be plain text no larger than 100 KB.");
+    }
+    const temp = path.join(path.dirname(file), `.maya-create.${process.pid}.${randomUUID()}.tmp`);
+    try {
+      fs.writeFileSync(temp, content, { encoding: "utf8", mode: 0o644, flag: "wx" });
+      fs.linkSync(temp, file);
+    } finally {
+      try { fs.rmSync(temp, { force: true }); } catch {}
+    }
+    const verified = fs.readFileSync(file, "utf8");
+    if (verified !== content) throw new Error("Local create verification failed; resulting bytes differ from the approved payload.");
+    const sha256 = createHash("sha256").update(verified, "utf8").digest("hex");
+    return { path: path.relative(root, file), bytes: Buffer.byteLength(verified, "utf8"), sha256, verified: true, created: true };
   }
   if (command === "workspace.write_file") {
     const file = resolveAllowedPath(root, args.path);

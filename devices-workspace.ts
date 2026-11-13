@@ -94,7 +94,7 @@ export class MayaDevicesWorkspace extends LitElement {
       <div class="space-y-4 p-4 md:p-6">
         <header class="flex flex-wrap items-start justify-between gap-3">
           <div><h2 class="text-xl font-semibold text-white">Local devices</h2>
-            <p class="muted mt-1 max-w-2xl">Pair your Windows PC with a one-time code. Direct device commands are read-only: system information, workspace listing and text-file reading. Existing-file replacement is available only through the Founder task queue after exact approval. Restart this local bridge after updating Maya so it loads the current command handler.</p>
+            <p class="muted mt-1 max-w-2xl">Pair your Windows PC with a one-time code. Direct device commands are read-only: system information, workspace listing and text-file reading. Existing-file replacement and new text-file creation in existing directories are available only through the Founder task queue after exact approval. Restart this local bridge after updating Maya so it loads the current command handler.</p>
           </div>
           <button class="btn" @click=${() => this.refresh()}>Refresh</button>
         </header>
