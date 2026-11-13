@@ -10,9 +10,11 @@ import type { DeveloperChangeRepository } from "./developer-change-store.ts";
 import { prepareDeveloperPatchPackage, type DeveloperPatchFile, type PreparedDeveloperPatchPackage } from "./developer-patch-package.ts";
 import type { DeveloperExecutionRuntime } from "./developer-execution-runtime.ts";
 import type { DeveloperExecutionResult } from "./developer-workspace-executor.ts";
+import type { ApprovalRepository } from "./approval-ledger.ts";
 
 interface DeveloperChangeHttpOptions {
   runtime?: DeveloperExecutionRuntime;
+  approvals?: ApprovalRepository;
 }
 
 type AuthenticatedRequest = Request & { authSession?: { user?: { id?: string; role?: string } } };
@@ -189,6 +191,39 @@ export function createDeveloperChangeRouter(repository: DeveloperChangeRepositor
       });
     } catch (error) {
       return res.status(409).json({ success: false, error: error instanceof Error ? error.message : "Unable to request Developer apply approval." });
+    }
+  });
+
+  router.post("/:id/apply-approval/:approvalId/decision", async (req: Request, res: Response) => {
+    const owner = founderId(req);
+    if (!owner) return res.status(401).json({ success: false, error: "Verified Founder session required." });
+    if (!options.approvals) return res.status(503).json({ success: false, error: "Approval ledger is unavailable." });
+    if (typeof req.body?.approved !== "boolean" ||
+        Object.keys(req.body).some(key => key !== "approved")) {
+      return res.status(400).json({ success: false, error: "A boolean approved decision is required." });
+    }
+    try {
+      const change = await repository.get({ changeId: req.params.id, founderId: owner });
+      if (!change || change.status !== "approved") {
+        return res.status(409).json({ success: false, error: "The owning Founder-approved change is required." });
+      }
+      const approval = (await options.approvals.listForFounder(owner))
+        .find(item => item.id === req.params.approvalId);
+      if (!approval || approval.capability !== "developer.workspace.apply") {
+        return res.status(404).json({ success: false, error: "Developer apply approval not found for this Founder." });
+      }
+      const decided = await options.approvals.decide({
+        approvalId: approval.id, founderId: owner, approved: req.body.approved,
+      });
+      return res.json({
+        success: true,
+        approval: decided,
+        message: decided.status === "approved"
+          ? "Exact Developer package approved. Execution has not started."
+          : "Developer package approval rejected. No files were applied.",
+      });
+    } catch (error) {
+      return res.status(409).json({ success: false, error: error instanceof Error ? error.message : "Unable to decide Developer apply approval." });
     }
   });
 
