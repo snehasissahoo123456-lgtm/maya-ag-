@@ -61,8 +61,8 @@ export function prepareDeveloperPatchPackage(input: {
   policy?: Partial<DeveloperPatchPackagePolicy>;
 }): PreparedDeveloperPatchPackage {
   const { change } = input;
-  if (!change || change.status !== "draft") {
-    throw new Error("A draft Developer change is required to prepare a patch package.");
+  if (!change || (change.status !== "draft" && !(change.status === "approved" && change.review?.decision === "approved" && change.founderApproval?.founderId === change.founderId))) {
+    throw new Error("A draft change or independently reviewed and Founder-approved change is required to prepare a patch package.");
   }
   if (!GIT_SHA.test(input.baselineCommit)) throw new Error("A full baseline Git commit SHA is required.");
   if (!Array.isArray(input.files) || input.files.length < 1) throw new Error("At least one proposed file is required.");
