@@ -52,3 +52,12 @@ The named volume `maya-data` holds file-backed stores. Back it up consistently a
 - No arbitrary shell execution, file writes/deletes, browser session access, payments or external publishing are enabled by this deployment template.
 - Android packaging, push notifications, distributed device control, and production penetration testing remain outstanding.
 - This deployment has not been executed against a real host or Supabase project. Validate the image and migrations in a staging environment first.
+
+
+## Optional Developer host-supervisor connection
+
+The app can now attempt a fail-closed Developer runtime preflight when all six `MAYA_DEVELOPER_*` and `MAYA_HOST_*` settings in `.env.example` are supplied. The server connects only to the restricted Unix-domain socket or Windows named pipe exposed by the independently operated Maya host supervisor. It verifies a fresh Ed25519-signed, workspace-bound isolation attestation and consumes its nonce through that supervisor. The app receives only the public verification key and a scoped RPC token; it must never receive the supervisor signing private key or Docker socket.
+
+Leave these settings blank unless the host supervisor is installed, its RPC endpoint is reachable by the Maya server process, and a single enrolled workspace plus pinned baseline record already exists. Missing settings keep the runtime unconfigured. Invalid signatures, stale attestations, replayed nonces, symlinked roots, or mismatched workspace bindings fail closed.
+
+This wiring is a readiness integration only. It does not expose patch-apply or execution routes, start the QA worker, or enable autonomous code changes. The runtime status endpoint continues to report execution and QA as disabled until those separate controls are connected and verified. The current Docker Compose template does not mount a host-supervisor socket; do not mount the Docker daemon socket as a workaround.

@@ -165,6 +165,7 @@ import { CEOOrchestrator } from "./agent-core/ceo-orchestrator.ts";
 import { createCEORunRepository } from "./agent-core/create-ceo-run-repository.ts";
 import { createScheduledJobRepository } from "./agent-core/create-scheduled-job-repository.ts";
 import { ScheduleWorker } from "./agent-core/schedule-worker.ts";
+import { bootstrapDeveloperExecutionRuntime, type DeveloperRuntimeBootstrapResult } from "./agent-core/developer-runtime-bootstrap.ts";
 
 const conversationStore = createConversationRepository();
 const taskRepository = createTaskRepository();
@@ -985,6 +986,7 @@ function randomTaskId(): string {
 
 const authService = new AuthService(path.join(process.env.MAYA_DATA_DIR || path.resolve(process.cwd(), "..", "maya-data"), "sessions.json"));
 const developerChangeRepository = new DeveloperChangeStore(path.join(process.env.MAYA_DATA_DIR || path.resolve(process.cwd(), "..", "maya-data"), "developer-changes.json"));
+let developerRuntimeBootstrapResult: DeveloperRuntimeBootstrapResult = { configured: false, blockers: ["Developer runtime bootstrap has not run."] };
 const platformService = new PlatformService();
 
 const watcherService = new WatcherService({
@@ -1067,6 +1069,11 @@ function isAllowedRequestOrigin(req: any): boolean {
 
 async function startServer() {
   await ceoRunRepository.recoverInterrupted();
+  developerRuntimeBootstrapResult = await bootstrapDeveloperExecutionRuntime({
+    env: process.env,
+    changes: developerChangeRepository,
+    approvals: approvalRepository,
+  });
   const app = express();
   const server = http.createServer(app);
   const PORT = Number(process.env.PORT) || 3000;
@@ -1138,24 +1145,33 @@ async function startServer() {
         ["draft", "submitted", "reviewed", "approved", "executing", "verifying", "completed", "rejected", "rolled_back"]
           .map(status => [status, changes.filter(change => change.status === status).length]),
       );
+      const readiness = developerRuntimeBootstrapResult.runtime
+        ? await developerRuntimeBootstrapResult.runtime.readiness()
+        : undefined;
+      const blockers = readiness
+        ? [...readiness.blockers]
+        : [...developerRuntimeBootstrapResult.blockers];
+      if (readiness?.readyToApply) {
+        blockers.push("The isolated workspace is attested, but Founder apply/execute API routes are not yet connected.");
+      }
+      blockers.push("The sandbox QA worker is not started by the application; QA remains disabled until a separately supervised worker is verified.");
       return res.json({
         success: true,
         runtime: {
-          configured: false,
+          configured: developerRuntimeBootstrapResult.configured,
           enabled: false,
-          readyToApply: false,
+          readyToApply: readiness?.readyToApply ?? false,
+          workspaceId: readiness?.workspaceId,
+          baselineCommit: readiness?.baselineCommit,
+          isolated: readiness?.isolated,
+          networkAccess: readiness?.networkAccess,
+          secretsMounted: readiness?.secretsMounted,
           executionEnabled: false,
           qaEnabled: false,
           workerEnabled: false,
         },
         changes: { total: changes.length, counts },
-        blockers: [
-          "A trusted host/container supervisor attestation is not integrated; isolation cannot be proven by the application server.",
-          "The Developer execution runtime is not enabled in server.ts.",
-          "The no-network sandbox worker remains opt-in and is not started by the application.",
-          "Workspace provisioning and a complete buildable baseline are not yet connected to the Founder change workflow.",
-          "Production activation requires durable shared storage and end-to-end runtime verification.",
-        ],
+        blockers,
       });
     } catch (error) {
       return res.status(500).json({
