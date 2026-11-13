@@ -82,6 +82,14 @@ export class MayaDeveloperChangesWorkspace extends LitElement {
     } catch (error) { this.error = error instanceof Error ? error.message : "Unable to load Developer changes."; }
   }
   private async loadDetail(id: string) {
+    if (this.selected?.id !== id) {
+      this.preparedPackageText = "";
+      this.approvalId = "";
+      this.approvalTaskId = "";
+      this.approvalStatus = "";
+      this.executionText = "";
+      this.verificationText = "";
+    }
     const response = await this.request("/api/developer/changes/" + encodeURIComponent(id));
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || "Developer change details unavailable.");
@@ -132,9 +140,11 @@ export class MayaDeveloperChangesWorkspace extends LitElement {
     try{files=JSON.parse(this.packageFilesText);}catch{this.error="File contents must be valid JSON.";return;}
     if(!Array.isArray(files)){this.error="Provide a JSON array of file objects.";return;}
     await this.withBusy(async()=>{
+      const taskId="developer-"+crypto.randomUUID();
       const data=await this.post("/api/developer/changes/"+encodeURIComponent(change.id)+"/request-apply-approval",{
-        taskId:"developer-"+crypto.randomUUID(),files,
+        taskId,files,
       });
+      this.approvalTaskId=taskId;
       this.preparedPackageText=JSON.stringify(data.package,null,2);
       this.approvalId=data.approval.id;
       this.approvalStatus=data.approval.status;
