@@ -12,7 +12,7 @@ export class DeviceCommandUncertainError extends Error {
     this.name = "DeviceCommandUncertainError";
   }
 }
-const ALLOWED_COMMANDS = new Set(["system.info", "workspace.list", "workspace.read_file"]);
+const ALLOWED_COMMANDS = new Set(["system.info", "workspace.list", "workspace.read_file", "workspace.git_status"]);
 
 export class DeviceBridgeManager {
   private readonly connected = new Map<string, ConnectedDevice>();
@@ -228,6 +228,9 @@ export class DeviceBridgeManager {
     }
     if (input.command === "workspace.list" && args.path !== undefined && (typeof args.path !== "string" || args.path.length > 1024)) {
       throw new Error("Workspace path is invalid.");
+    }
+    if (input.command === "workspace.git_status" && args.path !== undefined && (typeof args.path !== "string" || args.path.length > 1024)) {
+      throw new Error("Git status workspace path is invalid.");
     }
     const current = this.connected.get(input.deviceId);
     if (!current || current.device.founderId !== input.founderId || this.revokedDeviceIds.has(input.deviceId)) throw new Error("Device is offline, revoked or not registered for this Founder.");

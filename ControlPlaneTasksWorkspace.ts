@@ -9,6 +9,7 @@ interface ControlTask {
   };
   capability: string;
   args: Record<string, unknown>;
+  result?: unknown;
 }
 interface ControlDevice { id: string; name: string; platform: string; online: boolean; revokedAt?: string; }
 interface ControlApproval {
@@ -30,7 +31,7 @@ export class MayaControlPlaneTasksWorkspace extends LitElement {
   @state() private worker: any = null;
   @state() private instruction = "";
   @state() private filePath = "README.md";
-  @state() private capability: "workspace.read_file" | "workspace.write_file" | "device.workspace.write_file" | "device.workspace.create_file" | "device.workspace.create_directory" = "workspace.read_file";
+  @state() private capability: "workspace.read_file" | "device.workspace.read_file" | "device.workspace.git_status" | "workspace.write_file" | "device.workspace.write_file" | "device.workspace.create_file" | "device.workspace.create_directory" = "workspace.read_file";
   @state() private content = "";
   @state() private busy = false;
   @state() private busyId = "";
@@ -91,14 +92,15 @@ export class MayaControlPlaneTasksWorkspace extends LitElement {
 
   private async createTask() {
     if (this.busy || !this.instruction.trim() || !this.filePath.trim()) return;
-    const isWrite = this.capability !== "workspace.read_file";
-    const requiresContent = ["workspace.write_file", "device.workspace.write_file", "device.workspace.create_file"].includes(this.capability);
+    const isRead = ["workspace.read_file", "device.workspace.read_file", "device.workspace.git_status"].includes(this.capability);
+    const isMutation = !isRead;
+    const requiresContent = requiresFileContent(this.capability);
     if (requiresContent && !this.content.length) {
       this.message = "Enter the exact file content before creating this task.";
       return;
     }
     if (this.capability.startsWith("device.workspace.") && !this.devices.some(device => device.id === this.deviceId && device.online)) {
-      this.message = "Select an online paired device before creating a local write task.";
+      this.message = "Select an online paired device before creating a local task.";
       return;
     }
     this.busy = true;
@@ -117,7 +119,7 @@ export class MayaControlPlaneTasksWorkspace extends LitElement {
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || "Task creation failed.");
       const taskId = data.task?.id;
-      if (isWrite && taskId) {
+      if (isMutation && taskId) {
         const approvalResponse = await this.request(`/api/control-plane/tasks/${encodeURIComponent(taskId)}/request-approval`, { method: "POST" });
         const approvalData = await approvalResponse.json();
         if (!approvalResponse.ok) throw new Error(approvalData.error || "Task was created, but approval request could not be opened.");
@@ -219,7 +221,7 @@ export class MayaControlPlaneTasksWorkspace extends LitElement {
           <div>
             <p class="muted uppercase tracking-[0.18em] text-cyan-300">Founder control plane</p>
             <h2 class="text-xl font-semibold text-white mt-1">Verified task workspace</h2>
-            <p class="muted mt-1 max-w-3xl">Create bounded server or paired-PC workspace tasks. Every file write or creation requires your approval for the exact device, path and content.</p>
+            <p class="muted mt-1 max-w-3xl">Create bounded server or paired-PC workspace tasks. Every file write, file creation or directory creation requires your approval for the exact device and path; file actions also bind the complete content.</p>
           </div>
           <div class="flex items-center gap-2">
             <span class="rounded-full border px-2 py-1 text-xs ${workerEnabled ? "text-emerald-300 border-emerald-500/30" : "text-slate-300 border-slate-700"}">Worker ${workerEnabled ? "enabled" : "disabled"}</span>
@@ -234,8 +236,15 @@ export class MayaControlPlaneTasksWorkspace extends LitElement {
           </div>
           <div class="grid gap-3 md:grid-cols-2">
             <label class="space-y-1"><span class="muted">Task instruction</span><input .value=${this.instruction} @input=${(e: Event) => this.instruction = (e.target as HTMLInputElement).value} maxlength="1000" placeholder="Read the project overview"></label>
-            <label class="space-y-1"><span class="muted">Capability</span><select .value=${this.capability} @change=${(e: Event) => this.capability = (e.target as HTMLSelectElement).value as any}>
+            <label class="space-y-1"><span class="muted">Capability</span><select .value=${this.capability} @change=${(e: Event) => {
+              const next = (e.target as HTMLSelectElement).value as any;
+              this.capability = next;
+              if (next === "device.workspace.git_status" && this.filePath === "README.md") this.filePath = ".";
+              if (next !== "device.workspace.git_status" && this.filePath === ".") this.filePath = "README.md";
+            }}>
               <option value="workspace.read_file">Read a workspace file</option>
+              <option value="device.workspace.read_file">Read a paired-PC text file</option>
+              <option value="device.workspace.git_status">Inspect paired-PC Git status (read-only)</option>
               <option value="workspace.write_file">Replace an existing server text file (approval required)</option>
               <option value="device.workspace.write_file">Replace an existing paired-PC text file (approval required)</option>
               <option value="device.workspace.create_file">Create a new paired-PC text file (approval required)</option>
@@ -247,13 +256,13 @@ export class MayaControlPlaneTasksWorkspace extends LitElement {
                 ${this.devices.map(device => html`<option value=${device.id} ?disabled=${!device.online || Boolean(device.revokedAt)}>${device.name} · ${device.revokedAt ? "revoked" : device.online ? "online" : "offline"}</option>`)}
               </select></label>
             ` : ""}
-            <label class="space-y-1 md:col-span-2"><span class="muted">${this.capability.startsWith("device.workspace.") ? "Device workspace-relative path" : "Workspace-relative path"}</span><input .value=${this.filePath} @input=${(e: Event) => this.filePath = (e.target as HTMLInputElement).value} maxlength="1024" placeholder="docs/status.md"></label>
+            <label class="space-y-1 md:col-span-2"><span class="muted">${this.capability === "device.workspace.git_status" ? "Git workspace directory" : this.capability.startsWith("device.workspace.") ? "Device workspace-relative path" : "Workspace-relative path"}</span><input .value=${this.filePath} @input=${(e: Event) => this.filePath = (e.target as HTMLInputElement).value} maxlength="1024" placeholder=${this.capability === "device.workspace.git_status" ? "." : "docs/status.md"}></label>
             ${requiresFileContent(this.capability) ? html`
               <label class="space-y-1 md:col-span-2"><span class="muted">Exact file content (maximum 100 KB)</span><textarea .value=${this.content} @input=${(e: Event) => this.content = (e.target as HTMLTextAreaElement).value} maxlength="100000" placeholder="Paste the complete file content…"></textarea></label>
             ` : ""}
           </div>
           <div class="flex flex-wrap items-center justify-between gap-3">
-            <p class="muted">${this.capability !== "workspace.read_file" ? "Creating this task opens an approval request; it does not write the file." : "Read tasks do not modify files."}</p>
+            <p class="muted">${["workspace.read_file", "device.workspace.read_file", "device.workspace.git_status"].includes(this.capability) ? "Read tasks do not modify files; local reads require an online paired PC." : "Creating this task opens an approval request; it does not perform the action."}</p>
             <button class="btn primary" ?disabled=${this.busy || !this.instruction.trim() || !this.filePath.trim() || (this.capability.startsWith("device.workspace.") && !this.devices.some(device => device.id === this.deviceId && device.online))} @click=${() => this.createTask()}>${this.busy ? "Creating…" : "Create task"}</button>
           </div>
         </section>
@@ -279,7 +288,7 @@ export class MayaControlPlaneTasksWorkspace extends LitElement {
                   </div>
                   <span class="rounded-full border px-2 py-1 text-[10px] uppercase ${this.statusClass(task.status)}">${task.status.replaceAll("_", " ")}</span>
                 </div>
-                ${item.capability !== "workspace.read_file" ? html`
+                ${requiresFileContent(item.capability) ? html`
                   <details class="rounded-xl border border-amber-500/20 bg-amber-500/5 p-3">
                     <summary class="cursor-pointer text-xs text-amber-200">Review exact replacement content before approval</summary>
                     <pre class="mt-3 text-slate-200">${String(item.args.content || "")}</pre>
@@ -301,13 +310,19 @@ export class MayaControlPlaneTasksWorkspace extends LitElement {
                 ${workerEnabled && task.status === "queued" ? html`<p class="muted">${item.capability.startsWith("device.") && deviceRevoked ? "This paired PC was revoked. This task cannot execute; pair a replacement PC and create a new task." : item.capability.startsWith("device.") && !deviceOnline ? "Waiting for the paired PC to reconnect; this worker will skip the task until that device is online." : "The background worker will process this queued task. Approval-gated writes remain paused until you approve them."}</p>` : ""}
                 ${task.status === "requires_recovery" ? html`<p class="text-xs text-amber-200">Execution outcome is uncertain. Verify the target file on its host before creating another write task; Maya will not replay this action automatically.</p>` : ""}
                 ${task.lastError ? html`<p class="text-xs text-rose-300">${task.lastError}</p>` : ""}
+                ${item.result !== undefined ? html`
+                  <details class="rounded-xl border border-cyan-500/20 bg-cyan-500/5 p-3">
+                    <summary class="cursor-pointer text-xs text-cyan-200">View verified execution result</summary>
+                    <pre class="mt-3 text-slate-200">${JSON.stringify(item.result, null, 2)}</pre>
+                  </details>
+                ` : ""}
                 ${task.verificationEvidence?.length ? html`<div class="rounded-lg bg-slate-950/60 p-3"><div class="muted mb-1">Verification evidence</div>${task.verificationEvidence.map(evidence => html`<p class="text-[11px] text-emerald-300">${evidence.kind} · ${evidence.reference || "verified"} · ${new Date(evidence.observedAt).toLocaleString()}</p>`)}</div>` : ""}
               </article>
             `;
           }) : html`<div class="panel muted">No control-plane tasks yet. Create a bounded read or approval-gated write above.</div>`}
         </section>
         ${this.lastResult ? html`<section class="panel"><h3 class="muted uppercase tracking-wide mb-2">Last execution result</h3><pre>${this.lastResult}</pre></section>` : ""}
-        <p class="muted text-amber-200/80">Safety boundary: local PC file replacement is routed through the enrolled bridge only after exact Founder approval. It can replace an existing non-sensitive file; it cannot create/delete files, execute shell commands, browse authenticated sessions, publish externally or control the desktop.</p>
+        <p class="muted text-amber-200/80">Safety boundary: local PC reads use the read-only bridge; file replacement, file creation and one-level directory creation require exact Founder approval. No file deletion, shell execution, authenticated browser access, external publishing or arbitrary desktop control is enabled.</p>
       </div>
     `;
   }

@@ -3,7 +3,7 @@ import { digestAction, type ApprovalRepository } from "./approval-ledger.ts";
 import { randomUUID } from "node:crypto";
 import type { AuditRepository, MayaAuditEventType } from "./audit-repository.ts";
 import { CapabilityRegistry, type AgentIdentity } from "./capability-registry.ts";
-export interface TaskEnvelope { task: MayaTask; capability: string; args: Record<string, unknown>; attempts: number; idempotencyKey: string; }
+export interface TaskEnvelope { task: MayaTask; capability: string; args: Record<string, unknown>; attempts: number; idempotencyKey: string; result?: unknown; }
 export interface TaskRepository {
   get(id: string, founderId?: string): Promise<TaskEnvelope | undefined>;
   put(envelope: TaskEnvelope): Promise<void>;
@@ -114,6 +114,7 @@ export class TaskOrchestrator {
       envelope.task = transitionTask(envelope.task, "verifying");
       await this.repository.put(envelope);
       await this.recordAudit(actor, "task.execution_verified", envelope, { evidenceReference: output.evidence.reference ?? null, evidenceKind: output.evidence.kind });
+      envelope.result = output.result;
       envelope.task = transitionTask(envelope.task, "completed", { evidence: output.evidence });
       await this.repository.put(envelope);
       return { task: envelope.task, result: output.result };
