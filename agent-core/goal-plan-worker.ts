@@ -2,6 +2,15 @@ import { randomUUID } from "node:crypto";
 import type { GoalPlanRepository } from "./goal-plan-repository.ts";
 import type { GoalPlanExecutor } from "./goal-plan-executor.ts";
 
+/** Validate the storage guarantees required before enabling the background plan worker. */
+export function assertGoalPlanWorkerStorage(repository: GoalPlanRepository, storageDriver = "file"): void {
+  const driver = storageDriver.trim().toLowerCase();
+  if (driver === "file") return; // File storage is supported only as a single server process.
+  if (driver === "supabase" && typeof repository.claimNext === "function" &&
+      typeof repository.renewClaim === "function" && typeof repository.releaseClaim === "function") return;
+  throw new Error("Background goal-plan worker requires file storage in a single server process, or Supabase storage with atomic claim, lease renewal and release support.");
+}
+
 export interface GoalPlanWorkerStatus {
   enabled: boolean;
   running: boolean;
@@ -15,7 +24,8 @@ export interface GoalPlanWorkerStatus {
 }
 
 /**
- * Single-process background runner for explicitly started Founder plans.
+ * Bounded background runner for explicitly started Founder plans. File storage is single-process;
+ * database-backed repositories coordinate workers through atomic, renewable Founder-scoped leases.
  * Interrupted in-flight steps are parked as failed for review; they are never replayed.
  * Database-backed workers renew their Founder-scoped lease while a plan executes.
  */
