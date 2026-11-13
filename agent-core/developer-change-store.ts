@@ -47,7 +47,9 @@ function validateRecord(value: unknown): DeveloperChangeRequest {
       !Number.isFinite(Date.parse(r.founderApproval.at)))) throw new Error("Developer change Founder approval metadata is invalid.");
   if (r.execution && (!Number.isFinite(Date.parse(r.execution.startedAt)) ||
       (r.execution.finishedAt !== undefined && !Number.isFinite(Date.parse(r.execution.finishedAt))) ||
-      !Array.isArray(r.execution.commandIds) || r.execution.commandIds.some(x => typeof x !== "string"))) {
+      !Array.isArray(r.execution.commandIds) || r.execution.commandIds.some(x => typeof x !== "string") ||
+      (r.execution.taskId !== undefined && (typeof r.execution.taskId !== "string" || !r.execution.taskId.trim())) ||
+      (r.execution.packageSha256 !== undefined && !SHA.test(r.execution.packageSha256)))) {
     throw new Error("Developer change execution metadata is invalid.");
   }
   if (r.verification && (typeof r.verification.passed !== "boolean" ||
@@ -123,7 +125,9 @@ export class DeveloperChangeStore implements DeveloperChangeRepository {
       throw new Error("Founder approval metadata is immutable once recorded.");
     }
     if (current.execution && (valid.execution?.startedAt !== current.execution.startedAt ||
-        JSON.stringify(valid.execution.commandIds) !== JSON.stringify(current.execution.commandIds))) {
+        JSON.stringify(valid.execution.commandIds) !== JSON.stringify(current.execution.commandIds) ||
+        valid.execution?.taskId !== current.execution.taskId ||
+        valid.execution?.packageSha256 !== current.execution.packageSha256)) {
       throw new Error("Developer execution identity is immutable once execution starts.");
     }
     this.records.set(valid.id, valid);

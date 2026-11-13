@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import test from "node:test";
-import { createDeveloperChangeRequest } from "./developer-change-control.ts";
+import { approveDeveloperChange, createDeveloperChangeRequest, recordDeveloperReview, submitDeveloperChange } from "./developer-change-control.ts";
 import { prepareDeveloperPatchPackage, verifyDeveloperPatchPackage } from "./developer-patch-package.ts";
 
 const digest = (value: string) => createHash("sha256").update(value, "utf8").digest("hex");
@@ -55,4 +55,27 @@ test("detects tampered content or manifest after preparation", () => {
   assert.equal(verifyDeveloperPatchPackage(pkg), true);
   const tampered = { ...pkg, files: [{ ...pkg.files[0], content: "tampered" }] };
   assert.equal(verifyDeveloperPatchPackage(tampered), false);
+});
+
+test("allows package preparation only after independent review and Founder approval", () => {
+  const draft = makeChange();
+  assert.throws(() => prepareDeveloperPatchPackage({
+    change: { ...draft, status: "submitted" },
+    baselineCommit: "a".repeat(40),
+    files: [{ path: "src/example.ts", content: "updated", expectedSha256: null }],
+    now,
+  }), /draft change or independently reviewed/i);
+
+  const submitted = submitDeveloperChange(draft, now);
+  const reviewed = recordDeveloperReview(submitted, {
+    reviewerId: "reviewer-1", decision: "approved", notes: "Independent review passed.", now,
+  });
+  const approved = approveDeveloperChange(reviewed, "founder-1", now);
+  const pkg = prepareDeveloperPatchPackage({
+    change: approved,
+    baselineCommit: "a".repeat(40),
+    files: [{ path: "src/example.ts", content: "updated", expectedSha256: null }],
+    now,
+  });
+  assert.equal(verifyDeveloperPatchPackage(pkg), true);
 });
