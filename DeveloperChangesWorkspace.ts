@@ -31,7 +31,7 @@ export class MayaDeveloperChangesWorkspace extends LitElement {
   @state() private reviewDecision: "approved" | "changes_requested" = "approved";
   @state() private packageFilesText = "";
   @state() private preparedPackageText = "";
-  @state() private approvalId = "";
+  @state() private approvalId = "";\n  @state() private approvalTaskId = "";
   @state() private approvalStatus = "";
   @state() private executionText = "";
   @state() private verificationText = "";
@@ -158,7 +158,7 @@ export class MayaDeveloperChangesWorkspace extends LitElement {
     await this.withBusy(async()=>{
       const pkg=this.readPackage();
       const data=await this.post("/api/developer/changes/"+encodeURIComponent(change.id)+"/execute",{
-        taskId:"developer-"+change.id,approvalId:this.approvalId,package:pkg,
+        taskId:this.approvalTaskId,approvalId:this.approvalId,package:pkg,
       });
       this.executionText=JSON.stringify(data.execution,null,2);
       this.notice="Execution request completed. Independent QA is still required.";
