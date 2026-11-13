@@ -92,7 +92,7 @@ test("running plans cannot pre-approve a future step while another step is execu
     const executor = new GoalPlanExecutor(store, async () => ({ ok: true }));
     const created = await store.create("founder-a", plan([readStep, saveStep]));
     await executor.start("founder-a", created.id);
-    await assert.rejects(() => executor.approveStep("founder-a", created.id, "save_step"), /only approve the exact step currently awaiting approval/i);
+    await assert.rejects(() => executor.approveStep("founder-a", created.id, "save_step"), /exact step currently awaiting Founder approval/i);
   } finally { fs.rmSync(directory, { recursive: true, force: true }); }
 });
 
