@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { ApprovalLedger, type ApprovalRepository } from "./approval-ledger.ts";
 import { CapabilityRegistry } from "./capability-registry.ts";
-import { TaskOrchestrator, type TaskEnvelope, type TaskRepository } from "./task-orchestrator.ts";
+import { TaskOrchestrator, UncertainTaskExecutionError, type TaskEnvelope, type TaskRepository } from "./task-orchestrator.ts";
 class MemoryRepo implements TaskRepository {
  private rows = new Map<string, TaskEnvelope>();
  async get(id: string) { return this.rows.get(id); }
@@ -136,4 +136,28 @@ test("expired Founder approval returns the task to the queue so a fresh approval
  const replacement = await orchestrator.requestApproval("t-expired-approval", founder);
  assert.ok(replacement.approvalId);
  assert.equal((await approvals.listForFounder("f1")).find(item => item.id === replacement.approvalId)?.status, "pending");
+});
+
+
+test("uncertain side effects are parked for Founder recovery instead of marked failed", async () => {
+ const registry = new CapabilityRegistry();
+ registry.register({
+  name: "workspace.write", description: "Replace a file", risk: "high",
+  allowedRoles: ["developer"], requiredScopes: ["workspace:write"],
+  arguments: { file: { type: "string", required: true, maxLength: 100 } },
+  timeoutMs: 5000, requiresApproval: true, verification: "Read back and hash the file.",
+ });
+ const repository = new MemoryRepo();
+ const ledger = new ApprovalLedger();
+ const orchestrator = new TaskOrchestrator(repository, registry, ledger, {
+  run: async () => { throw new UncertainTaskExecutionError("Remote write timed out; verify before retrying."); },
+ });
+ await orchestrator.enqueue({
+  id: "t-uncertain-write", founderId: "f1", instruction: "Replace report",
+  capability: "workspace.write", args: { file: "report.md" }, actor: developer,
+ });
+ const pending = await orchestrator.requestApproval("t-uncertain-write", founder);
+ await orchestrator.decideApproval({ approvalId: pending.approvalId, approved: true, actor: founder });
+ await assert.rejects(() => orchestrator.execute("t-uncertain-write", developer, pending.approvalId), /timed out/i);
+ assert.equal((await repository.get("t-uncertain-write"))?.task.status, "requires_recovery");
 });

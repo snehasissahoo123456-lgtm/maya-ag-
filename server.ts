@@ -11,8 +11,10 @@ import { createServer as createViteServer } from "vite";
 import { GoogleGenAI } from "@google/genai";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { WebSocketServer, WebSocket } from "ws";
-import { DeviceBridgeManager } from "./agent-core/device-bridge-manager.ts";
+import { DeviceBridgeManager, DeviceCommandUncertainError } from "./agent-core/device-bridge-manager.ts";
 import { createDeviceRegistry } from "./agent-core/create-device-registry.ts";
+
+let activeDeviceBridgeManager: DeviceBridgeManager | undefined;
 
 const MODEL_UPGRADES: Record<string, string> = {
   "gemini-2.5-flash": "gemini-3-flash-preview",
@@ -143,7 +145,7 @@ import { MayaPersistentStore } from "./agent-core/persistent-store.ts";
 import { runFunctionCallingTurn } from "./agent-core/function-call-loop.ts";
 import { CapabilityRegistry } from "./agent-core/capability-registry.ts";
 import { createApprovalRepository } from "./agent-core/create-approval-repository.ts";
-import { TaskOrchestrator } from "./agent-core/task-orchestrator.ts";
+import { TaskOrchestrator, UncertainTaskExecutionError } from "./agent-core/task-orchestrator.ts";
 import { createTaskRepository } from "./agent-core/create-task-repository.ts";
 import { createAuditRepository } from "./agent-core/create-audit-repository.ts";
 import { createMemoryRepository } from "./agent-core/create-memory-repository.ts";
@@ -190,8 +192,39 @@ taskCapabilityRegistry.register({
   requiresApproval: true,
   verification: "Atomically replace an existing file only after exact Founder approval and verify the resulting SHA-256 digest.",
 });
-// Only read_file and exact-Founder-approved write_file are enabled. Shell, deploy,
-// account, payment and arbitrary device capabilities remain blocked.
+taskCapabilityRegistry.register({
+  name: "device.workspace.write_file",
+  description: "Replace an existing non-sensitive file in an enrolled local device workspace after exact Founder approval.",
+  risk: "high",
+  allowedRoles: ["founder", "worker"],
+  requiredScopes: ["device:write"],
+  arguments: {
+    deviceId: { type: "string", required: true, maxLength: 128 },
+    path: { type: "string", required: true, maxLength: 1024 },
+    content: { type: "string", required: true, maxLength: 100_000 },
+  },
+  timeoutMs: 30_000,
+  requiresApproval: true,
+  verification: "Ask the enrolled local bridge to atomically replace the existing file and return a verified SHA-256 digest.",
+});
+taskCapabilityRegistry.register({
+  name: "device.workspace.create_file",
+  description: "Create a new non-sensitive text file in an existing directory on an enrolled local device after exact Founder approval.",
+  risk: "high",
+  allowedRoles: ["founder", "worker"],
+  requiredScopes: ["device:write"],
+  arguments: {
+    deviceId: { type: "string", required: true, maxLength: 128 },
+    path: { type: "string", required: true, maxLength: 1024 },
+    content: { type: "string", required: true, maxLength: 100_000 },
+  },
+  timeoutMs: 30_000,
+  requiresApproval: true,
+  verification: "Ask the enrolled local bridge to create the new file exclusively and return a verified SHA-256 digest.",
+});
+// Enabled task capabilities are safe server-workspace reads and exact-Founder-approved
+// replacement of existing server or paired-device files. Shell, deploy, payment and
+// arbitrary device-control capabilities remain blocked.
 const approvalRepository = createApprovalRepository();
 const taskOrchestrator = new TaskOrchestrator(
   taskRepository,
@@ -219,6 +252,62 @@ const taskOrchestrator = new TaskOrchestrator(
           },
         };
       }
+      if (capability === "device.workspace.create_file") {
+        const manager = activeDeviceBridgeManager;
+        if (!manager) throw new Error("Local device bridge is not available.");
+        let result: { verified?: boolean; sha256?: string; created?: boolean };
+        try {
+          result = await manager.executeApprovedCreate({
+            deviceId: String(args.deviceId || ""),
+            founderId: "founder-primary",
+            path: String(args.path || ""),
+            content: typeof args.content === "string" ? args.content : "",
+          }) as { verified?: boolean; sha256?: string; created?: boolean };
+        } catch (error) {
+          if (error instanceof DeviceCommandUncertainError) throw new UncertainTaskExecutionError(error.message);
+          throw error;
+        }
+        if (result?.verified !== true || result.created !== true || typeof result.sha256 !== "string" || !/^[a-f0-9]{64}$/.test(result.sha256)) {
+          throw new UncertainTaskExecutionError("Local device did not return valid create verification evidence; inspect the target path before retrying.");
+        }
+        return {
+          result,
+          evidence: {
+            kind: "device-workspace-file-create-sha256",
+            description: "The enrolled local device exclusively created the exact Founder-approved file and verified the resulting bytes.",
+            reference: "sha256:" + result.sha256,
+            observedAt: new Date().toISOString(),
+          },
+        };
+      }
+      if (capability === "device.workspace.write_file") {
+        const manager = activeDeviceBridgeManager;
+        if (!manager) throw new Error("Local device bridge is not available.");
+        let result: { verified?: boolean; sha256?: string };
+        try {
+          result = await manager.executeApprovedWrite({
+            deviceId: String(args.deviceId || ""),
+            founderId: "founder-primary",
+            path: String(args.path || ""),
+            content: typeof args.content === "string" ? args.content : "",
+          }) as { verified?: boolean; sha256?: string };
+        } catch (error) {
+          if (error instanceof DeviceCommandUncertainError) throw new UncertainTaskExecutionError(error.message);
+          throw error;
+        }
+        if (result?.verified !== true || typeof result.sha256 !== "string" || !/^[a-f0-9]{64}$/.test(result.sha256)) {
+          throw new UncertainTaskExecutionError("Local device did not return valid write verification evidence; inspect the target file before retrying.");
+        }
+        return {
+          result,
+          evidence: {
+            kind: "device-workspace-file-write-sha256",
+            description: "The enrolled local device atomically replaced the exact Founder-approved file and verified the resulting bytes.",
+            reference: "sha256:" + result.sha256,
+            observedAt: new Date().toISOString(),
+          },
+        };
+      }
       if (capability === "workspace.write_file") {
         const file = resolveWritableWorkspacePath(args.path);
         if (isSensitiveWorkspacePath(file)) throw new Error("Writing secrets and credential files is blocked.");
@@ -228,8 +317,8 @@ const taskOrchestrator = new TaskOrchestrator(
         if (!stat.isFile() || stat.isSymbolicLink()) throw new Error("Only existing regular files can be replaced; symlinks and new files are blocked.");
         if (stat.size > 100_000) throw new Error("Existing file exceeds the 100 KB write limit.");
         const temp = path.join(path.dirname(file), `.maya-write.${process.pid}.${randomUUID()}.tmp`);
-        fs.writeFileSync(temp, content, { encoding: "utf8", mode: stat.mode & 0o777, flag: "wx" });
         try {
+          fs.writeFileSync(temp, content, { encoding: "utf8", mode: stat.mode & 0o777, flag: "wx" });
           if (signal.aborted) throw new Error("Task execution was cancelled before commit.");
           fs.renameSync(temp, file);
         } catch (error) {
@@ -260,6 +349,7 @@ const taskWorker = new TaskWorker(taskRepository, taskOrchestrator, taskCapabili
   pollIntervalMs: Number(process.env.MAYA_TASK_WORKER_POLL_MS) || 3000,
   leaseMs: Number(process.env.MAYA_TASK_WORKER_LEASE_MS) || 60_000,
   maxTasksPerCycle: Number(process.env.MAYA_TASK_WORKER_MAX_TASKS_PER_CYCLE) || 20,
+  isDeviceAvailable: (deviceId, founderId) => activeDeviceBridgeManager?.isOnline(deviceId, founderId) === true,
 }, approvalRepository);
 const taskWorkerEnabled = process.env.MAYA_TASK_WORKER_ENABLED === "true";
 const scheduleRepository = createScheduledJobRepository();
@@ -508,6 +598,8 @@ async function startServer() {
   const server = http.createServer(app);
   const PORT = Number(process.env.PORT) || 3000;
   const deviceBridgeManager = new DeviceBridgeManager(createDeviceRegistry());
+  activeDeviceBridgeManager = deviceBridgeManager;
+  await taskWorker.recoverInterrupted();
 
   app.use(express.json({ limit: "50mb" }));
   app.use(express.urlencoded({ limit: "50mb", extended: true }));
@@ -1163,8 +1255,8 @@ async function startServer() {
   });
 
 
-  // Persistent task control plane. The current adapter is single-instance and exposes
-  // one read-only capability; broader execution remains disabled until its controls exist.
+  // Persistent Founder-scoped task control plane. Writes are restricted to exact-approved
+  // existing-file replacements; arbitrary shell and device-control actions remain blocked.
   app.get("/api/control-plane/tasks", async (req, res): Promise<any> => {
     const session = (req as any).authSession;
     const founderId = session?.user?.id;
@@ -1192,19 +1284,32 @@ async function startServer() {
     const instruction = typeof req.body?.instruction === "string" ? req.body.instruction.trim() : "";
     const capability = typeof req.body?.capability === "string" ? req.body.capability : "workspace.read_file";
     const filePath = typeof req.body?.path === "string" ? req.body.path : "";
+    const deviceId = typeof req.body?.deviceId === "string" ? req.body.deviceId : "";
     const content = req.body?.content;
     if (!instruction || instruction.length > 1000) return res.status(400).json({ success: false, error: "Instruction must contain 1–1000 characters." });
-    if (capability !== "workspace.read_file" && capability !== "workspace.write_file") return res.status(400).json({ success: false, error: "Only workspace.read_file and approval-gated workspace.write_file are enabled." });
+    if (!["workspace.read_file", "workspace.write_file", "device.workspace.write_file", "device.workspace.create_file"].includes(capability)) return res.status(400).json({ success: false, error: "Capability is not enabled for the task control plane." });
     if (!filePath || filePath.length > 1024) return res.status(400).json({ success: false, error: "A workspace-relative file path of 1–1024 characters is required." });
-    if (capability === "workspace.write_file" && (typeof content !== "string" || Buffer.byteLength(content, "utf8") > 100_000)) return res.status(400).json({ success: false, error: "Write content must be text no larger than 100 KB." });
+    if (capability !== "workspace.read_file" && (typeof content !== "string" || Buffer.byteLength(content, "utf8") > 100_000)) return res.status(400).json({ success: false, error: "Write content must be text no larger than 100 KB." });
+    if (capability.startsWith("device.workspace.") && (!deviceId || deviceId.length > 128)) return res.status(400).json({ success: false, error: "A valid enrolled device ID is required for a local-device write." });
     try {
-      const actor = { id: founderId, founderId, role: "founder" as const, scopes: capability === "workspace.write_file" ? ["workspace:read", "workspace:write"] : ["workspace:read"] };
+      if (capability.startsWith("device.workspace.")) {
+        const device = (await deviceBridgeManager.list(founderId)).find(item => item.id === deviceId);
+        if (!device) return res.status(404).json({ success: false, error: "Enrolled device not found for this Founder." });
+        if (!device.online) return res.status(409).json({ success: false, error: "The paired device must be online before creating a local write task." });
+      }
+      const scopes = capability === "workspace.write_file"
+        ? ["workspace:read", "workspace:write"]
+        : capability.startsWith("device.workspace.") ? ["device:write"] : ["workspace:read"];
+      const actor = { id: founderId, founderId, role: "founder" as const, scopes };
+      const args = capability === "workspace.write_file"
+        ? { path: filePath, content }
+        : capability.startsWith("device.workspace.") ? { deviceId, path: filePath, content } : { path: filePath };
       const envelope = await taskOrchestrator.enqueue({
         id: "task-" + randomTaskId(),
         founderId,
         instruction,
         capability,
-        args: capability === "workspace.write_file" ? { path: filePath, content } : { path: filePath },
+        args,
         actor,
       });
       currentAuditLogs.unshift({
@@ -1224,7 +1329,7 @@ async function startServer() {
     const founderId = session?.user?.id;
     if (!founderId) return res.status(401).json({ success: false, error: "Verified Founder session required." });
     try {
-      const actor = { id: founderId, founderId, role: "founder" as const, scopes: ["workspace:read", "workspace:write"] };
+      const actor = { id: founderId, founderId, role: "founder" as const, scopes: ["workspace:read", "workspace:write", "device:write"] };
       const approvalId = typeof req.body?.approvalId === "string" ? req.body.approvalId : undefined;
       const output = await taskOrchestrator.execute(req.params.id, actor, approvalId);
       currentAuditLogs.unshift({
@@ -1254,7 +1359,7 @@ async function startServer() {
     const founderId = session?.user?.id;
     if (!founderId) return res.status(401).json({ success: false, error: "Verified Founder session required." });
     try {
-      const actor = { id: founderId, founderId, role: "founder" as const, scopes: ["workspace:read", "workspace:write"] };
+      const actor = { id: founderId, founderId, role: "founder" as const, scopes: ["workspace:read", "workspace:write", "device:write"] };
       const approval = await taskOrchestrator.requestApproval(req.params.id, actor);
       return res.json({ success: true, ...approval });
     } catch (error) {

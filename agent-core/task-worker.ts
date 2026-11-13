@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { transitionTask } from "./task-lifecycle.ts";
 import type { CapabilityRegistry, AgentIdentity } from "./capability-registry.ts";
 import { digestAction, type ApprovalRepository } from "./approval-ledger.ts";
 import type { TaskEnvelope, TaskOrchestrator, TaskRepository } from "./task-orchestrator.ts";
@@ -19,10 +20,11 @@ export interface TaskWorkerOptions {
   workerId?: string;
   leaseMs?: number;
   maxTasksPerCycle?: number;
+  isDeviceAvailable?: (deviceId: string, founderId: string) => boolean;
 }
 
 /**
- * Opt-in worker for read-only file reads and exact-Founder-approved file replacements.
+ * Opt-in worker for safe workspace reads plus exact-Founder-approved server and local-device file replacements.
  * Unknown, unapproved, failed and interrupted work is never broadened or auto-replayed.
  */
 export class TaskWorker {
@@ -31,11 +33,13 @@ export class TaskWorker {
   private readonly workerId: string;
   private readonly leaseMs: number;
   private readonly maxTasksPerCycle: number;
+  private readonly isDeviceAvailable?: (deviceId: string, founderId: string) => boolean;
   private timer?: ReturnType<typeof setTimeout>;
   private cyclePromise?: Promise<{ scanned: number; executed: number; skipped: number; failed: number; busy?: boolean }>;
   private stopped = true;
   private cycleActive = false;
   private readonly blockedTaskIds = new Set<string>();
+  private startupRecoveryDone = false;
   private status: TaskWorkerStatus = { enabled: false, running: false, executed: 0, skipped: 0, failed: 0 };
 
   constructor(
@@ -52,12 +56,33 @@ export class TaskWorker {
     const requestedMaxTasks = Number.isFinite(options.maxTasksPerCycle) ? Math.floor(options.maxTasksPerCycle!) : 20;
     this.leaseMs = Math.min(300_000, Math.max(5_000, requestedLease));
     this.maxTasksPerCycle = Math.min(100, Math.max(1, requestedMaxTasks));
+    this.isDeviceAvailable = options.isDeviceAvailable;
     const requestedInterval = Number.isFinite(options.pollIntervalMs) ? options.pollIntervalMs! : 3000;
     this.pollIntervalMs = Math.min(60_000, Math.max(1_000, requestedInterval));
   }
 
   getStatus(): TaskWorkerStatus {
     return { ...this.status, enabled: !this.stopped, running: this.cycleActive };
+  }
+
+  async recoverInterrupted(): Promise<number> {
+    // Supabase-backed repositories recover expired leased claims inside runOnce().
+    // This startup scan is only for the single-process file-backed repository.
+    if (this.repository.claimNext) return 0;
+    if (this.startupRecoveryDone) return 0;
+    const envelopes = await this.repository.list(this.founderId);
+    let recovered = 0;
+    for (const envelope of envelopes) {
+      if (envelope.task.founderId !== this.founderId || !["running", "verifying"].includes(envelope.task.status)) continue;
+      if (this.orchestrator.isExecuting(envelope.task.id)) continue;
+      envelope.task = transitionTask(envelope.task, "requires_recovery", {
+        error: "Task was interrupted by a previous server process. Verify any side effects before creating a replacement task.",
+      });
+      await this.repository.put(envelope);
+      recovered++;
+    }
+    this.startupRecoveryDone = true;
+    return recovered;
   }
 
   start(): void {
@@ -80,16 +105,22 @@ export class TaskWorker {
   private async executeAllowed(envelope: TaskEnvelope): Promise<"executed" | "skipped"> {
     if (envelope.task.founderId !== this.founderId) return "skipped";
     const isRead = envelope.capability === "workspace.read_file";
-    const isApprovedWrite = envelope.capability === "workspace.write_file";
+    const isWorkspaceWrite = envelope.capability === "workspace.write_file";
+    const isDeviceWrite = ["device.workspace.write_file", "device.workspace.create_file"].includes(envelope.capability);
+    const isApprovedWrite = isWorkspaceWrite || isDeviceWrite;
     if (!isRead && !isApprovedWrite) return "skipped";
     if (isRead && envelope.task.requiresApproval) return "skipped";
     if (isApprovedWrite && (!envelope.task.requiresApproval || !this.approvals)) return "skipped";
+    if (isDeviceWrite) {
+      const deviceId = typeof envelope.args.deviceId === "string" ? envelope.args.deviceId : "";
+      if (!deviceId || !this.isDeviceAvailable?.(deviceId, this.founderId)) return "skipped";
+    }
 
     const actor: AgentIdentity = {
       id: "maya-internal-task-worker:" + this.workerId,
       founderId: this.founderId,
       role: "worker",
-      scopes: isApprovedWrite ? ["workspace:read", "workspace:write"] : ["workspace:read"],
+      scopes: isWorkspaceWrite ? ["workspace:read", "workspace:write"] : isDeviceWrite ? ["device:write"] : ["workspace:read"],
     };
     const { definition } = this.capabilities.validate(envelope.capability, actor, envelope.args);
     if (!definition.allowedRoles.includes("worker")) return "skipped";
@@ -143,6 +174,8 @@ export class TaskWorker {
           }
         }
       } else {
+        const recovered = await this.recoverInterrupted();
+        result.skipped += recovered;
         const envelopes = await this.repository.list(this.founderId);
         result.scanned = envelopes.length;
         for (const envelope of envelopes) {

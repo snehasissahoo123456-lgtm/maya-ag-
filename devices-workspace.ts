@@ -3,7 +3,7 @@ import { customElement, state } from "lit/decorators.js";
 
 interface EnrolledDevice {
   id: string; name: string; platform: string; architecture: string;
-  runtimeVersion: string; online: boolean; createdAt: string; lastSeenAt: string;
+  runtimeVersion: string; online: boolean; revokedAt?: string; createdAt: string; lastSeenAt: string;
 }
 
 @customElement("maya-devices-workspace")
@@ -94,7 +94,7 @@ export class MayaDevicesWorkspace extends LitElement {
       <div class="space-y-4 p-4 md:p-6">
         <header class="flex flex-wrap items-start justify-between gap-3">
           <div><h2 class="text-xl font-semibold text-white">Local devices</h2>
-            <p class="muted mt-1 max-w-2xl">Pair your Windows PC with a one-time code. The current connector is read-only: system information, workspace listing and text-file reading only.</p>
+            <p class="muted mt-1 max-w-2xl">Pair your Windows PC with a one-time code. Direct device commands are read-only: system information, workspace listing and text-file reading. Existing-file replacement and new text-file creation in existing directories are available only through the Founder task queue after exact approval. Restart this local bridge after updating Maya so it loads the current command handler.</p>
           </div>
           <button class="btn" @click=${() => this.refresh()}>Refresh</button>
         </header>
@@ -122,20 +122,20 @@ export class MayaDevicesWorkspace extends LitElement {
             <article class="panel">
               <div class="flex flex-wrap items-center justify-between gap-3">
                 <div><div class="font-medium">${device.name}</div><div class="muted">${device.platform} · ${device.architecture} · ${device.runtimeVersion}</div></div>
-                <div class="flex items-center gap-2"><span class="rounded-full px-2 py-1 text-xs ${device.online ? "bg-emerald-500/10 text-emerald-300" : "bg-slate-800 text-slate-400"}">${device.online ? "Online" : "Offline"}</span>
-                  <button class="btn danger" @click=${() => this.revoke(device)}>Revoke</button></div>
+                <div class="flex items-center gap-2"><span class="rounded-full px-2 py-1 text-xs ${device.online ? "bg-emerald-500/10 text-emerald-300" : "bg-slate-800 text-slate-400"}">${device.revokedAt ? "Revoked" : device.online ? "Online" : "Offline"}</span>
+                  <button class="btn danger" ?disabled=${Boolean(device.revokedAt)} @click=${() => this.revoke(device)}>${device.revokedAt ? "Revoked" : "Revoke"}</button></div>
               </div>
               <div class="mt-3 flex flex-wrap gap-2">
-                <button class="btn" ?disabled=${!device.online} @click=${() => this.command(device, "system.info")}>System info</button>
-                <button class="btn" ?disabled=${!device.online} @click=${() => this.command(device, "workspace.list", { path: "." })}>List workspace</button>
+                <button class="btn" ?disabled=${!device.online || Boolean(device.revokedAt)} @click=${() => this.command(device, "system.info")}>System info</button>
+                <button class="btn" ?disabled=${!device.online || Boolean(device.revokedAt)} @click=${() => this.command(device, "workspace.list", { path: "." })}>List workspace</button>
                 <input .value=${this.filePath} aria-label="Workspace relative file path" @input=${(event: Event) => this.filePath = (event.target as HTMLInputElement).value}>
-                <button class="btn" ?disabled=${!device.online} @click=${() => this.command(device, "workspace.read_file", { path: this.filePath })}>Read file</button>
+                <button class="btn" ?disabled=${!device.online || Boolean(device.revokedAt)} @click=${() => this.command(device, "workspace.read_file", { path: this.filePath })}>Read file</button>
               </div>
             </article>
           `)}
         </section>
         ${this.commandResult ? html`<section class="panel"><div class="muted mb-2 uppercase tracking-wide">Command result</div><pre>${this.commandResult}</pre></section>` : ""}
-        <p class="muted text-amber-200/80">Safety boundary: no shell, file writes/deletes, browser session access, keystrokes, screenshots, payments or arbitrary application control are enabled.</p>
+        <p class="muted text-amber-200/80">Safety boundary: direct device commands remain read-only. Approved existing-file replacement is routed through the Founder task queue; no shell, delete, browser session access, keystrokes, screenshots, payments or arbitrary application control is enabled.</p>
       </div>
     `;
   }

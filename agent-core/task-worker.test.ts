@@ -23,10 +23,13 @@ class MemoryRepo implements TaskRepository {
 }
 
 const founder = { id: "founder-session", founderId: "founder-primary", role: "founder" as const, scopes: ["workspace:read"] };
-function setup(run: (input: any) => Promise<any> = async () => ({
-  result: { path: "README.md" },
-  evidence: { kind: "sha256", description: "Read-only file digest verified.", observedAt: new Date().toISOString() },
-})) {
+function setup(
+  run: (input: any) => Promise<any> = async () => ({
+    result: { path: "README.md" },
+    evidence: { kind: "sha256", description: "Read-only file digest verified.", observedAt: new Date().toISOString() },
+  }),
+  isDeviceAvailable: (deviceId: string, founderId: string) => boolean = () => true,
+) {
   const repository = new MemoryRepo();
   const registry = new CapabilityRegistry();
   registry.register({
@@ -62,9 +65,39 @@ function setup(run: (input: any) => Promise<any> = async () => ({
     requiresApproval: true,
     verification: "Read back and hash the written file.",
   });
+  registry.register({
+    name: "device.workspace.write_file",
+    description: "Replace an existing local device workspace file after Founder approval.",
+    risk: "high",
+    allowedRoles: ["founder", "worker"],
+    requiredScopes: ["device:write"],
+    arguments: {
+      deviceId: { type: "string", required: true, maxLength: 128 },
+      path: { type: "string", required: true, maxLength: 1024 },
+      content: { type: "string", required: true, maxLength: 100_000 },
+    },
+    timeoutMs: 5000,
+    requiresApproval: true,
+    verification: "Read back the local file and verify its SHA-256 digest.",
+  });
+  registry.register({
+    name: "device.workspace.create_file",
+    description: "Create a new local device workspace file after Founder approval.",
+    risk: "high",
+    allowedRoles: ["founder", "worker"],
+    requiredScopes: ["device:write"],
+    arguments: {
+      deviceId: { type: "string", required: true, maxLength: 128 },
+      path: { type: "string", required: true, maxLength: 1024 },
+      content: { type: "string", required: true, maxLength: 100_000 },
+    },
+    timeoutMs: 5000,
+    requiresApproval: true,
+    verification: "Verify the newly created local file with SHA-256.",
+  });
   const approvals = new ApprovalLedger();
   const orchestrator = new TaskOrchestrator(repository, registry, approvals, { run });
-  const worker = new TaskWorker(repository, orchestrator, registry, { founderId: "founder-primary", pollIntervalMs: 1000 }, approvals);
+  const worker = new TaskWorker(repository, orchestrator, registry, { founderId: "founder-primary", pollIntervalMs: 1000, isDeviceAvailable }, approvals);
   return { repository, registry, orchestrator, worker, approvals };
 }
 
@@ -261,4 +294,142 @@ test("worker never executes a write without a matching approval digest", async (
   assert.equal(result.skipped, 1);
   assert.equal(executions, 0);
   assert.equal((await repository.get("worker-write-unapproved"))?.task.status, "queued");
+});
+
+
+test("worker executes local device writes only after exact Founder approval", async () => {
+  let executedArgs: Record<string, unknown> | undefined;
+  const { orchestrator, worker, repository, approvals } = setup(async input => {
+    executedArgs = input.args;
+    return {
+      result: { verified: true, sha256: "c".repeat(64) },
+      evidence: { kind: "device-write-sha256", description: "Local device file replacement verified.", reference: "sha256:" + "c".repeat(64), observedAt: new Date().toISOString() },
+    };
+  });
+  const deviceFounder = { ...founder, scopes: ["device:write"] };
+  const args = { deviceId: "device-123", path: "reports/status.md", content: "Approved local PC content" };
+  await orchestrator.enqueue({
+    id: "worker-device-write-1", founderId: "founder-primary", instruction: "Replace a local PC report",
+    capability: "device.workspace.write_file", args, actor: deviceFounder,
+  });
+  const pending = await orchestrator.requestApproval("worker-device-write-1", deviceFounder);
+  await orchestrator.decideApproval({ approvalId: pending.approvalId, approved: true, actor: founder });
+  const result = await worker.runOnce();
+  assert.equal(result.executed, 1);
+  assert.deepEqual(executedArgs, args);
+  assert.equal((await repository.get("worker-device-write-1"))?.task.status, "completed");
+  assert.equal((await approvals.listForFounder("founder-primary")).find(item => item.id === pending.approvalId)?.status, "consumed");
+});
+
+test("worker refuses local device write when the approved device or payload changes", async () => {
+  let executions = 0;
+  const { orchestrator, worker, repository } = setup(async () => {
+    executions++;
+    return { result: {}, evidence: { kind: "device-write", description: "Should not run", observedAt: new Date().toISOString() } };
+  });
+  const deviceFounder = { ...founder, scopes: ["device:write"] };
+  await orchestrator.enqueue({
+    id: "worker-device-write-tamper", founderId: "founder-primary", instruction: "Replace a local PC report",
+    capability: "device.workspace.write_file",
+    args: { deviceId: "device-123", path: "reports/status.md", content: "Original approved payload" },
+    actor: deviceFounder,
+  });
+  const pending = await orchestrator.requestApproval("worker-device-write-tamper", deviceFounder);
+  await orchestrator.decideApproval({ approvalId: pending.approvalId, approved: true, actor: founder });
+  const envelope = await repository.get("worker-device-write-tamper");
+  assert.ok(envelope);
+  envelope.args.deviceId = "different-device";
+  await repository.put(envelope);
+  const result = await worker.runOnce();
+  assert.equal(result.executed, 0);
+  assert.equal(result.skipped, 1);
+  assert.equal(executions, 0);
+});
+
+
+test("file-backed worker parks interrupted running tasks for manual recovery", async () => {
+  const { worker, repository } = setup();
+  const queued = createTask({ id: "worker-interrupted-1", founderId: "founder-primary", instruction: "Replace a file" });
+  const planning = transitionTask(queued, "planning");
+  const running = transitionTask(planning, "running");
+  await repository.put({
+    task: running,
+    capability: "workspace.read_file",
+    args: { path: "README.md" },
+    attempts: 1,
+    idempotencyKey: "worker-interrupted-1",
+  });
+  const result = await worker.runOnce();
+  assert.equal(result.executed, 0);
+  assert.equal(result.skipped, 1);
+  const saved = await repository.get("worker-interrupted-1");
+  assert.equal(saved?.task.status, "requires_recovery");
+  assert.match(saved?.task.lastError || "", /interrupted/i);
+});
+
+
+test("worker leaves an approved local device write queued when this process has no device connection", async () => {
+  let executions = 0;
+  const { orchestrator, worker, repository } = setup(async () => {
+    executions++;
+    return { result: {}, evidence: { kind: "device-write", description: "Should not run", observedAt: new Date().toISOString() } };
+  }, () => false);
+  const deviceFounder = { ...founder, scopes: ["device:write"] };
+  await orchestrator.enqueue({
+    id: "worker-device-offline", founderId: "founder-primary", instruction: "Replace local file",
+    capability: "device.workspace.write_file",
+    args: { deviceId: "device-123", path: "notes.md", content: "Approved payload" },
+    actor: deviceFounder,
+  });
+  const pending = await orchestrator.requestApproval("worker-device-offline", deviceFounder);
+  await orchestrator.decideApproval({ approvalId: pending.approvalId, approved: true, actor: founder });
+  const result = await worker.runOnce();
+  assert.equal(result.executed, 0);
+  assert.equal(result.skipped, 1);
+  assert.equal(executions, 0);
+  assert.equal((await repository.get("worker-device-offline"))?.task.status, "queued");
+});
+
+
+test("startup recovery can run while the background worker remains disabled", async () => {
+  const { worker, repository } = setup();
+  const task = transitionTask(transitionTask(createTask({
+    id: "worker-startup-recovery-disabled", founderId: "founder-primary", instruction: "Replace a local file",
+  }), "planning"), "running");
+  await repository.put({
+    task,
+    capability: "device.workspace.write_file",
+    args: { deviceId: "device-123", path: "notes.md", content: "approved content" },
+    attempts: 1,
+    idempotencyKey: "worker-startup-recovery-disabled",
+  });
+  assert.equal(worker.getStatus().enabled, false);
+  assert.equal(await worker.recoverInterrupted(), 1);
+  assert.equal(worker.getStatus().enabled, false);
+  assert.equal((await repository.get("worker-startup-recovery-disabled"))?.task.status, "requires_recovery");
+});
+
+
+test("worker creates a new local PC file only after exact Founder approval", async () => {
+  let executedArgs: Record<string, unknown> | undefined;
+  const { orchestrator, worker, repository, approvals } = setup(async input => {
+    executedArgs = input.args;
+    return {
+      result: { created: true, verified: true, sha256: "e".repeat(64) },
+      evidence: { kind: "device-create-sha256", description: "Local file creation verified.", reference: "sha256:" + "e".repeat(64), observedAt: new Date().toISOString() },
+    };
+  });
+  const deviceFounder = { ...founder, scopes: ["device:write"] };
+  const args = { deviceId: "device-123", path: "reports/new.md", content: "Exact approved new file" };
+  await orchestrator.enqueue({
+    id: "worker-device-create-1", founderId: "founder-primary", instruction: "Create a local PC report",
+    capability: "device.workspace.create_file", args, actor: deviceFounder,
+  });
+  const pending = await orchestrator.requestApproval("worker-device-create-1", deviceFounder);
+  await orchestrator.decideApproval({ approvalId: pending.approvalId, approved: true, actor: founder });
+  const result = await worker.runOnce();
+  assert.equal(result.executed, 1);
+  assert.deepEqual(executedArgs, args);
+  assert.equal((await repository.get("worker-device-create-1"))?.task.status, "completed");
+  assert.equal((await approvals.listForFounder("founder-primary")).find(item => item.id === pending.approvalId)?.status, "consumed");
 });
