@@ -34,6 +34,7 @@ export class MayaDeveloperChangesWorkspace extends LitElement {
   @state() private approvalId = "";
   @state() private approvalTaskId = "";
   @state() private approvalStatus = "";
+  @state() private approvalExpiresAt = "";
   @state() private executionText = "";
   @state() private verificationText = "";
   @state() private busy = false;
@@ -71,6 +72,7 @@ export class MayaDeveloperChangesWorkspace extends LitElement {
           approvalId: this.approvalId,
           taskId: this.approvalTaskId,
           status: this.approvalStatus,
+          expiresAt: this.approvalExpiresAt,
           packageText: this.preparedPackageText,
           savedAt: new Date().toISOString(),
         };
@@ -86,9 +88,11 @@ export class MayaDeveloperChangesWorkspace extends LitElement {
       const record = records && typeof records === "object" ? records[changeId] : undefined;
       if (!record || typeof record !== "object" ||
           typeof record.approvalId !== "string" || typeof record.taskId !== "string" ||
-          typeof record.packageText !== "string" || typeof record.status !== "string") return;
+          typeof record.packageText !== "string" || typeof record.status !== "string" ||
+          typeof record.expiresAt !== "string") return;
       const savedAt = Date.parse(record.savedAt);
-      if (!Number.isFinite(savedAt) || Date.now() - savedAt > 60 * 60 * 1000) {
+      if (!Number.isFinite(savedAt) || Date.now() - savedAt > 60 * 60 * 1000 ||
+          !Number.isFinite(Date.parse(record.expiresAt)) || Date.parse(record.expiresAt) <= Date.now()) {
         delete records[changeId];
         sessionStorage.setItem(this.recoveryKey, JSON.stringify(records));
         return;
@@ -98,6 +102,7 @@ export class MayaDeveloperChangesWorkspace extends LitElement {
       this.approvalId = record.approvalId;
       this.approvalTaskId = record.taskId;
       this.approvalStatus = record.status;
+      this.approvalExpiresAt = record.expiresAt;
       this.preparedPackageText = record.packageText;
     } catch {
       this.error = "Saved Developer approval recovery data is invalid; prepare a new exact package if the existing approval has expired.";
@@ -205,6 +210,7 @@ export class MayaDeveloperChangesWorkspace extends LitElement {
       this.preparedPackageText=JSON.stringify(data.package,null,2);
       this.approvalId=data.approval.id;
       this.approvalStatus=data.approval.status;
+      this.approvalExpiresAt=data.approval.expiresAt;
       this.persistRecovery();
       this.notice="Exact package prepared and approval requested. No files have been applied.";
     });
@@ -232,7 +238,7 @@ export class MayaDeveloperChangesWorkspace extends LitElement {
       });
       this.executionText=JSON.stringify(data.execution,null,2);
       this.clearRecovery(change.id);
-      this.approvalId="";this.approvalTaskId="";this.approvalStatus="";this.preparedPackageText="";
+      this.approvalId="";this.approvalTaskId="";this.approvalStatus="";this.approvalExpiresAt="";this.preparedPackageText="";
       this.notice="Execution request completed. Independent QA is still required.";
       await this.refresh();await this.loadDetail(change.id);
     });
