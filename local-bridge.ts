@@ -133,10 +133,48 @@ export async function executeLocalBridgeCommand(rootInput: string, command: stri
     const directory = resolveAllowedPath(root, args.path || ".");
     const stat = fs.lstatSync(directory);
     if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error("Only workspace directories can be listed.");
-    return fs.readdirSync(directory, { withFileTypes: true })
-      .filter(entry => !entry.isSymbolicLink() && !isSensitive(path.join(directory, entry.name)))
-      .slice(0, 100)
-      .map(entry => ({ name: entry.name, type: entry.isDirectory() ? "directory" : "file" }));
+    const entries: Array<{ name: string; type: "file" | "directory" }> = [];
+    const directoryHandle = fs.opendirSync(directory);
+    try {
+      for (let index = 0; index < 500 && entries.length < 100; index++) {
+        const entry = directoryHandle.readSync();
+        if (!entry) break;
+        if (entry.isSymbolicLink() || isSensitive(path.join(directory, entry.name))) continue;
+        if (!entry.isFile() && !entry.isDirectory()) continue;
+        entries.push({ name: entry.name, type: entry.isDirectory() ? "directory" : "file" });
+      }
+    } finally {
+      try { directoryHandle.closeSync(); } catch {}
+    }
+    return entries;
+  }
+  if (command === "workspace.list_directory") {
+    const directory = resolveAllowedPath(root, args.path || ".");
+    const stat = fs.lstatSync(directory);
+    if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error("Only workspace directories can be listed.");
+    const entries: Array<{ name: string; type: "file" | "directory" }> = [];
+    const directoryHandle = fs.opendirSync(directory);
+    let scanned = 0;
+    let truncated = false;
+    try {
+      while (scanned < 500 && entries.length < 100) {
+        const entry = directoryHandle.readSync();
+        if (!entry) break;
+        scanned++;
+        if (entry.isSymbolicLink() || isSensitive(path.join(directory, entry.name))) continue;
+        if (!entry.isFile() && !entry.isDirectory()) continue;
+        entries.push({ name: entry.name, type: entry.isDirectory() ? "directory" : "file" });
+      }
+      if (entries.length >= 100 || scanned >= 500) truncated = true;
+    } finally {
+      try { directoryHandle.closeSync(); } catch {}
+    }
+    return {
+      path: String(args.path || "."),
+      entries,
+      count: entries.length,
+      truncated,
+    };
   }
   if (command === "workspace.git_status") {
     const directory = resolveAllowedPath(root, args.path || ".");
@@ -177,6 +215,97 @@ export async function executeLocalBridgeCommand(rootInput: string, command: stri
     if (!stat.isFile() || stat.isSymbolicLink()) throw new Error("Only regular non-symlink files can be read.");
     if (stat.size > 50_000) throw new Error("File exceeds the 50 KB read limit.");
     return { path: path.relative(root, file), content: fs.readFileSync(file, "utf8") };
+  }
+  if (command === "workspace.search_files") {
+    const directory = resolveAllowedPath(root, args.path || ".");
+    const directoryStat = fs.lstatSync(directory);
+    if (!directoryStat.isDirectory() || directoryStat.isSymbolicLink()) throw new Error("Search path must be a regular workspace directory.");
+    const query = typeof args.query === "string" ? args.query.trim() : "";
+    if (!query || query.length > 200) throw new Error("Search query must contain 1–200 characters.");
+    const maxResults = typeof args.maxResults === "number" && Number.isInteger(args.maxResults)
+      ? Math.min(100, Math.max(1, args.maxResults)) : 50;
+    const needle = query.toLocaleLowerCase();
+    const matches: Array<{ path: string; line: number; preview: string }> = [];
+    const maxFiles = 1_000;
+    const maxDirectories = 200;
+    const maxDepth = 8;
+    const deadline = Date.now() + 5_000;
+    let filesScanned = 0;
+    let directoriesScanned = 0;
+    let truncated = false;
+    let stopped = false;
+    const walk = (current: string, depth: number): void => {
+      if (stopped) return;
+      if (Date.now() >= deadline || directoriesScanned >= maxDirectories || depth > maxDepth) {
+        truncated = true;
+        stopped = true;
+        return;
+      }
+      directoriesScanned++;
+      const entries: fs.Dirent[] = [];
+      let directoryHandle: fs.Dir | undefined;
+      try {
+        directoryHandle = fs.opendirSync(current);
+        for (let index = 0; index < 500; index++) {
+          const entry = directoryHandle.readSync();
+          if (!entry) break;
+          entries.push(entry);
+        }
+        if (directoryHandle.readSync()) truncated = true;
+      } catch { truncated = true; return; }
+      finally { try { directoryHandle?.closeSync(); } catch {} }
+      for (const entry of entries) {
+        if (stopped) return;
+        const candidate = path.join(current, entry.name);
+        if (entry.isSymbolicLink() || isSensitive(candidate)) continue;
+        if (entry.isDirectory()) {
+          if (depth < maxDepth) walk(candidate, depth + 1);
+          else truncated = true;
+          continue;
+        }
+        if (!entry.isFile()) continue;
+        if (filesScanned >= maxFiles || Date.now() >= deadline) {
+          truncated = true;
+          stopped = true;
+          return;
+        }
+        filesScanned++;
+        try {
+          const stat = fs.lstatSync(candidate);
+          if (!stat.isFile() || stat.isSymbolicLink()) continue;
+          if (stat.size > 256_000) { truncated = true; continue; }
+          const bytes = fs.readFileSync(candidate);
+          if (bytes.includes(0)) continue;
+          const lines = bytes.toString("utf8").split(/\r?\n/);
+          for (let index = 0; index < lines.length; index++) {
+            if (lines[index].toLocaleLowerCase().includes(needle)) {
+              matches.push({
+                path: path.relative(root, candidate),
+                line: index + 1,
+                preview: lines[index].trim().slice(0, 240)
+                  .replace(/\bBearer\s+[A-Za-z0-9._~+\/-]+=*/gi, "Bearer [REDACTED]")
+                  .replace(/\b(?:sk-(?:proj-)?[A-Za-z0-9_-]{16,}|gh[pousr]_[A-Za-z0-9]{20,}|AIza[0-9A-Za-z_-]{20,}|AKIA[0-9A-Z]{16}|xox[baprs]-[A-Za-z0-9-]{10,})\b/gi, "[REDACTED]")
+                  .replace(/((?:api[_-]?key|client[_-]?secret|password|passwd|secret|token|authorization|private[_-]?key)["']?\s*[:=]\s*)(?:"[^"]*"|'[^']*'|[^\s,;]+)/gi, "$1[REDACTED]"),
+              });
+              if (matches.length >= maxResults) {
+                truncated = true;
+                stopped = true;
+                return;
+              }
+            }
+          }
+        } catch { truncated = true; /* Skip files that disappear or become unreadable during the bounded scan. */ }
+      }
+    };
+    walk(directory, 0);
+    return {
+      path: path.relative(root, directory) || ".",
+      query,
+      matches,
+      filesScanned,
+      directoriesScanned,
+      truncated,
+    };
   }
   if (command === "workspace.move_file") {
     const source = resolveAllowedPath(root, args.fromPath);

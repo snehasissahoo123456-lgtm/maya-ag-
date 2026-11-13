@@ -105,7 +105,7 @@ export class TaskWorker {
   private async executeAllowed(envelope: TaskEnvelope): Promise<"executed" | "skipped"> {
     if (envelope.task.founderId !== this.founderId) return "skipped";
     const isRead = envelope.capability === "workspace.read_file";
-    const isDeviceRead = ["device.workspace.read_file", "device.workspace.git_status"].includes(envelope.capability);
+    const isDeviceRead = ["device.workspace.read_file", "device.workspace.git_status", "device.workspace.search_files", "device.workspace.list_directory"].includes(envelope.capability);
     const isWorkspaceWrite = envelope.capability === "workspace.write_file";
     const isDeviceWrite = ["device.workspace.write_file", "device.workspace.create_file", "device.workspace.create_directory", "device.workspace.move_file"].includes(envelope.capability);
     const isApprovedWrite = isWorkspaceWrite || isDeviceWrite;
