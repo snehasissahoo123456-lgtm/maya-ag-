@@ -14,7 +14,7 @@ export interface DeveloperChangeRequest {
   diffSha256: string;
   review?: { reviewerId: string; decision: "approved" | "changes_requested"; notes: string; at: string };
   founderApproval?: { founderId: string; at: string };
-  execution?: { startedAt: string; finishedAt?: string; commandIds: string[] };
+  execution?: { startedAt: string; finishedAt?: string; commandIds: string[]; taskId?: string; packageSha256?: string };
   verification?: { passed: boolean; evidenceRef: string; summary: string; at: string };
   rollbackSnapshotId?: string;
   createdAt: string;
