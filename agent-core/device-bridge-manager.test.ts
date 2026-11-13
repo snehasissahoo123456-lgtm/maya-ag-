@@ -34,6 +34,46 @@ test("device bridge pairs, authenticates commands to one Founder and rejects non
     assert.ok(command?.requestId);
     socket.receive({ type: "command_result", requestId: command.requestId, success: true, result: { platform: "linux" } });
     assert.deepEqual(await commandPromise, { platform: "linux" });
+    const searchPromise = manager.executeCommand({
+      deviceId: paired.device.id, founderId: "founder-a", command: "workspace.search_files",
+      args: { path: ".", query: "executeTask" },
+    });
+    await new Promise(resolve => setTimeout(resolve, 0));
+    const searchCommand = socket.sent.find(item => item.type === "command" && item.command === "workspace.search_files");
+    assert.ok(searchCommand?.requestId);
+    assert.deepEqual(searchCommand.args, { path: ".", query: "executeTask" });
+    socket.receive({ type: "command_result", requestId: searchCommand.requestId, success: true, result: {
+      path: ".", query: "executeTask", matches: [], filesScanned: 4, directoriesScanned: 2, truncated: false,
+    } });
+    assert.deepEqual(await searchPromise, {
+      path: ".", query: "executeTask", matches: [], filesScanned: 4, directoriesScanned: 2, truncated: false,
+    });
+    const listPromise = manager.executeCommand({
+      deviceId: paired.device.id, founderId: "founder-a", command: "workspace.list", args: { path: "src" },
+    });
+    await new Promise(resolve => setTimeout(resolve, 0));
+    const listCommand = socket.sent.find(item => item.type === "command" && item.command === "workspace.list");
+    assert.ok(listCommand?.requestId);
+    assert.deepEqual(listCommand.args, { path: "src" });
+    socket.receive({ type: "command_result", requestId: listCommand.requestId, success: true, result: [
+      { name: "agent.ts", type: "file" }, { name: "core", type: "directory" },
+    ] });
+    assert.deepEqual(await listPromise, [{ name: "agent.ts", type: "file" }, { name: "core", type: "directory" }]);
+    const structuredListPromise = manager.executeCommand({
+      deviceId: paired.device.id, founderId: "founder-a", command: "workspace.list_directory", args: { path: "src" },
+    });
+    await new Promise(resolve => setTimeout(resolve, 0));
+    const structuredListCommand = socket.sent.find(item => item.type === "command" && item.command === "workspace.list_directory");
+    assert.ok(structuredListCommand?.requestId);
+    socket.receive({ type: "command_result", requestId: structuredListCommand.requestId, success: true, result: {
+      path: "src", entries: [{ name: "agent.ts", type: "file" }], count: 1, truncated: false,
+    } });
+    assert.deepEqual(await structuredListPromise, {
+      path: "src", entries: [{ name: "agent.ts", type: "file" }], count: 1, truncated: false,
+    });
+    await assert.rejects(() => manager.executeCommand({
+      deviceId: paired.device.id, founderId: "founder-a", command: "workspace.search_files", args: { query: "" },
+    }), /1–200 characters/i);
     await assert.rejects(() => manager.executeCommand({ deviceId: paired.device.id, founderId: "founder-b", command: "system.info" }), /not registered/i);
     await assert.rejects(() => manager.executeCommand({ deviceId: paired.device.id, founderId: "founder-a", command: "shell.exec", args: { command: "whoami" } }), /read-only allowlist/i);
     await assert.rejects(() => manager.executeCommand({ deviceId: paired.device.id, founderId: "founder-a", command: "workspace.write_file", args: { path: "notes.txt", content: "bypass" } }), /read-only allowlist/i);
@@ -83,6 +123,67 @@ test("approved local file replacement uses a separate server-only command path",
   } finally { fs.rmSync(directory, { recursive: true, force: true }); }
 });
 
+
+
+test("approved local file move uses a separate server-only command path", async () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "maya-device-approved-move-"));
+  try {
+    const registry = new FileDeviceRegistry(directory);
+    const manager = new DeviceBridgeManager(registry);
+    const pairing = await manager.createPairing("founder-a");
+    const socket = new FakeSocket();
+    manager.accept(socket as any);
+    socket.receive({ type: "pair", code: pairing.code, device: { name: "Test PC", platform: "linux", architecture: "x64", runtimeVersion: "test" } });
+    await new Promise(resolve => setTimeout(resolve, 10));
+    const paired = socket.sent.find(item => item.type === "paired");
+    assert.ok(paired?.token);
+    await assert.rejects(() => manager.executeCommand({
+      deviceId: paired.device.id, founderId: "founder-a", command: "workspace.move_file",
+      args: { fromPath: "inbox/a.md", toPath: "archive/a.md" },
+    }), /read-only allowlist/i);
+    const movePromise = manager.executeApprovedMoveFile({
+      deviceId: paired.device.id, founderId: "founder-a",
+      fromPath: "inbox/a.md", toPath: "archive/a.md",
+    });
+    await new Promise(resolve => setTimeout(resolve, 0));
+    const command = socket.sent.find(item => item.type === "command" && item.command === "workspace.move_file");
+    assert.ok(command?.requestId);
+    assert.deepEqual(command.args, { fromPath: "inbox/a.md", toPath: "archive/a.md" });
+    socket.receive({ type: "command_result", requestId: command.requestId, success: true, result: {
+      moved: true, verified: true, fromPath: "inbox/a.md", toPath: "archive/a.md", sha256: "b".repeat(64),
+    } });
+    assert.deepEqual(await movePromise, {
+      moved: true, verified: true, fromPath: "inbox/a.md", toPath: "archive/a.md", sha256: "b".repeat(64),
+    });
+    await assert.rejects(() => manager.executeApprovedMoveFile({
+      deviceId: paired.device.id, founderId: "founder-b", fromPath: "a.md", toPath: "b.md",
+    }), /not registered/i);
+  } finally { fs.rmSync(directory, { recursive: true, force: true }); }
+});
+
+
+test("disconnect during an approved file move reports an uncertain side effect", async () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "maya-device-move-disconnect-"));
+  try {
+    const registry = new FileDeviceRegistry(directory);
+    const manager = new DeviceBridgeManager(registry);
+    const pairing = await manager.createPairing("founder-a");
+    const socket = new FakeSocket();
+    manager.accept(socket as any);
+    socket.receive({ type: "pair", code: pairing.code, device: { name: "Test PC", platform: "linux", architecture: "x64", runtimeVersion: "test" } });
+    await new Promise(resolve => setTimeout(resolve, 10));
+    const paired = socket.sent.find(item => item.type === "paired");
+    assert.ok(paired?.token);
+    const pending = manager.executeApprovedMoveFile({
+      deviceId: paired.device.id, founderId: "founder-a",
+      fromPath: "inbox/report.md", toPath: "archive/report.md",
+    });
+    await new Promise(resolve => setTimeout(resolve, 0));
+    assert.ok(socket.sent.some(item => item.type === "command" && item.command === "workspace.move_file"));
+    socket.close();
+    await assert.rejects(pending, DeviceCommandUncertainError);
+  } finally { fs.rmSync(directory, { recursive: true, force: true }); }
+});
 
 test("disconnect during a local write reports an uncertain side effect", async () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "maya-device-write-disconnect-"));

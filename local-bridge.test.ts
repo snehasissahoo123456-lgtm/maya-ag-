@@ -104,6 +104,72 @@ test("local bridge creates only one new directory under an existing non-sensitiv
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
 
+
+test("local bridge moves only regular non-sensitive files without overwriting and verifies bytes", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "maya-bridge-move-"));
+  try {
+    fs.mkdirSync(path.join(root, "inbox"));
+    fs.mkdirSync(path.join(root, "archive"));
+    fs.mkdirSync(path.join(root, ".ssh"));
+    fs.writeFileSync(path.join(root, "inbox", "report.md"), "move this exact content");
+    fs.writeFileSync(path.join(root, "archive", "existing.md"), "keep destination");
+    fs.writeFileSync(path.join(root, ".ssh", "id_ed25519"), "private key");
+    fs.linkSync(path.join(root, ".ssh", "id_ed25519"), path.join(root, "mirror.txt"));
+    await assert.rejects(() => executeLocalBridgeCommand(root, "workspace.move_file", {
+      fromPath: "mirror.txt", toPath: "archive/mirror.txt",
+    }), /hard-linked/i);
+    assert.equal(fs.existsSync(path.join(root, "mirror.txt")), true);
+    const moved = await executeLocalBridgeCommand(root, "workspace.move_file", {
+      fromPath: "inbox/report.md", toPath: "archive/report.md",
+    }) as any;
+    assert.equal(moved.moved, true);
+    assert.equal(moved.verified, true);
+    assert.equal(moved.fromPath, path.join("inbox", "report.md"));
+    assert.equal(moved.toPath, path.join("archive", "report.md"));
+    assert.match(moved.sha256, /^[a-f0-9]{64}$/);
+    assert.equal(fs.existsSync(path.join(root, "inbox", "report.md")), false);
+    assert.equal(fs.readFileSync(path.join(root, "archive", "report.md"), "utf8"), "move this exact content");
+    await assert.rejects(() => executeLocalBridgeCommand(root, "workspace.move_file", {
+      fromPath: "archive/report.md", toPath: "archive/existing.md",
+    }), /already exists/i);
+    assert.equal(fs.existsSync(path.join(root, "archive", "report.md")), true);
+    assert.equal(fs.readFileSync(path.join(root, "archive", "existing.md"), "utf8"), "keep destination");
+    await assert.rejects(() => executeLocalBridgeCommand(root, "workspace.move_file", {
+      fromPath: ".ssh/id_ed25519", toPath: "archive/key.txt",
+    }), /sensitive/i);
+    await assert.rejects(() => executeLocalBridgeCommand(root, "workspace.move_file", {
+      fromPath: "archive/report.md", toPath: "../outside.md",
+    }), /escapes/i);
+    await assert.rejects(() => executeLocalBridgeCommand(root, "workspace.move_file", {
+      fromPath: "archive/report.md", toPath: "archive/report.md",
+    }), /already exists|different/i);
+    await assert.rejects(() => executeLocalBridgeCommand(root, "workspace.move_file", {
+      fromPath: "missing.txt", toPath: "archive/missing.txt",
+    }), /does not exist|resolve/i);
+    await assert.rejects(() => executeLocalBridgeCommand(root, "workspace.move_file", {
+      fromPath: "archive/report.md", toPath: "missing-parent/report.md",
+    }), /parent does not exist/i);
+    await assert.rejects(() => executeLocalBridgeCommand(root, "workspace.move_file", {
+      fromPath: "archive", toPath: "archive-folder",
+    }), /regular non-symlink files/i);
+    fs.writeFileSync(path.join(root, "oversized.bin"), Buffer.alloc(5_000_001, 1));
+    await assert.rejects(() => executeLocalBridgeCommand(root, "workspace.move_file", {
+      fromPath: "oversized.bin", toPath: "archive/oversized.bin",
+    }), /5 MB/i);
+    assert.equal(fs.existsSync(path.join(root, "oversized.bin")), true);
+    if (process.platform !== "win32") {
+      const outside = fs.mkdtempSync(path.join(os.tmpdir(), "maya-move-outside-"));
+      try {
+        fs.symlinkSync(outside, path.join(root, "linked"), "dir");
+        await assert.rejects(() => executeLocalBridgeCommand(root, "workspace.move_file", {
+          fromPath: "archive/report.md", toPath: "linked/escape.md",
+        }), /symbolic links/i);
+      } finally { fs.rmSync(outside, { recursive: true, force: true }); }
+    }
+    await assert.rejects(() => executeLocalBridgeCommand(root, "shell.exec", { command: "whoami" }), /allowlist/i);
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
 test("local bridge returns bounded read-only Git status without diff contents", async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "maya-bridge-git-status-"));
   try {
@@ -123,5 +189,93 @@ test("local bridge returns bounded read-only Git status without diff contents", 
     assert.equal("diff" in result, false);
     await assert.rejects(() => executeLocalBridgeCommand(root, "workspace.git_status", { path: "../outside" }), /escapes/i);
     await assert.rejects(() => executeLocalBridgeCommand(root, "shell.exec", { command: "whoami" }), /allowlist/i);
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
+
+test("local bridge search is bounded, literal and excludes sensitive, binary and symlink paths", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "maya-bridge-search-"));
+  try {
+    fs.mkdirSync(path.join(root, "src"));
+    fs.mkdirSync(path.join(root, ".ssh"));
+    fs.writeFileSync(path.join(root, "src", "agent.ts"), "export function executeTask() { return true; }\nconst other = 1;");
+    fs.writeFileSync(path.join(root, "src", "config.ts"), 'const apiKey = "private-value-123";\\nconst data = {"client_secret": "json-secret-456"};\\nconst auth = "Authorization: Bearer bearer-secret-789";\\nconst provider = "sk-proj-1234567890123456789012345678";');
+    fs.writeFileSync(path.join(root, "README.md"), "Maya local workspace\nTask worker documentation");
+    fs.writeFileSync(path.join(root, ".env"), "GEMINI_API_KEY=private-token");
+    fs.writeFileSync(path.join(root, ".ssh", "id_ed25519"), "private-key");
+    fs.writeFileSync(path.join(root, "binary.dat"), Buffer.from([0, 1, 2, 3]));
+    const result = await executeLocalBridgeCommand(root, "workspace.search_files", {
+      path: ".", query: "EXECUTETASK", maxResults: 50,
+    }) as any;
+    assert.equal(result.query, "EXECUTETASK");
+    assert.ok(result.matches.some((item: any) => item.path === path.join("src", "agent.ts") && item.line === 1));
+    assert.equal(result.matches.some((item: any) => String(item.preview).includes("GEMINI_API_KEY")), false);
+    assert.equal(result.matches.some((item: any) => item.path.includes(".ssh")), false);
+    assert.equal(result.matches.some((item: any) => item.path === "binary.dat"), false);
+    assert.equal(typeof result.filesScanned, "number");
+    assert.equal(typeof result.directoriesScanned, "number");
+    assert.equal(result.truncated, false);
+    fs.writeFileSync(path.join(root, "large.txt"), Buffer.alloc(256_001, 65));
+    const bounded = await executeLocalBridgeCommand(root, "workspace.search_files", { query: "not-present" }) as any;
+    assert.equal(bounded.truncated, true);
+    const redacted = await executeLocalBridgeCommand(root, "workspace.search_files", { query: "apiKey" }) as any;
+    const credentialMatch = redacted.matches.find((item: any) => item.path === path.join("src", "config.ts"));
+    assert.ok(credentialMatch);
+    assert.equal(credentialMatch.preview.includes("private-value-123"), false);
+    assert.equal(credentialMatch.preview.includes("[REDACTED]"), true);
+    const jsonSecret = await executeLocalBridgeCommand(root, "workspace.search_files", { query: "client_secret" }) as any;
+    assert.equal(jsonSecret.matches[0].preview.includes("json-secret-456"), false);
+    const bearerSecret = await executeLocalBridgeCommand(root, "workspace.search_files", { query: "Bearer" }) as any;
+    assert.equal(bearerSecret.matches[0].preview.includes("bearer-secret-789"), false);
+    const providerSecret = await executeLocalBridgeCommand(root, "workspace.search_files", { query: "sk-proj" }) as any;
+    assert.equal(providerSecret.matches[0].preview.includes("sk-proj-1234567890123456789012345678"), false);
+    await assert.rejects(() => executeLocalBridgeCommand(root, "workspace.search_files", { query: "" }), /1–200 characters/i);
+    await assert.rejects(() => executeLocalBridgeCommand(root, "workspace.search_files", { query: "x".repeat(201) }), /1–200 characters/i);
+    await assert.rejects(() => executeLocalBridgeCommand(root, "workspace.search_files", { path: "../outside", query: "token" }), /escapes/i);
+    await assert.rejects(() => executeLocalBridgeCommand(root, "shell.exec", { command: "whoami" }), /allowlist/i);
+    if (process.platform !== "win32") {
+      const outside = fs.mkdtempSync(path.join(os.tmpdir(), "maya-search-outside-"));
+      try {
+        fs.writeFileSync(path.join(outside, "secret.txt"), "needle");
+        fs.symlinkSync(outside, path.join(root, "linked"), "dir");
+        const linked = await executeLocalBridgeCommand(root, "workspace.search_files", { query: "needle" }) as any;
+        assert.equal(linked.matches.some((item: any) => String(item.path).includes("linked")), false);
+      } finally { fs.rmSync(outside, { recursive: true, force: true }); }
+    }
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
+
+test("local bridge directory listing is bounded and excludes sensitive and symlink entries", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "maya-bridge-list-"));
+  try {
+    fs.mkdirSync(path.join(root, "src"));
+    fs.mkdirSync(path.join(root, ".ssh"));
+    fs.writeFileSync(path.join(root, "README.md"), "safe");
+    fs.writeFileSync(path.join(root, ".env"), "GEMINI_API_KEY=private");
+    fs.writeFileSync(path.join(root, ".ssh", "id_ed25519"), "private");
+    if (process.platform !== "win32") {
+      const outside = fs.mkdtempSync(path.join(os.tmpdir(), "maya-list-outside-"));
+      try {
+        fs.writeFileSync(path.join(outside, "secret.txt"), "secret");
+        fs.symlinkSync(outside, path.join(root, "linked"), "dir");
+        const entries = await executeLocalBridgeCommand(root, "workspace.list", { path: "." }) as any[];
+        assert.ok(entries.some(item => item.name === "README.md" && item.type === "file"));
+        assert.ok(entries.some(item => item.name === "src" && item.type === "directory"));
+        assert.equal(entries.some(item => item.name === ".env" || item.name === ".ssh" || item.name === "linked"), false);
+      } finally { fs.rmSync(outside, { recursive: true, force: true }); }
+    } else {
+      const entries = await executeLocalBridgeCommand(root, "workspace.list", { path: "." }) as any[];
+      assert.ok(entries.some(item => item.name === "README.md" && item.type === "file"));
+      assert.equal(entries.some(item => item.name === ".env" || item.name === ".ssh"), false);
+    }
+    const detailed = await executeLocalBridgeCommand(root, "workspace.list_directory", { path: "." }) as any;
+    assert.equal(detailed.path, ".");
+    assert.equal(detailed.count, detailed.entries.length);
+    assert.equal(detailed.truncated, false);
+    assert.ok(detailed.entries.some((item: any) => item.name === "README.md" && item.type === "file"));
+    assert.equal(detailed.entries.some((item: any) => item.name === ".env" || item.name === ".ssh" || item.name === "linked"), false);
+    await assert.rejects(() => executeLocalBridgeCommand(root, "workspace.list", { path: "../outside" }), /escapes/i);
+    await assert.rejects(() => executeLocalBridgeCommand(root, "workspace.list_directory", { path: "../outside" }), /escapes/i);
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });

@@ -12,7 +12,7 @@ export class DeviceCommandUncertainError extends Error {
     this.name = "DeviceCommandUncertainError";
   }
 }
-const ALLOWED_COMMANDS = new Set(["system.info", "workspace.list", "workspace.read_file", "workspace.git_status"]);
+const ALLOWED_COMMANDS = new Set(["system.info", "workspace.list", "workspace.list_directory", "workspace.read_file", "workspace.git_status", "workspace.search_files"]);
 
 export class DeviceBridgeManager {
   private readonly connected = new Map<string, ConnectedDevice>();
@@ -39,7 +39,7 @@ export class DeviceBridgeManager {
         if (pending.deviceId === device.id) {
           clearTimeout(pending.timer);
           pending.reject(pending.sideEffecting
-            ? new DeviceCommandUncertainError("Device disconnected during a file replacement; verify the target file before retrying.")
+            ? new DeviceCommandUncertainError("Device disconnected during an approved local file operation; inspect the affected paths before retrying.")
             : new Error("Device disconnected during command execution."));
           this.pending.delete(id);
         }
@@ -86,20 +86,20 @@ export class DeviceBridgeManager {
           this.pending.delete(requestId);
           if (message.success !== true) {
             pending.reject(pending.sideEffecting
-            ? new DeviceCommandUncertainError("Local device reported a write failure after receiving the command; verify the target file before retrying.")
+            ? new DeviceCommandUncertainError("Local device reported a failure after receiving an approved file operation; inspect the affected paths before retrying.")
             : new Error(String(message.error || "Local device command failed.").slice(0, 500)));
             return;
           }
           let serialized: string;
           try { serialized = JSON.stringify(message.result); } catch {
             pending.reject(pending.sideEffecting
-              ? new DeviceCommandUncertainError("Device returned an unverifiable write result; inspect the target file before retrying.")
+              ? new DeviceCommandUncertainError("Device returned an unverifiable result for an approved file operation; inspect the affected paths before retrying.")
               : new Error("Device returned an unserializable result."));
             return;
           }
           if (serialized.length > 250_000) {
             pending.reject(pending.sideEffecting
-              ? new DeviceCommandUncertainError("Device write result exceeded the response limit; inspect the target file before retrying.")
+              ? new DeviceCommandUncertainError("Approved file-operation result exceeded the response limit; inspect the affected paths before retrying.")
               : new Error("Device result exceeds the 250 KB limit."));
             return;
           }
@@ -220,6 +220,36 @@ export class DeviceBridgeManager {
     });
   }
 
+  /**
+   * Trusted server-side path used only after the task orchestrator consumes
+   * an exact Founder approval for moving one local workspace file.
+   */
+  async executeApprovedMoveFile(input: { deviceId: string; founderId: string; fromPath: string; toPath: string }): Promise<unknown> {
+    if (!input.deviceId || input.deviceId.length > 128 || !input.founderId) throw new Error("A valid Founder-owned device is required.");
+    if (typeof input.fromPath !== "string" || !input.fromPath.trim() || input.fromPath.length > 1024 ||
+        typeof input.toPath !== "string" || !input.toPath.trim() || input.toPath.length > 1024) {
+      throw new Error("Valid source and destination workspace-relative paths are required.");
+    }
+    const current = this.connected.get(input.deviceId);
+    if (!current || current.device.founderId !== input.founderId || this.revokedDeviceIds.has(input.deviceId)) throw new Error("Device is offline, revoked or not registered for this Founder.");
+    const requestId = randomUUID();
+    const args = { fromPath: input.fromPath, toPath: input.toPath };
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.pending.delete(requestId);
+        reject(new DeviceCommandUncertainError("Local file move timed out; inspect both source and destination paths before retrying."));
+      }, this.commandTimeoutMs);
+      this.pending.set(requestId, { deviceId: input.deviceId, resolve, reject, timer, sideEffecting: true });
+      try {
+        current.socket.send(JSON.stringify({ type: "command", requestId, command: "workspace.move_file", args }));
+      } catch {
+        clearTimeout(timer);
+        this.pending.delete(requestId);
+        reject(new DeviceCommandUncertainError("The local move command could not be confirmed as sent; inspect both paths before retrying."));
+      }
+    });
+  }
+
   async executeCommand(input: { deviceId: string; founderId: string; command: string; args?: Record<string, unknown> }): Promise<unknown> {
     if (!ALLOWED_COMMANDS.has(input.command)) throw new Error("Device command is not in the read-only allowlist.");
     const args = input.args || {};
@@ -229,8 +259,23 @@ export class DeviceBridgeManager {
     if (input.command === "workspace.list" && args.path !== undefined && (typeof args.path !== "string" || args.path.length > 1024)) {
       throw new Error("Workspace path is invalid.");
     }
+    if (input.command === "workspace.list_directory" && args.path !== undefined && (typeof args.path !== "string" || args.path.length > 1024)) {
+      throw new Error("Workspace listing path is invalid.");
+    }
     if (input.command === "workspace.git_status" && args.path !== undefined && (typeof args.path !== "string" || args.path.length > 1024)) {
       throw new Error("Git status workspace path is invalid.");
+    }
+    if (input.command === "workspace.search_files" &&
+        (typeof args.query !== "string" || !args.query.trim() || args.query.length > 200)) {
+      throw new Error("Workspace search query must contain 1–200 characters.");
+    }
+    if (input.command === "workspace.search_files" && args.path !== undefined &&
+        (typeof args.path !== "string" || args.path.length > 1024)) {
+      throw new Error("Workspace search path is invalid.");
+    }
+    if (input.command === "workspace.search_files" && args.maxResults !== undefined &&
+        (typeof args.maxResults !== "number" || !Number.isInteger(args.maxResults) || args.maxResults < 1 || args.maxResults > 100)) {
+      throw new Error("Workspace search maxResults must be an integer from 1 to 100.");
     }
     const current = this.connected.get(input.deviceId);
     if (!current || current.device.founderId !== input.founderId || this.revokedDeviceIds.has(input.deviceId)) throw new Error("Device is offline, revoked or not registered for this Founder.");
