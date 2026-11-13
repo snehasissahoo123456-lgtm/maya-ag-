@@ -78,6 +78,12 @@ services:
     cpus: 2.0
     pids_limit: 128
     stop_grace_period: 15s
+    healthcheck:
+      test: ["CMD", "node", "-e", "const fs=require('fs'); try { const s=JSON.parse(fs.readFileSync('/developer-queue/worker-status.json','utf8')); process.exit(s.status==='running' && Date.now()-Date.parse(s.heartbeatAt)<30000 ? 0 : 1); } catch { process.exit(1); }"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
 
 volumes:
   maya-data:
