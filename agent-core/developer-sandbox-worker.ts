@@ -95,6 +95,51 @@ export async function runSandboxCommand(command:SandboxCommand,cwd:string,timeou
     child.once("close",code=>{clearTimeout(timer);finish(code);});
   });
 }
+export async function recoverInterruptedSandboxJobs(queueRoot:string,now:()=>Date=()=>new Date()):Promise<SandboxResult[]> {
+  const root=path.resolve(queueRoot); await dirs(root);
+  const running=path.join(root,"running"),results=path.join(root,"results");
+  const recovered:SandboxResult[]=[];
+  for(const entry of await fs.readdir(running,{withFileTypes:true})) {
+    if(!entry.isFile()||!entry.name.endsWith(".json"))continue;
+    const file=path.join(running,entry.name);
+    let job:SandboxJob|undefined;
+    try {
+      const st=await fs.lstat(file);
+      if(!st.isFile()||st.isSymbolicLink()||st.size>16_384)throw new Error("Invalid or oversized interrupted job file.");
+      job=parseJob(JSON.parse(await fs.readFile(file,"utf8")));
+    } catch {}
+    const result:SandboxResult={
+      id:job?.id??"rejected-"+path.basename(entry.name,".json"),
+      workspaceId:job?.workspaceId??"unknown",command:job?.command??"unknown",
+      status:job?"interrupted":"rejected",exitCode:null,timedOut:false,durationMs:0,
+      output:job?"Worker restarted while this job was running; it was not replayed.":"Worker restart recovery rejected an invalid running-job record.",
+      finishedAt:now().toISOString(),
+    };
+    await saveResult(results,result);
+    await fs.rm(file,{force:true});
+    recovered.push(result);
+  }
+  return recovered;
+}
+
+interface SandboxWorkerStatus {
+  status:"running"|"stopping"|"stopped";
+  pid:number;
+  startedAt:string;
+  heartbeatAt:string;
+}
+async function writeWorkerStatus(root:string,status:SandboxWorkerStatus):Promise<void> {
+  const destination=path.join(root,"worker-status.json");
+  try {
+    const existing=await fs.lstat(destination);
+    if(!existing.isFile()||existing.isSymbolicLink()||existing.nlink!==1)throw new Error("Worker status path must be a regular file.");
+  } catch(error) {
+    if((error as NodeJS.ErrnoException).code!=="ENOENT")throw error;
+  }
+  const temporary=path.join(root,".worker-status-"+randomUUID()+".tmp");
+  await fs.writeFile(temporary,JSON.stringify(status),{encoding:"utf8",flag:"wx",mode:0o600});
+  await fs.rename(temporary,destination);
+}
 async function saveResult(dir:string,result:SandboxResult) {
   const dest=path.join(dir,result.id+".json"),tmp=path.join(dir,"."+randomUUID()+".tmp");
   await fs.writeFile(tmp,JSON.stringify(result),{encoding:"utf8",flag:"wx",mode:0o600}); await fs.rename(tmp,dest);
@@ -124,15 +169,29 @@ export async function processOneSandboxJob(o:SandboxOptions):Promise<boolean> {
   }
   await saveResult(results,result); await fs.rm(claimed,{force:true}); return true;
 }
-export async function runSandboxWorker(o:SandboxOptions):Promise<never> {
+export async function runSandboxWorker(o:SandboxOptions):Promise<void> {
   const root=path.resolve(o.queueRoot); await dirs(root);
-  const running=path.join(root,"running"),results=path.join(root,"results");
-  for(const entry of await fs.readdir(running,{withFileTypes:true})) {
-    if(!entry.isFile()||!entry.name.endsWith(".json"))continue;
-    await saveResult(results,{id:"interrupted-"+randomUUID(),workspaceId:"unknown",command:"unknown",status:"interrupted",exitCode:null,timedOut:false,durationMs:0,output:"Worker restarted; job was not replayed.",finishedAt:(o.now?.()??new Date()).toISOString()});
-    await fs.rm(path.join(running,entry.name),{force:true});
+  const startedAt=(o.now?.()??new Date()).toISOString();
+  let stopping=false;
+  const publish=(status:SandboxWorkerStatus["status"])=>writeWorkerStatus(root,{
+    status,pid:process.pid,startedAt,heartbeatAt:(o.now?.()??new Date()).toISOString(),
+  });
+  const onStop=()=>{stopping=true;void publish("stopping").catch(()=>{});};
+  process.on("SIGTERM",onStop);
+  process.on("SIGINT",onStop);
+  await recoverInterruptedSandboxJobs(root,o.now);
+  await publish("running");
+  const heartbeat=setInterval(()=>{void publish(stopping?"stopping":"running").catch(()=>{});},5_000);
+  try {
+    while(!stopping) {
+      if(!await processOneSandboxJob(o))await new Promise(r=>setTimeout(r,1_000));
+    }
+  } finally {
+    clearInterval(heartbeat);
+    await publish("stopped");
+    process.off("SIGTERM",onStop);
+    process.off("SIGINT",onStop);
   }
-  while(true){if(!await processOneSandboxJob(o))await new Promise(r=>setTimeout(r,1000));}
 }
 if(process.env.MAYA_DEVELOPER_SANDBOX_QUEUE_DIR&&process.env.MAYA_DEVELOPER_SANDBOX_WORKSPACE_DIR){
   runSandboxWorker({queueRoot:process.env.MAYA_DEVELOPER_SANDBOX_QUEUE_DIR,workspaceRoot:process.env.MAYA_DEVELOPER_SANDBOX_WORKSPACE_DIR}).catch(()=>{process.exitCode=1;});
