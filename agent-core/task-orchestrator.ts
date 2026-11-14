@@ -1,5 +1,5 @@
 import { createTask, transitionTask, type MayaTask, type RiskLevel, type VerificationEvidence } from "./task-lifecycle.ts";
-import { ApprovalLedger, digestAction } from "./approval-ledger.ts";
+import { digestAction, type ApprovalRepository } from "./approval-ledger.ts";
 import { randomUUID } from "node:crypto";
 import type { AuditRepository, MayaAuditEventType } from "./audit-repository.ts";
 import { CapabilityRegistry, type AgentIdentity } from "./capability-registry.ts";
@@ -14,7 +14,7 @@ export interface CapabilityRunner {
 }
 export class TaskOrchestrator {
   private readonly executing = new Set<string>();
-  constructor(private readonly repository: TaskRepository, private readonly capabilities: CapabilityRegistry, private readonly approvals: ApprovalLedger, private readonly runner: CapabilityRunner, private readonly audit?: AuditRepository) {}
+  constructor(private readonly repository: TaskRepository, private readonly capabilities: CapabilityRegistry, private readonly approvals: ApprovalRepository, private readonly runner: CapabilityRunner, private readonly audit?: AuditRepository) {}
   async enqueue(input: { id: string; founderId: string; instruction: string; capability: string; args: Record<string, unknown>; actor: AgentIdentity; riskLevel?: RiskLevel }): Promise<TaskEnvelope> {
     if (input.actor.founderId !== input.founderId) throw new Error("Task Founder does not match authenticated actor.");
     const { definition, args } = this.capabilities.validate(input.capability, input.actor, input.args);
@@ -29,7 +29,7 @@ export class TaskOrchestrator {
     if (actor.role !== "founder" || actor.founderId !== envelope.task.founderId) throw new Error("Only the owning Founder can request/approve this action.");
     if (!envelope.task.requiresApproval) throw new Error("This task does not require approval.");
     if (envelope.task.status !== "queued") throw new Error("Only queued tasks can enter the approval queue.");
-    const record = this.approvals.request({ taskId, founderId: actor.founderId, capability: envelope.capability, args: envelope.args });
+    const record = await this.approvals.request({ taskId, founderId: actor.founderId, capability: envelope.capability, args: envelope.args });
     envelope.task = transitionTask(envelope.task, "planning");
     envelope.task = transitionTask(envelope.task, "awaiting_approval");
     await this.repository.put(envelope);
@@ -38,9 +38,10 @@ export class TaskOrchestrator {
   }
   async decideApproval(input: { approvalId: string; approved: boolean; actor: AgentIdentity }): Promise<void> {
     if (input.actor.role !== "founder") throw new Error("Only the Founder can approve actions.");
-    const approval = this.approvals.listForFounder(input.actor.founderId).find(item => item.id === input.approvalId);
+    const approval = (await this.approvals.listForFounder(input.actor.founderId)).find(item => item.id === input.approvalId);
     if (!approval) throw new Error("Approval not found for this Founder.");
-    this.approvals.decide({ approvalId: input.approvalId, founderId: input.actor.founderId, approved: input.approved });
+    const decision = await this.approvals.decide({ approvalId: input.approvalId, founderId: input.actor.founderId, approved: input.approved });
+    if (decision.status === "expired") throw new Error("Approval request expired.");
     const envelope = await this.requireTask(approval.taskId, input.actor.founderId);
     await this.recordAudit(input.actor, "task.approval_decided", envelope, { approvalId: approval.id, approved: input.approved });
   }
@@ -60,7 +61,7 @@ export class TaskOrchestrator {
     if (envelope.task.status !== "queued" && envelope.task.status !== "awaiting_approval") throw new Error("Task is not executable from its current state.");
     if (envelope.task.requiresApproval) {
       if (!approvalId) throw new Error("Founder approval is required before execution.");
-      const grant = this.approvals.consume({ approvalId, founderId: actor.founderId, taskId, capability: envelope.capability, args: envelope.args });
+      const grant = await this.approvals.consume({ approvalId, founderId: actor.founderId, taskId, capability: envelope.capability, args: envelope.args });
       if (envelope.task.status === "queued") {
         envelope.task = transitionTask(envelope.task, "planning");
         envelope.task = transitionTask(envelope.task, "awaiting_approval");

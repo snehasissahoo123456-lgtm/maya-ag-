@@ -90,3 +90,8 @@ The `maya/supabase-task-queue` branch adds an optional Supabase PostgREST task r
 ## Durable audit trail (development branch)
 
 Maya records append-only Founder-scoped task lifecycle events (enqueue, approval request/decision, execution start, verification, and failure) through an injected audit repository. Local development uses an atomic JSON file. Optional Supabase storage uses the server-only service-role key and an append-only table with no update/delete grants. Apply `supabase/migrations/20261108020000_maya_audit_events.sql` before enabling the Supabase storage driver. Audit metadata intentionally stores action digests and bounded evidence metadata rather than raw task arguments or file contents.
+
+
+## Supabase approval ledger (development branch)
+
+Approval requests, decisions and single-use consumption now have an asynchronous repository contract. The local file adapter remains the default; optional Supabase mode uses atomic database RPCs to enforce Founder ownership, expiry, exact capability/argument digest matching and one-time consumption. Apply `supabase/migrations/20261108030000_maya_approvals.sql` before using Supabase storage. The service-role key remains server-only. No live Supabase project was modified.

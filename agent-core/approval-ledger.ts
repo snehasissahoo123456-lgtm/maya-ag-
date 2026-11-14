@@ -15,6 +15,13 @@ export interface ApprovalRequest {
 }
 interface StoredApprovals { version: 1; updatedAt: string; approvals: ApprovalRequest[]; }
 
+export interface ApprovalRepository {
+  request(input: { taskId: string; founderId: string; capability: string; args: Record<string, unknown>; ttlMs?: number; now?: number }): Promise<ApprovalRequest>;
+  decide(input: { approvalId: string; founderId: string; approved: boolean; now?: number }): Promise<ApprovalRequest>;
+  consume(input: { approvalId: string; founderId: string; taskId: string; capability: string; args: Record<string, unknown>; now?: number }): Promise<ApprovalRequest>;
+  listForFounder(founderId: string): Promise<ApprovalRequest[]>;
+}
+
 export function digestAction(capability: string, args: Record<string, unknown>): string {
   const stable = (value: unknown): unknown => {
     if (Array.isArray(value)) return value.map(stable);
@@ -28,7 +35,7 @@ export function digestAction(capability: string, args: Record<string, unknown>):
  * Exact-action approval ledger. Supplying a file path enables atomic, single-instance
  * persistence. Keep high-risk capabilities disabled until this durable adapter is used.
  */
-export class ApprovalLedger {
+export class ApprovalLedger implements ApprovalRepository {
   private readonly records = new Map<string, ApprovalRequest>();
   private readonly filePath?: string;
 
@@ -37,7 +44,7 @@ export class ApprovalLedger {
     if (this.filePath) this.load();
   }
 
-  request(input: { taskId: string; founderId: string; capability: string; args: Record<string, unknown>; ttlMs?: number; now?: number }): ApprovalRequest {
+  async request(input: { taskId: string; founderId: string; capability: string; args: Record<string, unknown>; ttlMs?: number; now?: number }): Promise<ApprovalRequest> {
     if (this.records.size >= 10_000) throw new Error("Approval ledger capacity reached; archive old records before creating more.");
     const now = input.now ?? Date.now();
     const ttl = Math.min(Math.max(input.ttlMs ?? 10 * 60_000, 30_000), 60 * 60_000);
@@ -51,7 +58,7 @@ export class ApprovalLedger {
     return { ...record };
   }
 
-  decide(input: { approvalId: string; founderId: string; approved: boolean; now?: number }): ApprovalRequest {
+  async decide(input: { approvalId: string; founderId: string; approved: boolean; now?: number }): Promise<ApprovalRequest> {
     const record = this.records.get(input.approvalId);
     if (!record || record.founderId !== input.founderId) throw new Error("Approval not found for this Founder.");
     if (record.status !== "pending") throw new Error("Approval is no longer pending.");
@@ -68,7 +75,7 @@ export class ApprovalLedger {
     return { ...record };
   }
 
-  consume(input: { approvalId: string; founderId: string; taskId: string; capability: string; args: Record<string, unknown>; now?: number }): ApprovalRequest {
+  async consume(input: { approvalId: string; founderId: string; taskId: string; capability: string; args: Record<string, unknown>; now?: number }): Promise<ApprovalRequest> {
     const record = this.records.get(input.approvalId);
     if (!record || record.status !== "approved") throw new Error("A pending Founder-approved grant is required.");
     if (record.founderId !== input.founderId || record.taskId !== input.taskId || record.capability !== input.capability || record.actionDigest !== digestAction(input.capability, input.args)) {
@@ -84,7 +91,7 @@ export class ApprovalLedger {
     return { ...record };
   }
 
-  listForFounder(founderId: string): ApprovalRequest[] {
+  async listForFounder(founderId: string): Promise<ApprovalRequest[]> {
     return [...this.records.values()].filter(record => record.founderId === founderId).map(record => ({ ...record }));
   }
 

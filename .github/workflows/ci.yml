@@ -18,6 +18,7 @@ on:
       - maya/supabase-agent-state
       - maya/supabase-task-queue
       - maya/durable-audit-trail
+      - maya/supabase-approval-ledger
   pull_request:
     branches:
       - main
