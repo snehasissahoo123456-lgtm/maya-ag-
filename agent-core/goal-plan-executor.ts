@@ -93,6 +93,10 @@ export class GoalPlanExecutor {
         await this.store.save(founderId, plan);
         if (stepTask) {
           if (stepTask.task.status === "queued") stepTask.task = transitionTask(stepTask.task, "planning");
+          // Repair a partially persisted parent approval: the plan digest remains
+          // authoritative, and the child record can safely be moved out of its
+          // approval wait before execution resumes.
+          if (stepTask.task.status === "awaiting_approval") stepTask.task = transitionTask(stepTask.task, "paused");
           if (stepTask.task.status === "paused" || stepTask.task.status === "planning") stepTask.task = transitionTask(stepTask.task, "running");
           if (stepTask.task.status !== "running") throw new Error("Goal-plan step task is not in a runnable state.");
           stepTask.attempts += 1;
