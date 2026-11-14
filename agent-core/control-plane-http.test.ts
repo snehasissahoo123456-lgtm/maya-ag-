@@ -58,6 +58,8 @@ test("real HTTP control-plane routes enforce Founder auth and execute only the r
       NODE_ENV: "production",
       PORT: String(port),
       MAYA_DATA_DIR: dataDir,
+      MAYA_TASK_WORKER_ENABLED: "false",
+      MAYA_SCHEDULE_WORKER_ENABLED: "false",
       MAYA_FOUNDER_EMAIL: "founder-test@example.invalid",
       MAYA_FOUNDER_PASSWORD: password,
       GEMINI_API_KEY: "",
@@ -89,6 +91,11 @@ test("real HTTP control-plane routes enforce Founder auth and execute only the r
     const cookie = login.headers.get("set-cookie")?.split(";")[0];
     assert.ok(cookie, "Founder login should set an HttpOnly session cookie");
 
+    const schedulesBeforeAuth = await fetch(baseUrl + "/api/schedules");
+    assert.equal(schedulesBeforeAuth.status, 401, "Schedule inventory must require Founder authentication");
+    const createScheduleBeforeAuth = await fetch(baseUrl + "/api/schedules", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ title: "unauthorized", path: "README.md", runAt: new Date(Date.now() + 60000).toISOString() }) });
+    assert.equal(createScheduleBeforeAuth.status, 401, "Schedule creation must require Founder authentication");
+
     const devicesBeforeAuth = await fetch(baseUrl + "/api/devices");
     assert.equal(devicesBeforeAuth.status, 401, "Device inventory must require Founder authentication");
     const pairingBeforeAuth = await fetch(baseUrl + "/api/devices/pairing", { method: "POST" });
@@ -111,6 +118,19 @@ test("real HTTP control-plane routes enforce Founder auth and execute only the r
     }));
     const pairedMessage = await pairedMessagePromise;
     assert.ok(pairedMessage.token);
+    const emptySchedules = await fetch(baseUrl + "/api/schedules", { headers: { cookie } });
+    assert.equal(emptySchedules.status, 200);
+    assert.deepEqual((await emptySchedules.json() as any).schedules, []);
+    const createdSchedule = await fetch(baseUrl + "/api/schedules", {
+      method: "POST", headers: { "content-type": "application/json", cookie },
+      body: JSON.stringify({ title: "Read project README", path: "README.md", runAt: new Date(Date.now() + 60_000).toISOString(), intervalMs: null }),
+    });
+    assert.equal(createdSchedule.status, 201);
+    const createdScheduleBody = await createdSchedule.json() as any;
+    assert.equal(createdScheduleBody.schedule.path, "README.md");
+    const pausedSchedule = await fetch(baseUrl + `/api/schedules/${createdScheduleBody.schedule.id}`, { method: "DELETE", headers: { cookie } });
+    assert.equal(pausedSchedule.status, 200);
+
     const devices = await fetch(baseUrl + "/api/devices", { headers: { cookie } });
     assert.equal(devices.status, 200);
     const deviceList = await devices.json() as any;

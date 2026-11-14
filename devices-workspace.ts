@@ -26,6 +26,8 @@ export class MayaDevicesWorkspace extends LitElement {
     pre { white-space:pre-wrap; overflow-wrap:anywhere; max-height:320px; overflow:auto; font-size:12px; }
   `;
 
+  override createRenderRoot() { return this; }
+
   connectedCallback() { super.connectedCallback(); void this.refresh(); }
 
   private async request(url: string, init: RequestInit = {}) {
@@ -79,6 +81,16 @@ export class MayaDevicesWorkspace extends LitElement {
 
   render() {
     return html`
+      <style>
+        maya-devices-workspace { display:block; color:#e2e8f0; }
+        maya-devices-workspace .panel { background:rgba(2,6,23,.72); border:1px solid rgba(100,116,139,.24); border-radius:16px; padding:16px; }
+        maya-devices-workspace .muted { color:#94a3b8; font-size:12px; line-height:1.6; }
+        maya-devices-workspace .btn { border:1px solid rgba(100,116,139,.45); border-radius:9px; padding:8px 11px; font-size:12px; }
+        maya-devices-workspace .primary { background:#4f46e5; border-color:#6366f1; color:white; }
+        maya-devices-workspace .danger { color:#fda4af; border-color:rgba(244,63,94,.4); }
+        maya-devices-workspace input { min-width:0; background:#0f172a; border:1px solid #334155; border-radius:8px; padding:8px; color:white; font-size:12px; }
+        maya-devices-workspace pre { white-space:pre-wrap; overflow-wrap:anywhere; max-height:320px; overflow:auto; font-size:12px; }
+      </style>
       <div class="space-y-4 p-4 md:p-6">
         <header class="flex flex-wrap items-start justify-between gap-3">
           <div><h2 class="text-xl font-semibold text-white">Local devices</h2>

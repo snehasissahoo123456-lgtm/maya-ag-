@@ -158,6 +158,8 @@ import { createChatToolExecutor } from "./agent-core/chat-tool-policy.ts";
 import { SpecialistRuntime, listRunnableSpecialists } from "./agent-core/specialist-runtime.ts";
 import { CEOOrchestrator } from "./agent-core/ceo-orchestrator.ts";
 import { FileCEORunRepository } from "./agent-core/file-ceo-run-repository.ts";
+import { FileScheduledJobRepository } from "./agent-core/file-scheduled-job-repository.ts";
+import { ScheduleWorker } from "./agent-core/schedule-worker.ts";
 
 const conversationStore = createConversationRepository();
 const taskRepository = createTaskRepository();
@@ -213,6 +215,19 @@ const taskWorker = new TaskWorker(taskRepository, taskOrchestrator, taskCapabili
   maxTasksPerCycle: Number(process.env.MAYA_TASK_WORKER_MAX_TASKS_PER_CYCLE) || 20,
 });
 const taskWorkerEnabled = process.env.MAYA_TASK_WORKER_ENABLED === "true";
+const scheduleRepository = new FileScheduledJobRepository();
+const scheduleWorkerEnabled = process.env.MAYA_SCHEDULE_WORKER_ENABLED === "true";
+if (scheduleWorkerEnabled && !taskWorkerEnabled) {
+  throw new Error("MAYA_SCHEDULE_WORKER_ENABLED requires MAYA_TASK_WORKER_ENABLED=true so queued read-only jobs can be executed.");
+}
+if (scheduleWorkerEnabled && (process.env.MAYA_STORAGE_DRIVER || "file").toLowerCase() !== "file") {
+  throw new Error("MAYA_SCHEDULE_WORKER_ENABLED requires single-instance file storage until distributed schedule leases are implemented.");
+}
+const scheduleWorker = new ScheduleWorker(scheduleRepository, taskRepository, taskOrchestrator, {
+  founderId: "founder-primary",
+  pollIntervalMs: Number(process.env.MAYA_SCHEDULE_WORKER_POLL_MS) || 3000,
+  maxJobsPerCycle: Number(process.env.MAYA_SCHEDULE_WORKER_MAX_JOBS_PER_CYCLE) || 10,
+});
 
 const MAYA_FUNCTION_DECLARATIONS = [
   { name: "list_dir", description: "List non-secret files and folders inside Maya's enrolled server workspace.", parametersJsonSchema: { type: "object", properties: { path: { type: "string" } } } },
@@ -443,7 +458,7 @@ async function startServer() {
   }
 
   app.get("/api/health", (_req, res) => {
-    res.json({ status: "ok", agent: "Maya · Action Engine v2.0", taskWorker: taskWorker.getStatus(), goalPlanWorker: goalPlanWorker.getStatus() });
+    res.json({ status: "ok", agent: "Maya · Action Engine v2.0", taskWorker: taskWorker.getStatus(), goalPlanWorker: goalPlanWorker.getStatus(), scheduleWorker: scheduleWorker.getStatus() });
   });
 
   // Default-deny REST API access. Only Founder password sign-in, session validation,
@@ -467,6 +482,53 @@ async function startServer() {
     }
     (req as any).authSession = session;
     return next();
+  });
+
+  app.get("/api/schedules", async (req, res) => {
+    const founderId = (req as any).authSession?.user?.id;
+    if (!founderId) return res.status(401).json({ success: false, error: "Verified Founder session required." });
+    return res.json({ success: true, schedules: await scheduleRepository.list(founderId), worker: scheduleWorker.getStatus() });
+  });
+
+  app.get("/api/schedules/:id", async (req, res) => {
+    const founderId = (req as any).authSession?.user?.id;
+    if (!founderId) return res.status(401).json({ success: false, error: "Verified Founder session required." });
+    const schedule = await scheduleRepository.get(founderId, req.params.id);
+    return schedule ? res.json({ success: true, schedule }) : res.status(404).json({ success: false, error: "Schedule not found." });
+  });
+
+  app.post("/api/schedules", async (req, res): Promise<any> => {
+    const founderId = (req as any).authSession?.user?.id;
+    if (!founderId) return res.status(401).json({ success: false, error: "Verified Founder session required." });
+    const title = typeof req.body?.title === "string" ? req.body.title.trim() : "";
+    const workspacePath = typeof req.body?.path === "string" ? req.body.path.trim() : "";
+    const runAt = typeof req.body?.runAt === "string" ? Date.parse(req.body.runAt) : NaN;
+    const intervalMs = req.body?.intervalMs === null || req.body?.intervalMs === undefined ? null : Number(req.body.intervalMs);
+    if (!title || title.length > 160 || !workspacePath || workspacePath.length > 1024) return res.status(400).json({ success: false, error: "A title (1–160 characters) and workspace file path (1–1,024 characters) are required." });
+    if (!Number.isFinite(runAt) || runAt < Date.now() - 30_000 || runAt > Date.now() + 365 * 24 * 60 * 60_000) return res.status(400).json({ success: false, error: "Run time must be between now and one year from now." });
+    if (intervalMs !== null && (!Number.isInteger(intervalMs) || intervalMs < 60_000 || intervalMs > 30 * 24 * 60 * 60_000)) return res.status(400).json({ success: false, error: "Repeat interval must be between one minute and 30 days." });
+    try {
+      const resolved = resolveWorkspacePath(workspacePath);
+      if (isSensitiveWorkspacePath(resolved)) throw new Error("Sensitive workspace paths cannot be scheduled.");
+      const fileStat = fs.statSync(resolved);
+      if (!fileStat.isFile() || fileStat.size > 50_000) throw new Error("Scheduled target must be a regular file no larger than 50 KB.");
+      const now = new Date().toISOString();
+      const schedule = {
+        id: "schedule-" + randomTaskId(), founderId, title, path: workspacePath, status: "active" as const,
+        nextRunAt: new Date(runAt).toISOString(), intervalMs, createdAt: now, updatedAt: now, runCount: 0, failureCount: 0,
+      };
+      await scheduleRepository.create(schedule);
+      return res.status(201).json({ success: true, schedule });
+    } catch (error) {
+      return res.status(400).json({ success: false, error: error instanceof Error ? error.message : "Unable to create schedule." });
+    }
+  });
+
+  app.delete("/api/schedules/:id", async (req, res) => {
+    const founderId = (req as any).authSession?.user?.id;
+    if (!founderId) return res.status(401).json({ success: false, error: "Verified Founder session required." });
+    const paused = await scheduleRepository.pause(founderId, req.params.id);
+    return paused ? res.json({ success: true, paused: req.params.id }) : res.status(404).json({ success: false, error: "Active schedule not found." });
   });
 
   app.post("/api/devices/pairing", async (req, res): Promise<any> => {
@@ -1977,14 +2039,16 @@ MULTILINGUAL & RAPID REACTION:
     });
   }
 
-  server.on("close", () => { void taskWorker.stop(); void goalPlanWorker.stop(); });
+  server.on("close", () => { void taskWorker.stop(); void goalPlanWorker.stop(); void scheduleWorker.stop(); });
   server.on("close", () => { deviceWss.close(); wss.close(); });
   server.listen(PORT, "0.0.0.0", () => {
     if (taskWorkerEnabled) taskWorker.start();
     if (goalPlanWorkerEnabled) goalPlanWorker.start();
+    if (scheduleWorkerEnabled) scheduleWorker.start();
     console.log(`[Backend] Server running on http://localhost:${PORT}`);
     console.log(`[Task Worker] ${taskWorkerEnabled ? "enabled (read-only allowlist)" : "disabled; set MAYA_TASK_WORKER_ENABLED=true to opt in"}`);
     console.log(`[Goal Plan Worker] ${goalPlanWorkerEnabled ? "enabled (single-instance; Founder-approved plans only)" : "disabled; set MAYA_PLAN_WORKER_ENABLED=true to opt in"}`);
+    console.log(`[Schedule Worker] ${scheduleWorkerEnabled ? "enabled (read-only workspace jobs; task worker required)" : "disabled; set MAYA_SCHEDULE_WORKER_ENABLED=true to opt in"}`);
   });
 }
 

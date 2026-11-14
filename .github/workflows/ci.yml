@@ -26,6 +26,7 @@ on:
       - maya/secure-device-bridge
       - maya/approved-plan-worker
       - maya/persistent-ceo-runs
+      - maya/scheduled-readonly-jobs
   pull_request:
     branches:
       - main
@@ -46,6 +47,7 @@ on:
       - maya/secure-device-bridge
       - maya/approved-plan-worker
       - maya/persistent-ceo-runs
+      - maya/scheduled-readonly-jobs
 
 permissions:
   contents: read
