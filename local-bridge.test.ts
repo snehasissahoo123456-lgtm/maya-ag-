@@ -1,4 +1,5 @@
 import test from "node:test";
+import { spawnSync } from "node:child_process";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
@@ -73,5 +74,54 @@ test("local bridge permits only bounded replacement of an existing non-sensitive
     }
     const entries = await executeLocalBridgeCommand(root, "workspace.list", {}) as any[];
     assert.ok(!entries.some(entry => entry.name === ".env"));
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
+test("local bridge creates only one new directory under an existing non-sensitive parent", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "maya-bridge-directory-"));
+  try {
+    fs.mkdirSync(path.join(root, "projects"));
+    fs.mkdirSync(path.join(root, ".ssh"));
+    const created = await executeLocalBridgeCommand(root, "workspace.create_directory", { path: "projects/new-project" }) as any;
+    assert.equal(created.created, true);
+    assert.equal(created.verified, true);
+    assert.equal(created.path, path.join("projects", "new-project"));
+    assert.equal(fs.statSync(path.join(root, "projects", "new-project")).isDirectory(), true);
+    await assert.rejects(() => executeLocalBridgeCommand(root, "workspace.create_directory", { path: "projects/new-project" }), /already exists/i);
+    await assert.rejects(() => executeLocalBridgeCommand(root, "workspace.create_directory", { path: "missing/child" }), /parent does not exist/i);
+    await assert.rejects(() => executeLocalBridgeCommand(root, "workspace.create_directory", { path: "../outside" }), /escapes|dot segments/i);
+    await assert.rejects(() => executeLocalBridgeCommand(root, "workspace.create_directory", { path: "." }), /dot segments|equals/i);
+    await assert.rejects(() => executeLocalBridgeCommand(root, "workspace.create_directory", { path: "projects/\0bad" }), /valid workspace-relative/i);
+    await assert.rejects(() => executeLocalBridgeCommand(root, "workspace.create_directory", { path: ".ssh/new-key-dir" }), /sensitive/i);
+    if (process.platform !== "win32") {
+      const outside = fs.mkdtempSync(path.join(os.tmpdir(), "maya-directory-outside-"));
+      try {
+        fs.symlinkSync(outside, path.join(root, "linked-parent"), "dir");
+        await assert.rejects(() => executeLocalBridgeCommand(root, "workspace.create_directory", { path: "linked-parent/escape" }), /symbolic links/i);
+      } finally { fs.rmSync(outside, { recursive: true, force: true }); }
+    }
+    await assert.rejects(() => executeLocalBridgeCommand(root, "shell.exec", { command: "whoami" }), /allowlist/i);
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
+test("local bridge returns bounded read-only Git status without diff contents", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "maya-bridge-git-status-"));
+  try {
+    fs.writeFileSync(path.join(root, "notes.md"), "tracked note");
+    fs.writeFileSync(path.join(root, ".env"), "SECRET=value");
+    const initialized = spawnSync("git", ["init", "-q"], { cwd: root, encoding: "utf8", windowsHide: true });
+    assert.equal(initialized.status, 0, initialized.stderr);
+    const staged = spawnSync("git", ["add", "notes.md", ".env"], { cwd: root, encoding: "utf8", windowsHide: true });
+    assert.equal(staged.status, 0, staged.stderr);
+    const result = await executeLocalBridgeCommand(root, "workspace.git_status", { path: "." }) as any;
+    assert.equal(result.repository, ".");
+    assert.match(result.branch, /No commits yet|main|master/);
+    assert.ok(result.changes.some((change: any) => change.path === "notes.md"));
+    assert.equal(result.changes.some((change: any) => change.path === ".env"), false);
+    assert.equal(typeof result.changeCount, "number");
+    assert.equal(result.truncated, false);
+    assert.equal("diff" in result, false);
+    await assert.rejects(() => executeLocalBridgeCommand(root, "workspace.git_status", { path: "../outside" }), /escapes/i);
+    await assert.rejects(() => executeLocalBridgeCommand(root, "shell.exec", { command: "whoami" }), /allowlist/i);
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
