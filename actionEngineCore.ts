@@ -37,6 +37,8 @@ export interface MemoryEntry {
   content: string;
   createdAt: string;
   updatedAt: string;
+  feedbackScore?: number;
+  feedbackCount?: number;
 }
 
 export interface ToolDefinition {

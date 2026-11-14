@@ -110,3 +110,8 @@ Maya's saved memory notes now use a Founder-scoped repository contract. File mod
 ## Semantic memory retrieval (development branch)
 
 When Gemini embeddings are available, new Supabase memory notes are embedded with `gemini-embedding-001` at 768 dimensions and retrieved through a Founder-filtered pgvector cosine-similarity RPC. Search combines semantic matches with bounded keyword matches so legacy notes without embeddings remain discoverable. If the embedding API is unavailable, the repository falls back to keyword retrieval. Apply `supabase/migrations/20261108060000_maya_semantic_memory.sql` after the base memory migration. This is retrieval augmentation, not model self-training.
+
+
+## Founder memory feedback (development branch)
+
+The memory workspace now accepts explicit `helpful` / `not_helpful` ratings for a Founder-owned note. File mode stores one current rating per memory; Supabase mode uses a Founder-scoped RPC and persists feedback metadata. Feedback influences retrieval ordering but does not change model weights, prompts, code or permissions. Apply `supabase/migrations/20261108070000_maya_memory_feedback.sql` after the vector memory migration.

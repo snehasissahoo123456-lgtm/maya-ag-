@@ -22,9 +22,11 @@ on:
       - maya/distributed-task-leases
       - maya/supabase-memory-store
       - maya/semantic-memory-retrieval
+      - maya/memory-feedback-loop
   pull_request:
     branches:
       - main
+      - maya/semantic-memory-retrieval
       - maya/supabase-memory-store
       - maya/distributed-task-leases
       - maya/durable-audit-trail

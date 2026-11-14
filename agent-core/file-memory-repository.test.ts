@@ -24,3 +24,15 @@ test("file memory repository imports legacy state and validates content", async 
   await assert.rejects(() => repository.save("founder-primary", { ...memory, content: "" }), /content/i);
   assert.equal(persisted.length, 0);
 });
+
+test("file memory feedback updates the current Founder rating and retrieval score", async () => {
+  let persisted: MemoryEntry[] = [];
+  const repository = new FileMemoryRepository([memory], value => { persisted = structuredClone(value); });
+  const helpful = await repository.recordFeedback("founder-primary", "m1", "helpful");
+  assert.equal(helpful.feedbackScore, 1);
+  assert.equal(helpful.feedbackCount, 1);
+  const notHelpful = await repository.recordFeedback("founder-primary", "m1", "not_helpful");
+  assert.equal(notHelpful.feedbackScore, -1);
+  assert.equal(notHelpful.feedbackCount, 1);
+  assert.equal(persisted[0].feedbackScore, -1);
+});

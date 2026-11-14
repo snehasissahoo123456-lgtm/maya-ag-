@@ -29,12 +29,26 @@ export class FileMemoryRepository implements MemoryRepository {
     this.persist(structuredClone(this.memories));
     return true;
   }
+  async recordFeedback(founderId: string, memoryId: string, rating: "helpful" | "not_helpful"): Promise<MemoryEntry> {
+    if (!founderId) throw new Error("Founder identity is required.");
+    if (rating !== "helpful" && rating !== "not_helpful") throw new Error("Memory feedback rating is invalid.");
+    const index = this.memories.findIndex(item => item.id === memoryId);
+    if (index < 0) throw new Error("Memory not found for this Founder.");
+    const current = this.memories[index];
+    const value = rating === "helpful" ? 1 : -1;
+    // File mode is single-Founder; retain one current rating per memory, matching Supabase.
+    const updated: MemoryEntry = { ...current, feedbackScore: value, feedbackCount: 1, updatedAt: new Date().toISOString() };
+    this.memories[index] = updated;
+    this.persist(structuredClone(this.memories));
+    return structuredClone(updated);
+  }
   async search(founderId: string, query: string, limit = 20): Promise<MemoryEntry[]> {
     const needle = query.trim().toLocaleLowerCase();
     if (!needle) throw new Error("A non-empty memory query is required.");
     const bounded = Math.max(1, Math.min(Math.floor(limit), 100));
     return this.memories.filter(item => item.title.toLocaleLowerCase().includes(needle) ||
       item.content.toLocaleLowerCase().includes(needle) || item.category.includes(needle))
+      .sort((a, b) => (b.feedbackScore || 0) - (a.feedbackScore || 0))
       .slice(0, bounded).map(item => structuredClone(item));
   }
   private validate(memory: MemoryEntry): void {

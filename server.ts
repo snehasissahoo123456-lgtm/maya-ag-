@@ -1060,6 +1060,20 @@ async function startServer() {
     }
   });
 
+  app.post("/api/action-engine/memory/:id/feedback", async (req, res): Promise<any> => {
+    const founderId = (req as any).authSession?.user?.id;
+    if (!founderId) return res.status(401).json({ success: false, error: "Verified Founder session required." });
+    const rating = req.body?.rating;
+    if (rating !== "helpful" && rating !== "not_helpful") return res.status(400).json({ success: false, error: "Rating must be helpful or not_helpful." });
+    try {
+      const memory = await memoryRepository.recordFeedback(founderId, req.params.id, rating);
+      currentMemories = await memoryRepository.list(founderId);
+      return res.json({ success: true, memoryId: memory.id, feedbackScore: memory.feedbackScore ?? 0, feedbackCount: memory.feedbackCount ?? 0 });
+    } catch (error) {
+      return res.status(400).json({ success: false, error: error instanceof Error ? error.message : String(error) });
+    }
+  });
+
   app.delete("/api/action-engine/memory/:id", async (req, res): Promise<any> => {
     const founderId = (req as any).authSession?.user?.id;
     if (!founderId) return res.status(401).json({ success: false, error: "Verified Founder session required." });
