@@ -1,4 +1,6 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
+import { createTask, transitionTask } from "./task-lifecycle.ts";
+import type { TaskEnvelope, TaskRepository } from "./task-orchestrator.ts";
 import { CapabilityRegistry, type AgentIdentity, type CapabilityDefinition } from "./capability-registry.ts";
 import { getAgentManifest } from "./agent-manifests.ts";
 
@@ -24,6 +26,7 @@ export interface SpecialistToolExecutionEvent {
   resultBytes?: number;
   resultSha256?: string;
   errorCode?: "policy_denied" | "execution_failed";
+  taskId?: string;
 }
 
 export type SpecialistCapabilityHandler = (
@@ -42,6 +45,7 @@ export class SpecialistToolExecutor {
     private readonly handler: SpecialistCapabilityHandler,
     private readonly maxResultBytes = 32_000,
     private readonly onExecution?: (event: SpecialistToolExecutionEvent) => void | Promise<void>,
+    private readonly taskRepository?: TaskRepository,
   ) {}
 
   list(agentId: string): SpecialistToolDeclaration[] {
@@ -60,6 +64,7 @@ export class SpecialistToolExecutor {
   async execute(agentId: string, founderId: string, capability: string, input: unknown): Promise<unknown> {
     const startedAt = Date.now();
     let handlerStarted = false;
+    let taskEnvelope: TaskEnvelope | undefined;
     try {
       if (!founderId || founderId.length > 256) throw new Error("A verified Founder identity is required.");
       const manifest = getAgentManifest(agentId);
@@ -78,6 +83,15 @@ export class SpecialistToolExecutor {
       }
       if (!definition.requiredScopes.every(scope => manifest.defaultScopes.includes(scope))) {
         throw new Error("Specialist manifest does not grant every required capability scope.");
+      }
+
+      if (this.taskRepository) {
+        const taskId = "specialist-tool-" + randomUUID();
+        let task = createTask({ id: taskId, founderId, instruction: "Specialist " + manifest.id + " tool execution: " + capability, riskLevel: "low", requiresApproval: false });
+        task = transitionTask(task, "planning");
+        task = transitionTask(task, "running");
+        taskEnvelope = { task, capability, args, attempts: 1, idempotencyKey: taskId };
+        await this.taskRepository.put(taskEnvelope);
       }
 
       const controller = new AbortController();
@@ -100,22 +114,51 @@ export class SpecialistToolExecutor {
         if (resultBytes > this.maxResultBytes) {
           throw new Error("Specialist capability result exceeds the configured response limit.");
         }
+        const completedAt = new Date().toISOString();
+        const resultSha256 = createHash("sha256").update(serialized, "utf8").digest("hex");
+        if (taskEnvelope) {
+          const evidence = { kind: "specialist-tool-result-sha256", description: "The specialist tool returned a bounded result; only its digest and byte count are retained in the task ledger.", reference: "sha256:" + resultSha256, observedAt: completedAt };
+          taskEnvelope.result = { resultBytes, resultSha256, observedAt: completedAt };
+          taskEnvelope.task = transitionTask(taskEnvelope.task, "verifying", { evidence });
+          await this.taskRepository.put(taskEnvelope);
+        }
         await this.emit({
           agentId, founderId, actorRole: manifest.role, capability, status: "success",
-          durationMs: Date.now() - startedAt, completedAt: new Date().toISOString(),
-          resultBytes,
-          resultSha256: createHash("sha256").update(serialized, "utf8").digest("hex"),
+          durationMs: Date.now() - startedAt, completedAt,
+          resultBytes, resultSha256,
+          ...(taskEnvelope ? { taskId: taskEnvelope.task.id } : {}),
         });
+        if (taskEnvelope) {
+          taskEnvelope.task = transitionTask(taskEnvelope.task, "completed", {
+            evidence: {
+              kind: "specialist-tool-completion",
+              description: "The specialist result was durably recorded and its audit event was acknowledged.",
+              reference: "sha256:" + resultSha256,
+              observedAt: completedAt,
+            },
+          });
+          await this.taskRepository.put(taskEnvelope);
+        }
         return result;
       } finally {
         if (timeout) clearTimeout(timeout);
       }
     } catch (error) {
+      if (taskEnvelope) {
+        if (taskEnvelope.task.status === "verifying") {
+          taskEnvelope.task = transitionTask(taskEnvelope.task, "requires_recovery", { error: "The specialist tool returned, but its durable completion/audit record was not confirmed. Reconcile before retrying." });
+          await this.taskRepository!.put(taskEnvelope);
+        } else if (taskEnvelope.task.status === "running" || taskEnvelope.task.status === "planning") {
+          taskEnvelope.task = transitionTask(taskEnvelope.task, "failed", { error: (error instanceof Error ? error.message : String(error)).slice(0, 1000) });
+          await this.taskRepository!.put(taskEnvelope);
+        }
+      }
       await this.emit({
         agentId, founderId: founderId || "unknown", actorRole: getAgentManifest(agentId)?.role || "unknown", capability,
         status: handlerStarted ? "failed" : "denied",
         durationMs: Date.now() - startedAt,
         completedAt: new Date().toISOString(),
+        ...(taskEnvelope ? { taskId: taskEnvelope.task.id } : {}),
         errorCode: handlerStarted ? "execution_failed" : "policy_denied",
       });
       throw error;
