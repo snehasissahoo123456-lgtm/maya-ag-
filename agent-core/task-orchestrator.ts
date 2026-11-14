@@ -3,7 +3,7 @@ import { ApprovalLedger } from "./approval-ledger.ts";
 import { CapabilityRegistry, type AgentIdentity } from "./capability-registry.ts";
 export interface TaskEnvelope { task: MayaTask; capability: string; args: Record<string, unknown>; attempts: number; idempotencyKey: string; }
 export interface TaskRepository {
-  get(id: string): Promise<TaskEnvelope | undefined>;
+  get(id: string, founderId?: string): Promise<TaskEnvelope | undefined>;
   put(envelope: TaskEnvelope): Promise<void>;
   list(founderId: string): Promise<TaskEnvelope[]>;
 }
@@ -22,7 +22,7 @@ export class TaskOrchestrator {
     return envelope;
   }
   async requestApproval(taskId: string, actor: AgentIdentity): Promise<{ approvalId: string; expiresAt: string }> {
-    const envelope = await this.requireTask(taskId);
+    const envelope = await this.requireTask(taskId, actor.founderId);
     if (actor.role !== "founder" || actor.founderId !== envelope.task.founderId) throw new Error("Only the owning Founder can request/approve this action.");
     if (!envelope.task.requiresApproval) throw new Error("This task does not require approval.");
     if (envelope.task.status !== "queued") throw new Error("Only queued tasks can enter the approval queue.");
@@ -46,7 +46,7 @@ export class TaskOrchestrator {
     }
   }
   private async executeOnce(taskId: string, actor: AgentIdentity, approvalId?: string): Promise<{ task: MayaTask; result: unknown }> {
-    const envelope = await this.requireTask(taskId);
+    const envelope = await this.requireTask(taskId, actor.founderId);
     if (actor.founderId !== envelope.task.founderId) throw new Error("Task belongs to another Founder.");
     const { definition } = this.capabilities.validate(envelope.capability, actor, envelope.args);
     if (envelope.task.status !== "queued" && envelope.task.status !== "awaiting_approval") throw new Error("Task is not executable from its current state.");
@@ -83,8 +83,8 @@ export class TaskOrchestrator {
       if (timeout) clearTimeout(timeout);
     }
   }
-  private async requireTask(id: string): Promise<TaskEnvelope> {
-    const envelope = await this.repository.get(id);
+  private async requireTask(id: string, founderId: string): Promise<TaskEnvelope> {
+    const envelope = await this.repository.get(id, founderId);
     if (!envelope) throw new Error("Task not found.");
     return envelope;
   }

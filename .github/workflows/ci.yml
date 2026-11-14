@@ -12,11 +12,15 @@ on:
       - maya/memory-retrieval
       - maya/specialist-runtime
       - maya/ceo-orchestrator
+      - maya/supabase-persistence
       - maya/ceo-orchestrator
       - maya/supabase-persistence
+      - maya/supabase-agent-state
+      - maya/supabase-task-queue
   pull_request:
     branches:
       - main
+      - maya/supabase-agent-state
       - maya/dashboard-foundation
       - maya/task-worker-foundation
       - maya/persistent-conversations
@@ -38,7 +42,7 @@ jobs:
       - name: Install Bun
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version: latest
+          bun-version: 1.4.4
       - name: Install locked dependencies
         run: bun install --frozen-lockfile
       - name: Typecheck

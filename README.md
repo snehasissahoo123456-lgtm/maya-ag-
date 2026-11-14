@@ -78,3 +78,10 @@ The authenticated CEO orchestration endpoint uses Gemini to select one to four d
 ## Supabase conversation database (optional deployment mode)
 
 The conversation repository now supports either local atomic JSON storage or Supabase PostgREST storage. To use Supabase, apply `supabase/migrations/20261108000000_maya_conversations.sql`, set `MAYA_STORAGE_DRIVER=supabase`, `SUPABASE_URL`, and `SUPABASE_SERVICE_ROLE_KEY` in the **server environment**, then restart Maya. The service-role key is server-only and must never be placed in browser configuration or committed. With `MAYA_STORAGE_DRIVER=file` (default), local JSON storage remains active. The migration enables RLS, denies direct anon/authenticated table access, and exposes only a Founder-scoped atomic append RPC to the service role. Goal plans, tasks and memory notes still use their existing file-backed repositories; their database migration is not complete.
+
+The same Supabase mode also persists validated goal plans and step execution state in `maya_goal_plans`. Plan approval and execution now use the async repository contract, so file and Supabase drivers share the same executor. The database adapter stores plan JSON and step states, while the executor still uses a single-process lock; cross-instance optimistic concurrency/locking is not yet implemented.
+
+
+## Supabase task queue adapter (development branch)
+
+The `maya/supabase-task-queue` branch adds an optional Supabase PostgREST task repository. It uses a server-only service-role key, Founder-scoped reads, and the `maya_save_task` database RPC to atomically create/update a task only when its immutable Founder owner matches. Apply `supabase/migrations/20261108010000_maya_tasks.sql` in addition to the prior conversation and goal-plan migrations before enabling `MAYA_STORAGE_DRIVER=supabase`. The local JSON task repository remains the default. This adapter does not itself make the worker distributed or multi-instance safe; claim/lease semantics and concurrent worker coordination remain separate release requirements.

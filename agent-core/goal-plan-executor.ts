@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
-import { GoalPlanStore, type StoredGoalPlan } from "./goal-plan-store.ts";
+import type { GoalPlanRepository } from "./goal-plan-repository.ts";
+import type { StoredGoalPlan } from "./goal-plan-store.ts";
 
 export type PlannedToolExecutor = (tool: string, args: Record<string, unknown>) => Promise<unknown>;
 function stepDigest(step: StoredGoalPlan["plan"]["steps"][number]): string {
@@ -22,32 +23,32 @@ function requiresApproval(step: StoredGoalPlan["plan"]["steps"][number]): boolea
  */
 export class GoalPlanExecutor {
   private readonly executing = new Set<string>();
-  constructor(private readonly store: GoalPlanStore, private readonly executeTool: PlannedToolExecutor) {}
+  constructor(private readonly store: GoalPlanRepository, private readonly executeTool: PlannedToolExecutor) {}
 
-  approveStep(founderId: string, planId: string, stepId: string): StoredGoalPlan {
-    const plan = this.requirePlan(founderId, planId);
+  async approveStep(founderId: string, planId: string, stepId: string): Promise<StoredGoalPlan> {
+    const plan = await this.requirePlan(founderId, planId);
     const step = plan.plan.steps.find(item => item.id === stepId);
     if (!step) throw new Error("Plan step not found.");
     if (!requiresApproval(step)) throw new Error("This step does not require Founder approval.");
     if (plan.stepStates[stepId].status === "completed") throw new Error("Completed steps cannot be re-approved.");
     plan.stepStates[stepId].approvedDigest = stepDigest(step);
     if (plan.status === "proposed" || plan.status === "awaiting_approval") plan.status = "proposed";
-    this.store.save(founderId, plan);
-    return this.requirePlan(founderId, planId);
+    await this.store.save(founderId, plan);
+    return await this.requirePlan(founderId, planId);
   }
 
   async execute(founderId: string, planId: string): Promise<StoredGoalPlan> {
     if (this.executing.has(planId)) throw new Error("Plan execution is already in progress.");
     this.executing.add(planId);
     try {
-      let plan = this.requirePlan(founderId, planId);
+      let plan = await this.requirePlan(founderId, planId);
       if (plan.status === "completed") return plan;
       if (plan.status === "failed") throw new Error("Failed plans require a new reviewed plan; automatic retry is disabled.");
       plan.status = "running";
-      this.store.save(founderId, plan);
+      await this.store.save(founderId, plan);
 
       for (const step of plan.plan.steps) {
-        plan = this.requirePlan(founderId, planId);
+        plan = await this.requirePlan(founderId, planId);
         const state = plan.stepStates[step.id];
         if (state.status === "completed") continue;
         const dependenciesComplete = step.dependsOn.every(id => plan.stepStates[id]?.status === "completed");
@@ -55,12 +56,12 @@ export class GoalPlanExecutor {
         if (requiresApproval(step) && state.approvedDigest !== stepDigest(step)) {
           state.status = "awaiting_approval";
           plan.status = "awaiting_approval";
-          this.store.save(founderId, plan);
-          return this.requirePlan(founderId, planId);
+          await this.store.save(founderId, plan);
+          return await this.requirePlan(founderId, planId);
         }
         state.status = "running";
         delete state.error;
-        this.store.save(founderId, plan);
+        await this.store.save(founderId, plan);
         try {
           const result = await this.executeTool(step.tool, step.args);
           const serialized = JSON.stringify(result) ?? "null";
@@ -68,26 +69,26 @@ export class GoalPlanExecutor {
           state.result = result;
           state.evidence = { sha256: digestResult(result), observedAt: new Date().toISOString() };
           state.status = "completed";
-          this.store.save(founderId, plan);
+          await this.store.save(founderId, plan);
         } catch (error) {
           state.status = "failed";
           state.error = (error instanceof Error ? error.message : String(error)).slice(0, 1000);
           plan.status = "failed";
-          this.store.save(founderId, plan);
+          await this.store.save(founderId, plan);
           return this.requirePlan(founderId, planId);
         }
       }
-      plan = this.requirePlan(founderId, planId);
+      plan = await this.requirePlan(founderId, planId);
       plan.status = "completed";
-      this.store.save(founderId, plan);
-      return this.requirePlan(founderId, planId);
+      await this.store.save(founderId, plan);
+      return await this.requirePlan(founderId, planId);
     } finally {
       this.executing.delete(planId);
     }
   }
 
-  private requirePlan(founderId: string, planId: string): StoredGoalPlan {
-    const plan = this.store.get(founderId, planId);
+  private async requirePlan(founderId: string, planId: string): Promise<StoredGoalPlan> {
+    const plan = await this.store.get(founderId, planId);
     if (!plan) throw new Error("Plan not found for this Founder.");
     return plan;
   }
