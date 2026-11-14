@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { CapabilityRegistry } from "./capability-registry.ts";
 import { SpecialistToolExecutor } from "./specialist-tool-executor.ts";
+import type { TaskEnvelope, TaskRepository } from "./task-orchestrator.ts";
 
 function registry() {
   const value = new CapabilityRegistry();
@@ -166,4 +167,59 @@ test("fails closed when specialist audit persistence cannot be acknowledged", as
     executor.execute("developer", "founder-1", "workspace.read_file", { path: "README.md" }),
     /durable audit unavailable/,
   );
+});
+
+
+test("records successful specialist tool execution in the shared Founder task ledger", async () => {
+  const rows = new Map<string, TaskEnvelope>();
+  const repository: TaskRepository = {
+    async get(id, founderId) {
+      const value = rows.get(id);
+      return value && (!founderId || value.task.founderId === founderId) ? structuredClone(value) : undefined;
+    },
+    async put(value) { rows.set(value.task.id, structuredClone(value)); },
+    async list(founderId) {
+      return [...rows.values()].filter(value => value.task.founderId === founderId).map(value => structuredClone(value));
+    },
+  };
+  const events: Array<Record<string, unknown>> = [];
+  const executor = new SpecialistToolExecutor(
+    registry(),
+    async () => ({ content: "private tool output" }),
+    32_000,
+    event => { events.push(event as unknown as Record<string, unknown>); },
+    repository,
+  );
+  const result = await executor.execute("developer", "founder-1", "workspace.read_file", { path: "README.md" });
+  assert.deepEqual(result, { content: "private tool output" });
+  const tasks = await repository.list("founder-1");
+  assert.equal(tasks.length, 1);
+  assert.equal(tasks[0].task.status, "completed");
+  assert.equal(tasks[0].capability, "workspace.read_file");
+  assert.equal(tasks[0].task.verificationEvidence.length, 1);
+  assert.equal(typeof (tasks[0].result as any).resultSha256, "string");
+  assert.equal(JSON.stringify(tasks[0]).includes("private tool output"), false);
+  assert.equal(events[0].taskId, tasks[0].task.id);
+});
+
+test("parks specialist tool task for recovery if durable success audit fails after tool result", async () => {
+  const rows = new Map<string, TaskEnvelope>();
+  const repository: TaskRepository = {
+    async get(id) { const value = rows.get(id); return value ? structuredClone(value) : undefined; },
+    async put(value) { rows.set(value.task.id, structuredClone(value)); },
+    async list(founderId) {
+      return [...rows.values()].filter(value => value.task.founderId === founderId).map(value => structuredClone(value));
+    },
+  };
+  const executor = new SpecialistToolExecutor(
+    registry(),
+    async () => ({ content: "result returned" }),
+    32_000,
+    async () => { throw new Error("audit unavailable"); },
+    repository,
+  );
+  await assert.rejects(executor.execute("developer", "founder-1", "workspace.read_file", { path: "README.md" }), /audit unavailable/);
+  const tasks = await repository.list("founder-1");
+  assert.equal(tasks.length, 1);
+  assert.equal(tasks[0].task.status, "requires_recovery");
 });
