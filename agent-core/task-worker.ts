@@ -170,8 +170,13 @@ export class TaskWorker {
             error: "Worker lease renewal failed during execution. Inspect side effects and verification evidence before retrying.",
           });
           await this.repository.put(current);
+          throw new Error("Task lease renewal failed; task must be inspected before retrying: " + renewalError.message);
         }
-        throw new Error("Task lease renewal failed; task must be inspected before retrying: " + renewalError.message);
+        if (current?.task.status === "completed" && current.task.verificationEvidence.length > 0) {
+          // Durable completion evidence wins over a late lease-renewal response.
+          return "executed";
+        }
+        throw new Error("Task lease renewal failed and the final task state is uncertain: " + renewalError.message);
       }
       return outcome;
     } finally {
