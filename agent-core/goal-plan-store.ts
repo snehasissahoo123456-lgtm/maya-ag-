@@ -11,6 +11,7 @@ export interface GoalPlanStepState {
   approvedDigest?: string;
   result?: unknown;
   evidence?: { sha256: string; observedAt: string };
+  taskId?: string;
   error?: string;
 }
 export interface StoredGoalPlan {
@@ -93,7 +94,8 @@ export class GoalPlanStore implements GoalPlanRepository {
       }
       for (const [stepId, state] of Object.entries(item.stepStates)) {
         if (!stepId || !state || typeof state !== "object" ||
-            !validStepStatuses.has((state as any).status)) {
+            !validStepStatuses.has((state as any).status) ||
+            ((state as any).taskId !== undefined && (typeof (state as any).taskId !== "string" || !(state as any).taskId))) {
           throw new Error("Goal-plan storage contains a malformed step state; refusing to discard or overwrite it.");
         }
       }
