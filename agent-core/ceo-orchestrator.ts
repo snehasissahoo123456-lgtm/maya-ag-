@@ -126,6 +126,11 @@ export class CEOOrchestrator {
             error: (error instanceof Error ? error.message : String(error)).slice(0, 1000),
           });
           await this.taskRepository!.put(envelope);
+        } else if (envelope?.task.status === "verifying") {
+          envelope.task = transitionTask(envelope.task, "requires_recovery", {
+            error: "Specialist output was returned but its completion record could not be durably confirmed. Review the CEO run before retrying.",
+          });
+          await this.taskRepository!.put(envelope);
         }
         throw error;
       }
