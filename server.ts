@@ -673,7 +673,7 @@ async function executeAgentTool(name: string, args: Record<string, unknown>, fou
       persisted = true;
       const memories = await getFounderMemories(founderId);
       const context = formatMemoryContext(retrieveRelevantMemories(objective, memories, { limit: 5 }));
-      const result = await ceoOrchestrator.run({ objective, context, founderId });
+      const result = await ceoOrchestrator.run({ objective, context, founderId, runId: runRecord.id });
       const completedAt = new Date().toISOString();
       await ceoRunRepository.update(founderId, {
         ...runRecord, status: "completed", assignments: result.assignments,
@@ -977,7 +977,7 @@ const ceoOrchestrator = new CEOOrchestrator({
     });
     return String(response.text || "");
   },
-}, specialistRuntime);
+}, specialistRuntime, taskRepository);
 
 
 function randomTaskId(): string {

@@ -4,7 +4,7 @@ export interface CEORunRecord {
   founderId: string;
   objective: string;
   status: CEORunStatus;
-  assignments: Array<{ agentId: string; task: string }>;
+  assignments: Array<{ agentId: string; task: string; taskId?: string }>;
   findings: Array<{ agentId: string; displayName: string; role: string; output: string }>;
   summary?: string;
   error?: string;
