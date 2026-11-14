@@ -196,8 +196,8 @@ test("records successful specialist tool execution in the shared Founder task le
   assert.equal(tasks.length, 1);
   assert.equal(tasks[0].task.status, "completed");
   assert.equal(tasks[0].capability, "workspace.read_file");
-  assert.equal(tasks[0].task.verificationEvidence.length, 2);
-  assert.equal(tasks[0].task.verificationEvidence[1].kind, "specialist-tool-completion");
+  assert.equal(tasks[0].task.verificationEvidence.length, 1);
+  assert.equal(tasks[0].task.verificationEvidence[0].kind, "specialist-tool-completion");
   assert.equal(typeof (tasks[0].result as any).resultSha256, "string");
   assert.equal(JSON.stringify(tasks[0]).includes("private tool output"), false);
   assert.equal(events[0].taskId, tasks[0].task.id);
