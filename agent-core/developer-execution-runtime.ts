@@ -1,4 +1,12 @@
 import type { ApprovalRepository } from "./approval-ledger.ts";
+import type { TaskEnvelope, TaskRepository } from "./task-orchestrator.ts";
+import {
+  developerQAEvidenceDigest,
+  finishDeveloperExecutionTask,
+  markDeveloperExecutionRecovery,
+  markDeveloperExecutionVerifying,
+  startDeveloperExecutionTask,
+} from "./developer-task-ledger.ts";
 import type { DeveloperChangeRepository } from "./developer-change-store.ts";
 import {
   DeveloperChangeExecutionCoordinator,
@@ -24,6 +32,7 @@ export interface DeveloperRuntimeOptions {
   queueRoot: string;
   changes: DeveloperChangeRepository;
   approvals: ApprovalRepository;
+  taskRepository?: TaskRepository;
   isolation: DeveloperFilesystemIsolation;
   audit?: DeveloperChangeCoordinatorOptions["audit"];
   now?: () => Date;
@@ -51,12 +60,14 @@ export class DeveloperExecutionRuntime {
   readonly workspace: DeveloperFilesystemWorkspaceAdapter;
   readonly coordinator: DeveloperChangeExecutionCoordinator;
   private readonly qaOptions: DeveloperChangeQAOptions;
+  private readonly taskRepository?: TaskRepository;
 
   private constructor(
     workspace: DeveloperFilesystemWorkspaceAdapter,
     options: DeveloperRuntimeOptions,
   ) {
     this.workspace = workspace;
+    this.taskRepository = options.taskRepository;
     this.coordinator = new DeveloperChangeExecutionCoordinator({
       changes: options.changes,
       approvals: options.approvals,
@@ -121,24 +132,83 @@ export class DeveloperExecutionRuntime {
     return this.coordinator.requestApplyApproval(input);
   }
 
-  execute(input: {
+  async execute(input: {
     changeId: string;
     founderId: string;
     taskId: string;
     approvalId: string;
     pkg: PreparedDeveloperPatchPackage;
   }): Promise<DeveloperExecutionResult> {
-    return this.coordinator.execute(input);
+    let task: TaskEnvelope | undefined;
+    if (this.taskRepository) {
+      task = await startDeveloperExecutionTask(this.taskRepository, {
+        taskId: input.taskId,
+        founderId: input.founderId,
+        changeId: input.changeId,
+        packageSha256: input.pkg.packageSha256,
+      });
+    }
+    try {
+      const result = await this.coordinator.execute(input);
+      if (task && this.taskRepository) {
+        await markDeveloperExecutionVerifying(this.taskRepository, task, {
+          snapshotId: result.snapshotId,
+          appliedFiles: result.appliedFiles,
+        });
+      }
+      return result;
+    } catch (error) {
+      if (task && this.taskRepository) {
+        try {
+          await markDeveloperExecutionRecovery(this.taskRepository, task,
+            "Developer apply did not reach a durably verified task state. Inspect the change record and workspace snapshot before retrying: " +
+            (error instanceof Error ? error.message : String(error)));
+        } catch {
+          // The task remains running and will be parked by interrupted-task recovery.
+        }
+      }
+      throw error;
+    }
   }
 
-  verify(input: {
+  async verify(input: {
     changeId: string;
     founderId: string;
     execution: DeveloperExecutionResult;
     timeoutMs?: number;
     pollIntervalMs?: number;
   }): Promise<DeveloperChangeQAResult> {
-    return verifyDeveloperWorkspaceChange(this.qaOptions, input);
+    const taskId = input.execution.change.execution?.taskId;
+    const task = this.taskRepository && taskId
+      ? await this.taskRepository.get(taskId, input.founderId)
+      : undefined;
+    try {
+      const result = await verifyDeveloperWorkspaceChange(this.qaOptions, input);
+      if (task && this.taskRepository) {
+        const evidenceDigest = developerQAEvidenceDigest({
+          passed: result.passed,
+          summary: result.summary,
+          results: result.results.map(item => ({
+            command: item.command, status: item.status, exitCode: item.exitCode, timedOut: item.timedOut,
+          })),
+        });
+        await finishDeveloperExecutionTask(this.taskRepository, task, {
+          passed: result.passed, summary: result.summary, evidenceDigest,
+        });
+      }
+      return result;
+    } catch (error) {
+      if (task && this.taskRepository) {
+        try {
+          await markDeveloperExecutionRecovery(this.taskRepository, task,
+            "Developer QA or rollback could not be durably confirmed. Manual inspection is required before retrying: " +
+            (error instanceof Error ? error.message : String(error)));
+        } catch {
+          // The task remains verifying and will be visible for recovery after restart.
+        }
+      }
+      throw error;
+    }
   }
 }
 

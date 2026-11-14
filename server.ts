@@ -1073,6 +1073,7 @@ async function startServer() {
     env: process.env,
     changes: developerChangeRepository,
     approvals: approvalRepository,
+    taskRepository,
   });
   const app = express();
   const server = http.createServer(app);
@@ -1151,22 +1152,19 @@ async function startServer() {
       const blockers = readiness
         ? [...readiness.blockers]
         : [...developerRuntimeBootstrapResult.blockers];
-      if (readiness?.readyToApply) {
-        blockers.push("The isolated workspace is attested, but Founder apply/execute API routes are not yet connected.");
-      }
-      blockers.push("The sandbox QA worker is not started by the application; QA remains disabled until a separately supervised worker is verified.");
+      blockers.push("The sandbox QA worker is a separate supervised service and has not been verified as running by this application instance.");
       return res.json({
         success: true,
         runtime: {
           configured: developerRuntimeBootstrapResult.configured,
-          enabled: false,
+          enabled: readiness?.readyToApply ?? false,
           readyToApply: readiness?.readyToApply ?? false,
           workspaceId: readiness?.workspaceId,
           baselineCommit: readiness?.baselineCommit,
           isolated: readiness?.isolated,
           networkAccess: readiness?.networkAccess,
           secretsMounted: readiness?.secretsMounted,
-          executionEnabled: false,
+          executionEnabled: readiness?.readyToApply ?? false,
           qaEnabled: false,
           workerEnabled: false,
         },
