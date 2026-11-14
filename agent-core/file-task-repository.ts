@@ -29,9 +29,10 @@ export class FileTaskRepository implements TaskRepository {
     this.recoverInterruptedTasks();
   }
 
-  async get(id: string): Promise<TaskEnvelope | undefined> {
+  async get(id: string, founderId?: string): Promise<TaskEnvelope | undefined> {
     await this.writeQueue;
     const value = this.rows.get(id);
+    if (value && founderId && value.task.founderId !== founderId) return undefined;
     return value ? structuredClone(value) : undefined;
   }
 

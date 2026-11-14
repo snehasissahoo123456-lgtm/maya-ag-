@@ -122,7 +122,7 @@ import { runFunctionCallingTurn } from "./agent-core/function-call-loop.ts";
 import { CapabilityRegistry } from "./agent-core/capability-registry.ts";
 import { ApprovalLedger } from "./agent-core/approval-ledger.ts";
 import { TaskOrchestrator } from "./agent-core/task-orchestrator.ts";
-import { FileTaskRepository } from "./agent-core/file-task-repository.ts";
+import { createTaskRepository } from "./agent-core/create-task-repository.ts";
 import { TaskWorker } from "./agent-core/task-worker.ts";
 import { createConversationRepository } from "./agent-core/create-conversation-repository.ts";
 import { validateGoalPlan, type PlannerToolContract } from "./agent-core/goal-planner.ts";
@@ -134,7 +134,7 @@ import { SpecialistRuntime, listRunnableSpecialists } from "./agent-core/special
 import { CEOOrchestrator } from "./agent-core/ceo-orchestrator.ts";
 
 const conversationStore = createConversationRepository();
-const taskRepository = new FileTaskRepository();
+const taskRepository = createTaskRepository();
 const taskCapabilityRegistry = new CapabilityRegistry();
 taskCapabilityRegistry.register({
   name: "workspace.read_file",
