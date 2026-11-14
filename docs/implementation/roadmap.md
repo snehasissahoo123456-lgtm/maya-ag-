@@ -258,3 +258,19 @@ This module is intentionally described as file-backed persistence, not a product
 - [ ] Run threat modelling and penetration testing before enabling broader PC control
 
 Current connector is intentionally read-only. It is not a general remote desktop, shell, or arbitrary computer-control agent.
+
+
+## Approved goal-plan background worker — development branch
+
+- [x] Explicit Founder start endpoint for background plan execution
+- [x] Opt-in single-process worker resumes only plans marked running
+- [x] Resume after a Founder approves the exact pending step digest
+- [x] Stop at unapproved state-mutating steps and await Founder approval
+- [x] Recover in-flight steps after process restart by parking the plan as failed; never replay uncertain side effects
+- [x] Worker status exposed through health endpoint and bounded polling settings
+- [ ] Add transactional distributed plan leases before multi-instance deployment
+- [ ] Add per-step timeout/heartbeat, cancellation, retry review and evidence contracts
+- [ ] Add plan-worker concurrency tests against two real server processes
+- [ ] Enable only after the operator configures a single-instance persistent data directory and validates the approval workflow
+
+The plan worker is disabled by default. It currently requires the file storage driver and one server instance; it must not be enabled with Supabase until distributed goal-plan leases exist.
