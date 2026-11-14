@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { GoalPlanStore } from "./goal-plan-store.ts";
 import { GoalPlanExecutor } from "./goal-plan-executor.ts";
+import { FileTaskRepository } from "./file-task-repository.ts";
 import type { GoalPlan } from "./goal-planner.ts";
 
 async function setup(plan: GoalPlan, executeTool: (tool: string, args: Record<string, unknown>) => Promise<unknown>) {
@@ -148,5 +149,61 @@ test("fails closed on unsupported or malformed goal-plan storage instead of sile
     fs.writeFileSync(filePath, JSON.stringify({ version: 1, plans: [{ id: "plan-1", founderId: "founder-a" }] }), "utf8");
     await assert.rejects(store.create("founder-a", sample), /malformed plan record/i);
     assert.equal(JSON.parse(fs.readFileSync(filePath, "utf8")).plans[0].id, "plan-1");
+  } finally { fs.rmSync(directory, { recursive: true, force: true }); }
+});
+
+
+test("links every goal-plan step to a persistent task lifecycle without placing child tasks in the generic queue", async () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "maya-plan-task-link-"));
+  try {
+    const store = new GoalPlanStore(path.join(directory, "plans"));
+    const tasks = new FileTaskRepository(path.join(directory, "tasks.json"));
+    const saved = await store.create("founder-a", sample);
+    const executor = new GoalPlanExecutor(store, async (tool) => ({ ok: true, tool }), tasks);
+
+    const paused = await executor.execute("founder-a", saved.id);
+    const readTaskId = paused.stepStates.inspect.taskId;
+    const approvalTaskId = paused.stepStates.save_note.taskId;
+    assert.ok(readTaskId);
+    assert.ok(approvalTaskId);
+    let readTask = await tasks.get(readTaskId!, "founder-a");
+    let approvalTask = await tasks.get(approvalTaskId!, "founder-a");
+    assert.equal(readTask?.capability, "goal_plan.step");
+    assert.equal(readTask?.task.status, "completed");
+    assert.equal(readTask?.task.progress, 100);
+    assert.equal(readTask?.attempts, 1);
+    assert.equal(approvalTask?.task.status, "awaiting_approval");
+    assert.equal(approvalTask?.task.requiresApproval, false, "parent plan digest is the approval authority");
+    assert.notEqual(approvalTask?.task.status, "queued", "generic task worker must not claim plan child tasks");
+
+    await executor.approveStep("founder-a", saved.id, "save_note");
+    approvalTask = await tasks.get(approvalTaskId!, "founder-a");
+    assert.equal(approvalTask?.task.status, "paused", "approved child remains outside the generic task queue");
+
+    const completed = await executor.execute("founder-a", saved.id);
+    assert.equal(completed.status, "completed");
+    approvalTask = await tasks.get(approvalTaskId!, "founder-a");
+    assert.equal(approvalTask?.task.status, "completed");
+    assert.equal(approvalTask?.task.verificationEvidence.length, 1);
+    assert.match(String((approvalTask?.result as { sha256?: string })?.sha256), /^[a-f0-9]{64}$/);
+    const persisted = await new GoalPlanStore(path.join(directory, "plans")).get("founder-a", saved.id);
+    assert.equal(persisted?.stepStates.save_note.taskId, approvalTaskId);
+  } finally { fs.rmSync(directory, { recursive: true, force: true }); }
+});
+
+test("records failed goal-plan tool steps as failed child tasks", async () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "maya-plan-task-failure-"));
+  try {
+    const store = new GoalPlanStore(path.join(directory, "plans"));
+    const tasks = new FileTaskRepository(path.join(directory, "tasks.json"));
+    const saved = await store.create("founder-a", { ...sample, steps: [sample.steps[0]] });
+    const executor = new GoalPlanExecutor(store, async () => { throw new Error("tool adapter offline"); }, tasks);
+    const failed = await executor.execute("founder-a", saved.id);
+    assert.equal(failed.status, "failed");
+    const taskId = failed.stepStates.inspect.taskId;
+    assert.ok(taskId);
+    const task = await tasks.get(taskId!, "founder-a");
+    assert.equal(task?.task.status, "failed");
+    assert.match(task?.task.lastError || "", /tool adapter offline/);
   } finally { fs.rmSync(directory, { recursive: true, force: true }); }
 });
