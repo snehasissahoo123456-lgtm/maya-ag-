@@ -21,9 +21,11 @@ on:
       - maya/supabase-approval-ledger
       - maya/distributed-task-leases
       - maya/supabase-memory-store
+      - maya/semantic-memory-retrieval
   pull_request:
     branches:
       - main
+      - maya/supabase-memory-store
       - maya/distributed-task-leases
       - maya/durable-audit-trail
       - maya/supabase-approval-ledger

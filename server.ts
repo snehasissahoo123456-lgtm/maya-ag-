@@ -91,10 +91,22 @@ let currentPersona: RelationshipProfile = persistedState.persona;
 function persistFounderState(): void {
   persistentStore.save({ tasks: currentTasks, memories: currentMemories, persona: currentPersona });
 }
+async function embedMemoryText(text: string, purpose: "document" | "query"): Promise<number[] | undefined> {
+  const apiKey = process.env.GEMINI_API_KEY || process.env.API_KEY;
+  if (!apiKey) return undefined;
+  const ai = new GoogleGenAI({ apiKey });
+  const response = await ai.models.embedContent({
+    model: "gemini-embedding-001",
+    contents: text,
+    config: { taskType: purpose === "document" ? "RETRIEVAL_DOCUMENT" : "RETRIEVAL_QUERY", outputDimensionality: 768 },
+  });
+  const values = response.embeddings?.[0]?.values;
+  return Array.isArray(values) && values.length === 768 && values.every(Number.isFinite) ? values : undefined;
+}
 const memoryRepository = createMemoryRepository(currentMemories, (memories) => {
   currentMemories = structuredClone(memories);
   persistFounderState();
-});
+}, embedMemoryText);
 async function getFounderMemories(founderId: string): Promise<MemoryEntry[]> {
   currentMemories = await memoryRepository.list(founderId);
   return currentMemories;
