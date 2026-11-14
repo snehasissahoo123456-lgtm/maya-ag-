@@ -81,3 +81,27 @@ test("Supabase task repository claims, releases and recovers expired leases thro
   assert.equal(calls[1].body.p_worker_id, "worker-a");
   assert.equal(await repository.recoverExpiredClaims("founder-a"), 2);
 });
+
+test("renews a live task lease only for the matching Founder and worker", async () => {
+  const requests: Array<{ url: string; body: any }> = [];
+  const fetcher = async (input: string | URL, init?: RequestInit) => {
+    requests.push({ url: String(input), body: init?.body ? JSON.parse(String(init.body)) : undefined });
+    return new Response(JSON.stringify([{
+      id: "task-1",
+      founder_id: "founder-1",
+      envelope: { task: { id: "task-1", founderId: "founder-1" }, capability: "workspace.read_file", args: {}, attempts: 1, idempotencyKey: "task-1" },
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    }]), { status: 200, headers: { "Content-Type": "application/json" } });
+  };
+  const repository = new SupabaseTaskRepository("https://example.supabase.co", "service-role-test-key", fetcher as any);
+  await repository.renewClaim("task-1", "founder-1", "worker-1", 30_000);
+  assert.equal(requests.length, 1);
+  assert.match(requests[0].url, /rpc\\/maya_renew_task_claim$/);
+  assert.deepEqual(requests[0].body, {
+    p_task_id: "task-1",
+    p_founder_id: "founder-1",
+    p_worker_id: "worker-1",
+    p_lease_ms: 30_000,
+  });
+});
