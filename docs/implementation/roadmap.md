@@ -306,3 +306,14 @@ The plan worker is disabled by default. It currently requires the file storage d
 - [ ] Add real 24/7 hosting, monitoring and restart/backup acceptance tests
 
 Only read-only workspace file jobs are currently schedulable. This is not a general automation scheduler.
+
+
+## Supabase CEO run history — development branch
+
+- [x] Add Supabase CEO run repository and storage-driver factory
+- [x] Persist specialist assignments, findings, synthesis, status and run timing
+- [x] Add Founder-scoped RLS/service-role-only migration
+- [x] Add bounded run lease and expired-run recovery RPC
+- [ ] Apply migration and verify on the configured Supabase project
+- [ ] Add heartbeat/lease renewal for unusually long CEO runs
+- [ ] Add resumable specialist queues and per-specialist execution budgets

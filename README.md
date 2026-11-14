@@ -135,3 +135,6 @@ The Schedules workspace supports one-time, hourly, daily and weekly jobs that re
 
 
 Apply `supabase/migrations/20261110000000_maya_scheduled_jobs.sql` after the existing task lease migration to create the Founder-scoped schedule table and distributed claim/complete/failure/pause RPCs. With `MAYA_STORAGE_DRIVER=supabase`, both the schedule worker and task worker use atomic database leases; configure both worker flags to opt in. The migration is not applied automatically and must be run in the user's Supabase project after review.
+
+
+Apply `supabase/migrations/20261110010000_maya_ceo_runs.sql` to add Supabase-backed CEO orchestration history with Founder-scoped RLS and a two-hour run lease. When `MAYA_STORAGE_DRIVER=supabase` is selected, CEO run records use this table and expired runs are marked failed rather than replayed. The migration must be applied by the operator; no Supabase project has been changed by this repository work.

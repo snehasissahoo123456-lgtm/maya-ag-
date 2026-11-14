@@ -28,6 +28,7 @@ on:
       - maya/persistent-ceo-runs
       - maya/scheduled-readonly-jobs
       - maya/distributed-scheduler-leases
+      - maya/supabase-ceo-run-history
   pull_request:
     branches:
       - main
