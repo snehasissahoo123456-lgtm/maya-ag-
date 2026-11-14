@@ -91,6 +91,14 @@ let currentPersona: RelationshipProfile = persistedState.persona;
 function persistFounderState(): void {
   persistentStore.save({ tasks: currentTasks, memories: currentMemories, persona: currentPersona });
 }
+const memoryRepository = createMemoryRepository(currentMemories, (memories) => {
+  currentMemories = structuredClone(memories);
+  persistFounderState();
+});
+async function getFounderMemories(founderId: string): Promise<MemoryEntry[]> {
+  currentMemories = await memoryRepository.list(founderId);
+  return currentMemories;
+}
 let currentTestSuites: TestSuite[] = JSON.parse(JSON.stringify(INITIAL_TEST_SUITES));
 for (const suite of currentTestSuites) {
   suite.status = "warning";
@@ -124,6 +132,7 @@ import { createApprovalRepository } from "./agent-core/create-approval-repositor
 import { TaskOrchestrator } from "./agent-core/task-orchestrator.ts";
 import { createTaskRepository } from "./agent-core/create-task-repository.ts";
 import { createAuditRepository } from "./agent-core/create-audit-repository.ts";
+import { createMemoryRepository } from "./agent-core/create-memory-repository.ts";
 import { TaskWorker } from "./agent-core/task-worker.ts";
 import { createConversationRepository } from "./agent-core/create-conversation-repository.ts";
 import { validateGoalPlan, type PlannerToolContract } from "./agent-core/goal-planner.ts";
@@ -210,7 +219,7 @@ function isSensitiveWorkspacePath(filePath: string): boolean {
     || base === "id_rsa" || base.endsWith(".pem") || base.endsWith(".key") || base.endsWith(".p12") || base.endsWith(".pfx");
 }
 
-async function executeAgentTool(name: string, args: Record<string, unknown>): Promise<unknown> {
+async function executeAgentTool(name: string, args: Record<string, unknown>, founderId = "founder-primary"): Promise<unknown> {
   if (!IMPLEMENTED_TOOL_NAMES.has(name)) throw new Error(`Tool "${name}" is not implemented or enabled.`);
   if (name === "list_dir") {
     const dir = resolveWorkspacePath(args.path || ".");
@@ -251,13 +260,14 @@ async function executeAgentTool(name: string, args: Record<string, unknown>): Pr
       title: String(args.title || "Founder note").slice(0, 160), content,
       createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
     };
-    currentMemories.unshift(memory); currentMemories = currentMemories.slice(0, 500);
-    persistFounderState(); return { saved: true, memory };
+    await memoryRepository.save(founderId, memory);
+    currentMemories = await memoryRepository.list(founderId);
+    return { saved: true, memory };
   }
   if (name === "memory_search") {
     const query = String(args.query || "").trim().toLowerCase();
     if (!query) throw new Error("A non-empty memory query is required.");
-    const matches = currentMemories.filter((memory) => memory.title.toLowerCase().includes(query) || memory.content.toLowerCase().includes(query) || memory.category.includes(query)).slice(0, 20);
+    const matches = await memoryRepository.search(founderId, query, 20);
     return { count: matches.length, results: matches };
   }
   if (name === "run_tests") {
@@ -273,7 +283,9 @@ async function executeAgentTool(name: string, args: Record<string, unknown>): Pr
 
 const goalPlanStore = createGoalPlanRepository();
 const goalPlanExecutor = new GoalPlanExecutor(goalPlanStore, executeAgentTool);
-const executeChatTool = createChatToolExecutor(executeAgentTool);
+function createFounderChatToolExecutor(founderId: string) {
+  return createChatToolExecutor((name, args) => executeAgentTool(name, args, founderId));
+}
 const specialistRuntime = new SpecialistRuntime({
   generate: async ({ systemInstruction, task, context, maxOutputTokens }) => {
     const apiKey = process.env.GEMINI_API_KEY || process.env.API_KEY;
@@ -437,7 +449,8 @@ async function startServer() {
     if (!objective || objective.length > 2000) return res.status(400).json({ success: false, error: "Objective must contain 1–2,000 characters." });
     const startedAt = Date.now();
     try {
-      const context = formatMemoryContext(retrieveRelevantMemories(objective, currentMemories, { limit: 5 }));
+      const memories = await getFounderMemories(founderId);
+      const context = formatMemoryContext(retrieveRelevantMemories(objective, memories, { limit: 5 }));
       const result = await ceoOrchestrator.run({ objective, context });
       currentAuditLogs.unshift({
         id: "ceo-" + randomTaskId(),
@@ -470,7 +483,8 @@ async function startServer() {
     const task = typeof req.body?.task === "string" ? req.body.task : "";
     if (!agentId || !task.trim()) return res.status(400).json({ success: false, error: "agentId and task are required." });
     try {
-      const context = formatMemoryContext(retrieveRelevantMemories(task, currentMemories, { limit: 5 }));
+      const memories = await getFounderMemories(founderId);
+      const context = formatMemoryContext(retrieveRelevantMemories(task, memories, { limit: 5 }));
       const result = await specialistRuntime.run({ agentId, task, context });
       currentAuditLogs.unshift({
         id: "specialist-" + randomTaskId(),
@@ -544,7 +558,8 @@ async function startServer() {
     try {
       const ai = new GoogleGenAI({ apiKey });
       const toolContracts = MAYA_FUNCTION_DECLARATIONS as PlannerToolContract[];
-      const planMemoryContext = formatMemoryContext(retrieveRelevantMemories(objective, currentMemories, { limit: 5 }));
+      const memories = await getFounderMemories(founderId);
+      const planMemoryContext = formatMemoryContext(retrieveRelevantMemories(objective, memories, { limit: 5 }));
       const prompt = [
         "Create a safe, minimal plan for the Founder objective below.",
         "Return only JSON with this shape: { summary: string, steps: [{ id, title, tool, args, dependsOn, expectedResult }] }.",
@@ -618,7 +633,10 @@ async function startServer() {
   }
 
   // Action Engine System State
-  app.get("/api/action-engine/state", (_req, res) => {
+  app.get("/api/action-engine/state", async (req, res): Promise<any> => {
+    const founderId = (req as any).authSession?.user?.id;
+    if (!founderId) return res.status(401).json({ success: false, error: "Verified Founder session required." });
+    const memories = await getFounderMemories(founderId);
     const hasKey = Boolean(process.env.GEMINI_API_KEY || process.env.API_KEY);
     res.json({
       founder: {
@@ -632,7 +650,7 @@ async function startServer() {
       personaModes: PERSONA_MODES,
       ventures: SYB_VENTURES,
       tasks: currentTasks,
-      memories: currentMemories,
+      memories,
       tools: MASTER_TOOLS.filter((tool) => IMPLEMENTED_TOOL_NAMES.has(tool.name)),
       tests: currentTestSuites,
       auditLogs: currentAuditLogs.slice(-20).reverse(),
@@ -1008,33 +1026,47 @@ async function startServer() {
   });
 
   // Action Engine Memory Management
-  app.post("/api/action-engine/memory", (req, res): any => {
+  app.post("/api/action-engine/memory", async (req, res): Promise<any> => {
+    const founderId = (req as any).authSession?.user?.id;
+    if (!founderId) return res.status(401).json({ success: false, error: "Verified Founder session required." });
     const { category, title, content } = req.body || {};
-    if (!content) return res.status(400).json({ error: "Content is required" });
+    if (typeof content !== "string" || !content.trim() || content.length > 20000) return res.status(400).json({ success: false, error: "Content must contain 1–20,000 characters." });
     const newMem: MemoryEntry = {
-      id: "mem-" + Date.now().toString(36),
-      category: category || "lesson",
-      title: title || `${category || "Memory"} Entry`,
-      content,
+      id: "mem-" + randomTaskId(),
+      category: (category || "lesson") as MemoryEntry["category"],
+      title: String(title || `${category || "Memory"} Entry`).slice(0, 160),
+      content: content.trim(),
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
-    currentMemories.unshift(newMem);
-    persistFounderState();
-    return res.json({ success: true, memory: newMem });
+    try {
+      await memoryRepository.save(founderId, newMem);
+      const memories = await getFounderMemories(founderId);
+      return res.json({ success: true, memory: newMem, count: memories.length });
+    } catch (error) {
+      return res.status(400).json({ success: false, error: error instanceof Error ? error.message : String(error) });
+    }
   });
 
-  app.delete("/api/action-engine/memory/:id", (req, res): any => {
-    const { id } = req.params;
-    currentMemories = currentMemories.filter((m) => m.id !== id);
-    persistFounderState();
-    return res.json({ success: true, deleted: id });
+  app.delete("/api/action-engine/memory/:id", async (req, res): Promise<any> => {
+    const founderId = (req as any).authSession?.user?.id;
+    if (!founderId) return res.status(401).json({ success: false, error: "Verified Founder session required." });
+    try {
+      const deleted = await memoryRepository.delete(founderId, req.params.id);
+      if (!deleted) return res.status(404).json({ success: false, error: "Memory not found for this Founder." });
+      const memories = await getFounderMemories(founderId);
+      return res.json({ success: true, deleted: req.params.id, count: memories.length });
+    } catch (error) {
+      return res.status(503).json({ success: false, error: error instanceof Error ? error.message : String(error) });
+    }
   });
 
   // Action Engine Master Tool Execution
   // All UI tool calls use the same server-side allowlist and validation as Gemini function calls.
   app.post("/api/action-engine/tools/execute", async (req, res): Promise<any> => {
     const startTime = Date.now();
+    const founderId = (req as any).authSession?.user?.id;
+    if (!founderId) return res.status(401).json({ success: false, error: "Verified Founder session required." });
     const { toolName, params } = req.body || {};
     let result: unknown;
     let status: "success" | "failed" = "success";
@@ -1048,7 +1080,7 @@ async function startServer() {
       if (JSON.stringify(safeParams).length > 25000) {
         throw new Error("Tool parameters exceed the 25 KB request limit.");
       }
-      result = await executeAgentTool(toolName, safeParams);
+      result = await executeAgentTool(toolName, safeParams, founderId);
     } catch (error) {
       status = "failed";
       result = { error: error instanceof Error ? error.message : String(error) };
@@ -1196,7 +1228,8 @@ You act as an autonomous founder-grade CTO, lead engineer, and QA engineer.
         });
       }
 
-      const memoryContext = formatMemoryContext(retrieveRelevantMemories(String(message || ""), currentMemories, { limit: 5 }));
+      const memories = await getFounderMemories(conversationContext.founderId);
+      const memoryContext = formatMemoryContext(retrieveRelevantMemories(String(message || ""), memories, { limit: 5 }));
       const activeModeInfo = PERSONA_MODES.find((m) => m.id === currentPersona.activeMode) || PERSONA_MODES[0];
       const dynamicInstruction = `${ACTION_ENGINE_SYSTEM_PROMPT}
 
@@ -1244,7 +1277,7 @@ MULTILINGUAL & RAPID REACTION:
 
       const ai = new GoogleGenAI({ apiKey });
       const chat = ai.chats.create({ model: resolveModel(model), config, history: conversationContext.history });
-      const response = await runFunctionCallingTurn(chat, message, executeChatTool);
+      const response = await runFunctionCallingTurn(chat, message, createFounderChatToolExecutor(conversationContext.founderId));
       const serialized = serializeGenerateContentResponse(response);
       await persistConversationReply(conversationContext.founderId, conversationContext.conversationId, String(serialized.text || ""));
       return res.json(serialized);
@@ -1271,7 +1304,8 @@ MULTILINGUAL & RAPID REACTION:
         return;
       }
 
-      const memoryContext = formatMemoryContext(retrieveRelevantMemories(String(message || ""), currentMemories, { limit: 5 }));
+      const memories = await getFounderMemories(conversationContext.founderId);
+      const memoryContext = formatMemoryContext(retrieveRelevantMemories(String(message || ""), memories, { limit: 5 }));
       const activeModeInfo = PERSONA_MODES.find((m) => m.id === currentPersona.activeMode) || PERSONA_MODES[0];
       const dynamicInstruction = `${ACTION_ENGINE_SYSTEM_PROMPT}
 
@@ -1318,7 +1352,7 @@ MULTILINGUAL & RAPID REACTION:
 
       const ai = new GoogleGenAI({ apiKey });
       const chat = ai.chats.create({ model: resolveModel(model), config, history: conversationContext.history });
-      const response = await runFunctionCallingTurn(chat, message, executeChatTool);
+      const response = await runFunctionCallingTurn(chat, message, createFounderChatToolExecutor(conversationContext.founderId));
       const serialized = serializeGenerateContentResponse(response);
       await persistConversationReply(conversationContext.founderId, conversationContext.conversationId, String(serialized.text || ""));
       res.setHeader("Content-Type", "application/x-ndjson");

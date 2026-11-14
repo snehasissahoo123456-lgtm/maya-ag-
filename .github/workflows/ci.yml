@@ -20,9 +20,11 @@ on:
       - maya/durable-audit-trail
       - maya/supabase-approval-ledger
       - maya/distributed-task-leases
+      - maya/supabase-memory-store
   pull_request:
     branches:
       - main
+      - maya/distributed-task-leases
       - maya/durable-audit-trail
       - maya/supabase-approval-ledger
       - maya/supabase-task-queue

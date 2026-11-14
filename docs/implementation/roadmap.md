@@ -206,3 +206,15 @@ This module is intentionally described as file-backed persistence, not a product
 - [ ] Live Supabase concurrency test with two worker processes
 - [ ] Heartbeat extension for longer-running capabilities (current worker only runs short read-only capability)
 - [ ] Distributed worker monitoring and production hosting/restart policy
+
+
+## Founder memory persistence — development branch
+
+- [x] Founder-scoped memory repository contract
+- [x] Preserve existing local `state.json` memory notes in file mode
+- [x] Supabase memory table with one-time legacy import marker and RLS
+- [x] Use persistent memory in chat, goal planning, specialist and CEO context
+- [x] Founder-scoped save, search, list and delete APIs
+- [ ] Vector/semantic retrieval and relevance evaluation
+- [ ] Explicit memory extraction proposals, Founder confirmation and feedback-based quality loop
+- [ ] Live Supabase migration/import verification and backup/restore tests
