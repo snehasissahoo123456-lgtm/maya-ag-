@@ -1,6 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import type { ApprovalRepository } from "./approval-ledger.ts";
+import type { TaskRepository } from "./task-orchestrator.ts";
 import type { DeveloperChangeRepository } from "./developer-change-store.ts";
 import { DeveloperExecutionRuntime } from "./developer-execution-runtime.ts";
 import type { DeveloperChangeCoordinatorOptions } from "./developer-change-execution-coordinator.ts";
@@ -28,6 +29,7 @@ export interface DeveloperRuntimeBootstrapOptions {
   env?: NodeJS.ProcessEnv;
   changes: DeveloperChangeRepository;
   approvals: ApprovalRepository;
+  taskRepository?: TaskRepository;
   audit?: DeveloperChangeCoordinatorOptions["audit"];
   now?: () => Date;
 }
@@ -130,6 +132,7 @@ export async function bootstrapDeveloperExecutionRuntime(
       queueRoot,
       changes: options.changes,
       approvals: options.approvals,
+      taskRepository: options.taskRepository,
       isolation,
       audit: options.audit,
       now: options.now,
