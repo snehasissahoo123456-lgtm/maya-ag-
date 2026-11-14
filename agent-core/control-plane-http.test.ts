@@ -69,6 +69,36 @@ test("real HTTP control-plane routes enforce Founder auth and execute only the r
     const cookie = login.headers.get("set-cookie")?.split(";")[0];
     assert.ok(cookie, "Founder login should set an HttpOnly session cookie");
 
+    const conversationsBeforeAuth = await fetch(baseUrl + "/api/conversations");
+    assert.equal(conversationsBeforeAuth.status, 401, "Conversation history must require Founder authentication");
+
+    const conversationId = "http-conversation-test";
+    const chat = await fetch(baseUrl + "/api/chat-stream", {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie },
+      body: JSON.stringify({ conversationId, message: "Remember this conversation test." }),
+    });
+    assert.equal(chat.status, 200);
+    const chatText = await chat.text();
+    assert.match(chatText, /limited offline mode/i);
+
+    const conversations = await fetch(baseUrl + "/api/conversations", { headers: { cookie } });
+    assert.equal(conversations.status, 200);
+    const conversationsBody = await conversations.json() as any;
+    assert.ok(conversationsBody.conversations.some((item: any) => item.id === conversationId));
+
+    const conversation = await fetch(baseUrl + `/api/conversations/${conversationId}`, { headers: { cookie } });
+    assert.equal(conversation.status, 200);
+    const conversationBody = await conversation.json() as any;
+    assert.equal(conversationBody.conversation.messages.length, 2, "User and assistant turns should be persisted");
+    assert.equal(conversationBody.conversation.messages[0].role, "user");
+    assert.equal(conversationBody.conversation.messages[1].role, "model");
+
+    const deletedConversation = await fetch(baseUrl + `/api/conversations/${conversationId}`, { method: "DELETE", headers: { cookie } });
+    assert.equal(deletedConversation.status, 200);
+    const missingConversation = await fetch(baseUrl + `/api/conversations/${conversationId}`, { headers: { cookie } });
+    assert.equal(missingConversation.status, 404);
+
     const created = await fetch(baseUrl + "/api/control-plane/tasks", {
       method: "POST",
       headers: { "content-type": "application/json", cookie },

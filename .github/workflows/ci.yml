@@ -7,10 +7,12 @@ on:
       - maya/foundation-architecture
       - maya/dashboard-foundation
       - maya/task-worker-foundation
+      - maya/persistent-conversations
   pull_request:
     branches:
       - main
       - maya/dashboard-foundation
+      - maya/task-worker-foundation
 
 permissions:
   contents: read
