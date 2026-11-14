@@ -125,6 +125,9 @@ import { TaskOrchestrator } from "./agent-core/task-orchestrator.ts";
 import { FileTaskRepository } from "./agent-core/file-task-repository.ts";
 import { TaskWorker } from "./agent-core/task-worker.ts";
 import { ConversationStore } from "./agent-core/conversation-store.ts";
+import { validateGoalPlan, type PlannerToolContract } from "./agent-core/goal-planner.ts";
+import { GoalPlanStore } from "./agent-core/goal-plan-store.ts";
+import { GoalPlanExecutor } from "./agent-core/goal-plan-executor.ts";
 
 const conversationStore = new ConversationStore();
 const taskRepository = new FileTaskRepository();
@@ -259,6 +262,9 @@ async function executeAgentTool(name: string, args: Record<string, unknown>): Pr
   throw new Error("Tool execution is not available.");
 }
 
+const goalPlanStore = new GoalPlanStore();
+const goalPlanExecutor = new GoalPlanExecutor(goalPlanStore, executeAgentTool);
+
 function randomTaskId(): string {
   return randomBytes(8).toString("hex");
 }
@@ -351,6 +357,89 @@ async function startServer() {
     }
     (req as any).authSession = session;
     return next();
+  });
+
+  app.get("/api/agent/plans", (req, res) => {
+    const founderId = (req as any).authSession?.user?.id;
+    if (!founderId) return res.status(401).json({ success: false, error: "Verified Founder session required." });
+    return res.json({ success: true, plans: goalPlanStore.list(founderId) });
+  });
+
+  app.get("/api/agent/plans/:id", (req, res) => {
+    const founderId = (req as any).authSession?.user?.id;
+    if (!founderId) return res.status(401).json({ success: false, error: "Verified Founder session required." });
+    const plan = goalPlanStore.get(founderId, req.params.id);
+    return plan ? res.json({ success: true, plan }) : res.status(404).json({ success: false, error: "Plan not found." });
+  });
+
+  app.post("/api/agent/plans/:id/approve", (req, res) => {
+    const founderId = (req as any).authSession?.user?.id;
+    if (!founderId) return res.status(401).json({ success: false, error: "Verified Founder session required." });
+    if (typeof req.body?.stepId !== "string") return res.status(400).json({ success: false, error: "stepId is required." });
+    try {
+      const existing = goalPlanStore.get(founderId, req.params.id);
+      if (!existing) return res.status(404).json({ success: false, error: "Plan not found." });
+      validateGoalPlan(existing.plan, existing.plan.objective, MAYA_FUNCTION_DECLARATIONS as PlannerToolContract[]);
+      const plan = goalPlanExecutor.approveStep(founderId, req.params.id, req.body.stepId);
+      return res.json({ success: true, plan });
+    } catch (error) {
+      return res.status(400).json({ success: false, error: error instanceof Error ? error.message : String(error) });
+    }
+  });
+
+  app.post("/api/agent/plans/:id/execute", async (req, res): Promise<any> => {
+    const founderId = (req as any).authSession?.user?.id;
+    if (!founderId) return res.status(401).json({ success: false, error: "Verified Founder session required." });
+    try {
+      const existing = goalPlanStore.get(founderId, req.params.id);
+      if (!existing) return res.status(404).json({ success: false, error: "Plan not found." });
+      validateGoalPlan(existing.plan, existing.plan.objective, MAYA_FUNCTION_DECLARATIONS as PlannerToolContract[]);
+      const plan = await goalPlanExecutor.execute(founderId, req.params.id);
+      return res.json({ success: true, plan, executionStatus: plan.status });
+    } catch (error) {
+      return res.status(400).json({ success: false, error: error instanceof Error ? error.message : String(error) });
+    }
+  });
+
+  // Gemini may propose a bounded tool plan, but this endpoint never executes it.
+  // Model output is treated as untrusted JSON and validated against the server allowlist.
+  app.post("/api/agent/plan", async (req, res): Promise<any> => {
+    const founderId = (req as any).authSession?.user?.id;
+    if (!founderId) return res.status(401).json({ success: false, error: "Verified Founder session required." });
+    const objective = typeof req.body?.objective === "string" ? req.body.objective.trim() : "";
+    if (!objective || objective.length > 2000) return res.status(400).json({ success: false, error: "Objective must contain 1–2,000 characters." });
+    const apiKey = process.env.GEMINI_API_KEY || process.env.API_KEY;
+    if (!apiKey) return res.status(503).json({ success: false, error: "Gemini is not configured. Add GEMINI_API_KEY to the server environment." });
+    try {
+      const ai = new GoogleGenAI({ apiKey });
+      const toolContracts = MAYA_FUNCTION_DECLARATIONS as PlannerToolContract[];
+      const prompt = [
+        "Create a safe, minimal plan for the Founder objective below.",
+        "Return only JSON with this shape: { summary: string, steps: [{ id, title, tool, args, dependsOn, expectedResult }] }.",
+        "Use only tool names and argument schemas in the supplied allowlist. Do not invent tools or arguments.",
+        "Each dependency must refer to an earlier step. Maximum 12 steps.",
+        "This is a proposal only. Do not claim that any step has been executed.",
+        "AVAILABLE TOOLS:",
+        JSON.stringify(toolContracts),
+        "FOUNDER OBJECTIVE:",
+        objective,
+      ].join("\n\n");
+      const response = await ai.models.generateContent({
+        model: resolveModel("gemini-3-flash-preview"),
+        contents: [{ role: "user", parts: [{ text: prompt }] }],
+        config: { responseMimeType: "application/json" },
+      });
+      const raw = String(response.text || "").trim();
+      if (!raw) return res.status(502).json({ success: false, error: "Gemini returned an empty plan." });
+      let draft: unknown;
+      try { draft = JSON.parse(raw); }
+      catch { return res.status(502).json({ success: false, error: "Gemini returned invalid JSON; no plan was accepted." }); }
+      const plan = validateGoalPlan(draft, objective, toolContracts);
+      const storedPlan = goalPlanStore.create(founderId, plan);
+      return res.json({ success: true, plan: storedPlan, executionStatus: "not_executed", note: "This is a validated and persisted plan proposal. No tools were executed and no tasks were queued." });
+    } catch (error) {
+      return res.status(422).json({ success: false, error: error instanceof Error ? error.message : String(error) });
+    }
   });
 
   // Founder-scoped persistent conversation history. Every route is protected by the

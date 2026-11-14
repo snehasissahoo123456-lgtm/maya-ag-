@@ -52,3 +52,11 @@ The worker uses the same persisted task repository and orchestrator as the authe
 ## Persistent conversation history (current development branch)
 
 Maya now has a Founder-scoped conversation repository on the `maya/persistent-conversations` development branch. Authenticated users can list, read, and delete their own conversations through `/api/conversations`; chat turns are persisted and restored after a page reload. Data is stored in an atomic, permission-restricted JSON file under `MAYA_DATA_DIR` (default: `../maya-data`). This is single-instance file persistence, not SQLite/PostgreSQL, not encrypted at rest, and not suitable for horizontal scaling until a managed database adapter and deployment-specific key management are added. Conversation data must remain outside the source repository and must be backed up securely.
+
+## Goal planning endpoint (current development branch)
+
+Authenticated `POST /api/agent/plan` uses the configured Gemini provider to propose a plan. The server validates every proposed tool name and argument against the registered tool declaration allowlist, bounds plans to 12 steps, and requires dependencies to reference earlier steps. The endpoint is **plan-only**: it does not execute tools, create queued tasks, or claim completion. It returns a clear provider-unavailable response when Gemini is not configured.
+
+## Persisted plan execution (current development branch)
+
+Validated plans are stored in `goal-plans.json` under `MAYA_DATA_DIR`. Founder-scoped APIs list and inspect plans, approve individual state-mutating steps, and execute plans sequentially. The executor pauses at approval-required steps, binds approvals to a SHA-256 digest of the exact tool and arguments, records result digests as evidence, resumes completed plans without repeating completed steps, and stops on failure without automatic retry. Sensitive tool approval is enforced again inside the executor, independent of model-provided flags. This is still single-process file-backed execution; it is not a durable distributed queue or a production 24/7 worker.
