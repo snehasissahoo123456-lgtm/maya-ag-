@@ -764,7 +764,7 @@ async function executeAgentTool(name: string, args: Record<string, unknown>, fou
 }
 
 const goalPlanStore = createGoalPlanRepository();
-const goalPlanExecutor = new GoalPlanExecutor(goalPlanStore, executeAgentTool);
+const goalPlanExecutor = new GoalPlanExecutor(goalPlanStore, executeAgentTool, taskRepository);
 const goalPlanWorkerEnabled = process.env.MAYA_PLAN_WORKER_ENABLED === "true";
 if (goalPlanWorkerEnabled) {
   assertGoalPlanWorkerStorage(goalPlanStore, process.env.MAYA_STORAGE_DRIVER || "file");
