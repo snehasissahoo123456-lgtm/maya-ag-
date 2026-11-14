@@ -27,6 +27,36 @@ export class SupabaseTaskRepository implements TaskRepository {
     return rows.map(row => structuredClone(row.envelope));
   }
 
+  async claimNext(founderId: string, workerId: string, leaseMs: number): Promise<TaskEnvelope | undefined> {
+    if (!founderId || !workerId) throw new Error("Founder and worker identity are required to claim a task.");
+    const boundedLease = Math.max(5_000, Math.min(Math.floor(leaseMs), 300_000));
+    const rows = await this.request<TaskRow[]>("rpc/maya_claim_next_task", {
+      method: "POST",
+      body: JSON.stringify({ p_founder_id: founderId, p_worker_id: workerId, p_lease_ms: boundedLease }),
+    });
+    if (!Array.isArray(rows) || rows.length === 0) return undefined;
+    if (rows.length !== 1 || rows[0].founder_id !== founderId) throw new Error("Supabase returned an invalid task lease owner.");
+    return structuredClone(rows[0].envelope);
+  }
+
+  async releaseClaim(taskId: string, founderId: string, workerId: string): Promise<void> {
+    const rows = await this.request<TaskRow[]>("rpc/maya_release_task_claim", {
+      method: "POST",
+      body: JSON.stringify({ p_task_id: taskId, p_founder_id: founderId, p_worker_id: workerId }),
+    });
+    if (!Array.isArray(rows) || rows.length !== 1 || rows[0].id !== taskId || rows[0].founder_id !== founderId) {
+      throw new Error("Task lease was not released for the owning Founder and worker.");
+    }
+  }
+
+  async recoverExpiredClaims(founderId: string): Promise<number> {
+    const rows = await this.request<Array<{ recovered: number }>>("rpc/maya_recover_expired_task_claims", {
+      method: "POST",
+      body: JSON.stringify({ p_founder_id: founderId }),
+    });
+    return Array.isArray(rows) && rows[0] ? Number(rows[0].recovered) || 0 : 0;
+  }
+
   async put(envelope: TaskEnvelope): Promise<void> {
     if (!envelope?.task?.id || !envelope.task.founderId) throw new Error("Task ID and Founder identity are required.");
     const result = await this.request<TaskRow>("rpc/maya_save_task", {

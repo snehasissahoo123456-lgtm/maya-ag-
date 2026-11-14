@@ -157,3 +157,51 @@ test("worker does not automatically retry a failed task", async () => {
   assert.equal(second.executed, 0);
   assert.equal((await repository.get("worker-fail-1"))?.task.status, "failed");
 });
+
+test("worker uses atomic repository claims and releases each claimed task", async () => {
+  class LeaseRepo implements TaskRepository {
+    private item: TaskEnvelope = {
+      task: createTask({ id: "leased-task-1", founderId: "founder-primary", instruction: "Read README" }),
+      capability: "workspace.read_file", args: { path: "README.md" }, attempts: 0, idempotencyKey: "leased-task-1",
+    };
+    private claimed = false;
+    releases = 0;
+    async get(id: string, founderId?: string) {
+      return this.item.task.id === id && (!founderId || this.item.task.founderId === founderId) ? structuredClone(this.item) : undefined;
+    }
+    async put(value: TaskEnvelope) { this.item = structuredClone(value); }
+    async list(founderId: string) { return this.item.task.founderId === founderId ? [structuredClone(this.item)] : []; }
+    async claimNext(founderId: string, workerId: string, leaseMs: number) {
+      assert.equal(founderId, "founder-primary");
+      assert.ok(workerId.length > 0);
+      assert.ok(leaseMs >= 5000);
+      if (this.claimed || this.item.task.status !== "queued") return undefined;
+      this.claimed = true;
+      return structuredClone(this.item);
+    }
+    async releaseClaim(taskId: string, founderId: string, workerId: string) {
+      assert.equal(taskId, "leased-task-1");
+      assert.equal(founderId, "founder-primary");
+      assert.ok(workerId.length > 0);
+      this.releases++;
+    }
+    async recoverExpiredClaims(founderId: string) { assert.equal(founderId, "founder-primary"); return 0; }
+  }
+  const repository = new LeaseRepo();
+  const registry = new CapabilityRegistry();
+  registry.register({
+    name: "workspace.read_file", description: "Read a non-secret workspace file.", risk: "low",
+    allowedRoles: ["founder", "worker"], requiredScopes: ["workspace:read"],
+    arguments: { path: { type: "string", required: true, maxLength: 1024 } },
+    timeoutMs: 5000, requiresApproval: false, verification: "SHA-256 digest of file content.",
+  });
+  const orchestrator = new TaskOrchestrator(repository, registry, new ApprovalLedger(), { run: async () => ({
+    result: { path: "README.md" },
+    evidence: { kind: "sha256", description: "Read-only file digest verified.", observedAt: new Date().toISOString() },
+  }) });
+  const worker = new TaskWorker(repository, orchestrator, registry, { founderId: "founder-primary" });
+  const result = await worker.runOnce();
+  assert.equal(result.executed, 1);
+  assert.equal(repository.releases, 1);
+  assert.equal((await repository.get("leased-task-1"))?.task.status, "completed");
+});

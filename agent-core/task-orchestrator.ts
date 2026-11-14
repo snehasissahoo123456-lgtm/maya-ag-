@@ -8,6 +8,9 @@ export interface TaskRepository {
   get(id: string, founderId?: string): Promise<TaskEnvelope | undefined>;
   put(envelope: TaskEnvelope): Promise<void>;
   list(founderId: string): Promise<TaskEnvelope[]>;
+  claimNext?(founderId: string, workerId: string, leaseMs: number): Promise<TaskEnvelope | undefined>;
+  releaseClaim?(taskId: string, founderId: string, workerId: string): Promise<void>;
+  recoverExpiredClaims?(founderId: string): Promise<number>;
 }
 export interface CapabilityRunner {
   run(input: { capability: string; args: Record<string, unknown>; timeoutMs: number; idempotencyKey: string; signal: AbortSignal }): Promise<{ result: unknown; evidence: VerificationEvidence }>;

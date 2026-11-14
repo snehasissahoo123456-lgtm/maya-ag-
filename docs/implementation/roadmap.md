@@ -194,3 +194,15 @@ This module is intentionally described as file-backed persistence, not a product
 - [x] Server uses configured approval repository and audit logs approval lifecycle
 - [ ] Verify SQL migration and concurrency behavior against a live Supabase project
 - [ ] Add multi-instance task claim/lease and recovery semantics before expanding worker execution
+
+
+## Distributed task claim leases — development branch
+
+- [x] Supabase atomic claim using row locks and `SKIP LOCKED`
+- [x] Bounded lease owner/expiry and explicit release
+- [x] Recover expired running/verifying work into `requires_recovery` without replay
+- [x] Worker uses claim/release interface and caps tasks per cycle
+- [x] Lease claim tests at repository and worker layers
+- [ ] Live Supabase concurrency test with two worker processes
+- [ ] Heartbeat extension for longer-running capabilities (current worker only runs short read-only capability)
+- [ ] Distributed worker monitoring and production hosting/restart policy
