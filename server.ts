@@ -9,7 +9,7 @@ import fs from "fs";
 import { execSync, spawn } from "child_process";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI } from "@google/genai";
-import { createHash, randomBytes } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { WebSocketServer, WebSocket } from "ws";
 import { DeviceBridgeManager } from "./agent-core/device-bridge-manager.ts";
 import { createDeviceRegistry } from "./agent-core/create-device-registry.ts";
@@ -176,33 +176,80 @@ taskCapabilityRegistry.register({
   requiresApproval: false,
   verification: "Read the file and record its SHA-256 digest as execution evidence.",
 });
-// Only this read-only capability is enabled. Do not register write, shell, deploy,
-// account, payment, or device capabilities until durable approvals and adapters exist.
+taskCapabilityRegistry.register({
+  name: "workspace.write_file",
+  description: "Atomically replace the contents of an existing non-sensitive workspace file.",
+  risk: "high",
+  allowedRoles: ["founder", "worker"],
+  requiredScopes: ["workspace:write"],
+  arguments: {
+    path: { type: "string", required: true, maxLength: 1024 },
+    content: { type: "string", required: true, maxLength: 100_000 },
+  },
+  timeoutMs: 15_000,
+  requiresApproval: true,
+  verification: "Atomically replace an existing file only after exact Founder approval and verify the resulting SHA-256 digest.",
+});
+// Only read_file and exact-Founder-approved write_file are enabled. Shell, deploy,
+// account, payment and arbitrary device capabilities remain blocked.
+const approvalRepository = createApprovalRepository();
 const taskOrchestrator = new TaskOrchestrator(
   taskRepository,
   taskCapabilityRegistry,
-  createApprovalRepository(),
+  approvalRepository,
   {
     run: async ({ capability, args, signal }) => {
-      if (capability !== "workspace.read_file") throw new Error("Capability runner is not enabled for this action.");
       if (signal.aborted) throw new Error("Task execution was cancelled.");
-      const file = resolveWorkspacePath(args.path);
-      if (isSensitiveWorkspacePath(file)) throw new Error("Reading secrets and credential files is blocked.");
-      const stat = fs.statSync(file);
-      if (!stat.isFile()) throw new Error("Only regular text files can be read.");
-      if (stat.size > 50_000) throw new Error("File exceeds the 50 KB task read limit.");
-      const content = fs.readFileSync(file, "utf8");
-      if (signal.aborted) throw new Error("Task execution was cancelled.");
-      const digest = createHash("sha256").update(content, "utf8").digest("hex");
-      return {
-        result: { path: path.relative(process.cwd(), file), content, bytes: Buffer.byteLength(content, "utf8"), sha256: digest },
-        evidence: {
-          kind: "workspace-file-sha256",
-          description: "Read the requested workspace file and calculated its SHA-256 digest.",
-          reference: "sha256:" + digest,
-          observedAt: new Date().toISOString(),
-        },
-      };
+      if (capability === "workspace.read_file") {
+        const file = resolveWorkspacePath(args.path);
+        if (isSensitiveWorkspacePath(file)) throw new Error("Reading secrets and credential files is blocked.");
+        const stat = fs.statSync(file);
+        if (!stat.isFile()) throw new Error("Only regular text files can be read.");
+        if (stat.size > 50_000) throw new Error("File exceeds the 50 KB task read limit.");
+        const content = fs.readFileSync(file, "utf8");
+        if (signal.aborted) throw new Error("Task execution was cancelled.");
+        const digest = createHash("sha256").update(content, "utf8").digest("hex");
+        return {
+          result: { path: path.relative(process.cwd(), file), content, bytes: Buffer.byteLength(content, "utf8"), sha256: digest },
+          evidence: {
+            kind: "workspace-file-sha256",
+            description: "Read the requested workspace file and calculated its SHA-256 digest.",
+            reference: "sha256:" + digest,
+            observedAt: new Date().toISOString(),
+          },
+        };
+      }
+      if (capability === "workspace.write_file") {
+        const file = resolveWritableWorkspacePath(args.path);
+        if (isSensitiveWorkspacePath(file)) throw new Error("Writing secrets and credential files is blocked.");
+        const content = args.content;
+        if (typeof content !== "string" || content.length > 100_000) throw new Error("File content must be text no larger than 100 KB.");
+        const stat = fs.lstatSync(file);
+        if (!stat.isFile() || stat.isSymbolicLink()) throw new Error("Only existing regular files can be replaced; symlinks and new files are blocked.");
+        if (stat.size > 100_000) throw new Error("Existing file exceeds the 100 KB write limit.");
+        const temp = path.join(path.dirname(file), `.maya-write.${process.pid}.${randomUUID()}.tmp`);
+        fs.writeFileSync(temp, content, { encoding: "utf8", mode: stat.mode & 0o777, flag: "wx" });
+        try {
+          if (signal.aborted) throw new Error("Task execution was cancelled before commit.");
+          fs.renameSync(temp, file);
+        } catch (error) {
+          try { fs.rmSync(temp, { force: true }); } catch {}
+          throw error;
+        }
+        const verified = fs.readFileSync(file, "utf8");
+        if (verified !== content) throw new Error("Write verification failed; file content differs from the approved payload.");
+        const digest = createHash("sha256").update(verified, "utf8").digest("hex");
+        return {
+          result: { path: path.relative(process.cwd(), file), bytes: Buffer.byteLength(verified, "utf8"), sha256: digest, verified: true },
+          evidence: {
+            kind: "workspace-file-write-sha256",
+            description: "Atomically replaced an existing workspace file after Founder approval and verified the written bytes.",
+            reference: "sha256:" + digest,
+            observedAt: new Date().toISOString(),
+          },
+        };
+      }
+      throw new Error("Capability runner is not enabled for this action.");
     },
   },
   auditRepository,
@@ -213,7 +260,7 @@ const taskWorker = new TaskWorker(taskRepository, taskOrchestrator, taskCapabili
   pollIntervalMs: Number(process.env.MAYA_TASK_WORKER_POLL_MS) || 3000,
   leaseMs: Number(process.env.MAYA_TASK_WORKER_LEASE_MS) || 60_000,
   maxTasksPerCycle: Number(process.env.MAYA_TASK_WORKER_MAX_TASKS_PER_CYCLE) || 20,
-});
+}, approvalRepository);
 const taskWorkerEnabled = process.env.MAYA_TASK_WORKER_ENABLED === "true";
 const scheduleRepository = createScheduledJobRepository();
 const scheduleWorkerEnabled = process.env.MAYA_SCHEDULE_WORKER_ENABLED === "true";
@@ -237,6 +284,24 @@ const MAYA_FUNCTION_DECLARATIONS = [
   { name: "run_tests", description: "Run the repository lint, test, and production build commands and return their real output.", parametersJsonSchema: { type: "object", properties: {} } },
 ];
 const IMPLEMENTED_TOOL_NAMES = new Set(MAYA_FUNCTION_DECLARATIONS.map((tool) => tool.name));
+
+function resolveWritableWorkspacePath(requestedPath: unknown): string {
+  if (typeof requestedPath !== "string" || !requestedPath.trim() || requestedPath.length > 1024) throw new Error("A valid workspace-relative path is required.");
+  const root = fs.realpathSync(process.cwd());
+  const lexical = path.resolve(root, requestedPath);
+  const relative = path.relative(root, lexical);
+  if (relative.startsWith("..") || path.isAbsolute(relative)) throw new Error("Path escapes the enrolled workspace.");
+  let cursor = root;
+  for (const segment of relative.split(path.sep).filter(Boolean)) {
+    cursor = path.join(cursor, segment);
+    const stat = fs.lstatSync(cursor);
+    if (stat.isSymbolicLink()) throw new Error("Workspace writes through symbolic links are blocked.");
+  }
+  const real = fs.realpathSync(lexical);
+  const realRelative = path.relative(root, real);
+  if (realRelative.startsWith("..") || path.isAbsolute(realRelative)) throw new Error("Resolved path escapes the enrolled workspace.");
+  return real;
+}
 
 function isSensitiveWorkspacePath(filePath: string): boolean {
   const relative = path.relative(fs.realpathSync(process.cwd()), filePath);
@@ -1125,17 +1190,21 @@ async function startServer() {
     const founderId = session?.user?.id;
     if (!founderId) return res.status(401).json({ success: false, error: "Verified Founder session required." });
     const instruction = typeof req.body?.instruction === "string" ? req.body.instruction.trim() : "";
+    const capability = typeof req.body?.capability === "string" ? req.body.capability : "workspace.read_file";
     const filePath = typeof req.body?.path === "string" ? req.body.path : "";
+    const content = req.body?.content;
     if (!instruction || instruction.length > 1000) return res.status(400).json({ success: false, error: "Instruction must contain 1–1000 characters." });
+    if (capability !== "workspace.read_file" && capability !== "workspace.write_file") return res.status(400).json({ success: false, error: "Only workspace.read_file and approval-gated workspace.write_file are enabled." });
     if (!filePath || filePath.length > 1024) return res.status(400).json({ success: false, error: "A workspace-relative file path of 1–1024 characters is required." });
+    if (capability === "workspace.write_file" && (typeof content !== "string" || Buffer.byteLength(content, "utf8") > 100_000)) return res.status(400).json({ success: false, error: "Write content must be text no larger than 100 KB." });
     try {
-      const actor = { id: founderId, founderId, role: "founder" as const, scopes: ["workspace:read"] };
+      const actor = { id: founderId, founderId, role: "founder" as const, scopes: capability === "workspace.write_file" ? ["workspace:read", "workspace:write"] : ["workspace:read"] };
       const envelope = await taskOrchestrator.enqueue({
         id: "task-" + randomTaskId(),
         founderId,
         instruction,
-        capability: "workspace.read_file",
-        args: { path: filePath },
+        capability,
+        args: capability === "workspace.write_file" ? { path: filePath, content } : { path: filePath },
         actor,
       });
       currentAuditLogs.unshift({
@@ -1155,8 +1224,9 @@ async function startServer() {
     const founderId = session?.user?.id;
     if (!founderId) return res.status(401).json({ success: false, error: "Verified Founder session required." });
     try {
-      const actor = { id: founderId, founderId, role: "founder" as const, scopes: ["workspace:read"] };
-      const output = await taskOrchestrator.execute(req.params.id, actor);
+      const actor = { id: founderId, founderId, role: "founder" as const, scopes: ["workspace:read", "workspace:write"] };
+      const approvalId = typeof req.body?.approvalId === "string" ? req.body.approvalId : undefined;
+      const output = await taskOrchestrator.execute(req.params.id, actor, approvalId);
       currentAuditLogs.unshift({
         id: "control-task-run-" + randomTaskId(), toolName: "control_plane_task_execute",
         params: { taskId: req.params.id }, status: "success",
@@ -1184,12 +1254,18 @@ async function startServer() {
     const founderId = session?.user?.id;
     if (!founderId) return res.status(401).json({ success: false, error: "Verified Founder session required." });
     try {
-      const actor = { id: founderId, founderId, role: "founder" as const, scopes: ["workspace:read"] };
+      const actor = { id: founderId, founderId, role: "founder" as const, scopes: ["workspace:read", "workspace:write"] };
       const approval = await taskOrchestrator.requestApproval(req.params.id, actor);
       return res.json({ success: true, ...approval });
     } catch (error) {
       return res.status(400).json({ success: false, error: error instanceof Error ? error.message : String(error) });
     }
+  });
+
+  app.get("/api/control-plane/approvals", async (req, res) => {
+    const founderId = (req as any).authSession?.user?.id;
+    if (!founderId) return res.status(401).json({ success: false, error: "Verified Founder session required." });
+    return res.json({ success: true, approvals: await approvalRepository.listForFounder(founderId) });
   });
 
   app.post("/api/control-plane/approvals/:approvalId/decision", async (req, res): Promise<any> => {

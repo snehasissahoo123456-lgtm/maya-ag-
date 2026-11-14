@@ -51,9 +51,21 @@ function setup(run: (input: any) => Promise<any> = async () => ({
     requiresApproval: true,
     verification: "Publication receipt.",
   });
-  const orchestrator = new TaskOrchestrator(repository, registry, new ApprovalLedger(), { run });
-  const worker = new TaskWorker(repository, orchestrator, registry, { founderId: "founder-primary", pollIntervalMs: 1000 });
-  return { repository, registry, orchestrator, worker };
+  registry.register({
+    name: "workspace.write_file",
+    description: "Replace an existing non-sensitive workspace file.",
+    risk: "high",
+    allowedRoles: ["founder", "worker"],
+    requiredScopes: ["workspace:write"],
+    arguments: { path: { type: "string", required: true, maxLength: 1024 }, content: { type: "string", required: true, maxLength: 100_000 } },
+    timeoutMs: 5000,
+    requiresApproval: true,
+    verification: "Read back and hash the written file.",
+  });
+  const approvals = new ApprovalLedger();
+  const orchestrator = new TaskOrchestrator(repository, registry, approvals, { run });
+  const worker = new TaskWorker(repository, orchestrator, registry, { founderId: "founder-primary", pollIntervalMs: 1000 }, approvals);
+  return { repository, registry, orchestrator, worker, approvals };
 }
 
 test("worker executes only queued low-risk workspace read tasks using its scoped worker identity", async () => {
@@ -204,4 +216,49 @@ test("worker uses atomic repository claims and releases each claimed task", asyn
   assert.equal(result.executed, 1);
   assert.equal(repository.releases, 1);
   assert.equal((await repository.get("leased-task-1"))?.task.status, "completed");
+});
+
+test("worker executes a workspace write only after exact Founder approval", async () => {
+  let executedCapability = "";
+  const { orchestrator, worker, repository, approvals } = setup(async input => {
+    executedCapability = input.capability;
+    return { result: { written: true }, evidence: { kind: "write-sha256", description: "Approved file replacement verified.", reference: "sha256:" + "b".repeat(64), observedAt: new Date().toISOString() } };
+  });
+  const writeFounder = { ...founder, scopes: ["workspace:write"] };
+  await orchestrator.enqueue({
+    id: "worker-write-1", founderId: "founder-primary", instruction: "Replace the approved report",
+    capability: "workspace.write_file", args: { path: "report.md", content: "Approved contents" }, actor: writeFounder,
+  });
+  const pending = await orchestrator.requestApproval("worker-write-1", writeFounder);
+  await orchestrator.decideApproval({ approvalId: pending.approvalId, approved: true, actor: writeFounder });
+  assert.equal((await repository.get("worker-write-1"))?.task.status, "queued");
+  const result = await worker.runOnce();
+  assert.equal(result.executed, 1);
+  assert.equal(executedCapability, "workspace.write_file");
+  assert.equal((await repository.get("worker-write-1"))?.task.status, "completed");
+  assert.equal((await approvals.listForFounder("founder-primary")).find(item => item.id === pending.approvalId)?.status, "consumed");
+});
+
+test("worker never executes a write without a matching approval digest", async () => {
+  let executions = 0;
+  const { orchestrator, worker, repository } = setup(async () => {
+    executions++;
+    return { result: {}, evidence: { kind: "write", description: "Should not run", observedAt: new Date().toISOString() } };
+  });
+  const writeFounder = { ...founder, scopes: ["workspace:write"] };
+  await orchestrator.enqueue({
+    id: "worker-write-unapproved", founderId: "founder-primary", instruction: "Replace a report",
+    capability: "workspace.write_file", args: { path: "report.md", content: "Original approved payload" }, actor: writeFounder,
+  });
+  const pending = await orchestrator.requestApproval("worker-write-unapproved", writeFounder);
+  await orchestrator.decideApproval({ approvalId: pending.approvalId, approved: true, actor: writeFounder });
+  const envelope = await repository.get("worker-write-unapproved");
+  assert.ok(envelope);
+  envelope.args.content = "Different unapproved payload";
+  await repository.put(envelope);
+  const result = await worker.runOnce();
+  assert.equal(result.executed, 0);
+  assert.equal(result.skipped, 1);
+  assert.equal(executions, 0);
+  assert.equal((await repository.get("worker-write-unapproved"))?.task.status, "queued");
 });

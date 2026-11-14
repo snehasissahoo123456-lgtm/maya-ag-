@@ -15,12 +15,13 @@ function setup(risk: "low" | "high" = "low") {
  const registry = new CapabilityRegistry();
  registry.register({ name: "workspace.write", description: "Write a generated artifact", risk, allowedRoles: ["developer"], requiredScopes: ["workspace:write"], arguments: { file: { type: "string", required: true, maxLength: 100 } }, timeoutMs: 5000, requiresApproval: risk === "high", verification: "Read back artifact and compare checksum." });
  const ledger = new ApprovalLedger();
+ const repository = new MemoryRepo();
  let runs = 0;
- const orchestrator = new TaskOrchestrator(new MemoryRepo(), registry, ledger, { run: async ({ capability, args }) => {
+ const orchestrator = new TaskOrchestrator(repository, registry, ledger, { run: async ({ capability, args }) => {
   runs++;
   return { result: { capability, args }, evidence: { kind: "checksum", description: "Artifact read back and checksum matched.", observedAt: new Date().toISOString() } };
  } });
- return { orchestrator, ledger, getRuns: () => runs };
+ return { orchestrator, ledger, repository, getRuns: () => runs };
 }
 test("low-risk task executes and only completes with verification evidence", async () => {
  const { orchestrator, getRuns } = setup();
@@ -31,11 +32,12 @@ test("low-risk task executes and only completes with verification evidence", asy
  assert.equal(getRuns(), 1);
 });
 test("high-risk task cannot execute until exact Founder approval is granted", async () => {
- const { orchestrator, getRuns } = setup("high");
+ const { orchestrator, repository, getRuns } = setup("high");
  await orchestrator.enqueue({ id: "t-high", founderId: "f1", instruction: "Publish release", capability: "workspace.write", args: { file: "release.zip" }, actor: developer });
  await assert.rejects(() => orchestrator.execute("t-high", developer), /approval/i);
  const pending = await orchestrator.requestApproval("t-high", founder);
  await orchestrator.decideApproval({ approvalId: pending.approvalId, approved: true, actor: founder });
+ assert.equal((await repository.get("t-high"))?.task.status, "queued", "approved tasks return to the background worker queue");
  const result = await orchestrator.execute("t-high", developer, pending.approvalId);
  assert.equal(result.task.status, "completed");
  assert.equal(getRuns(), 1);
@@ -85,4 +87,13 @@ test("audit failure after a capability runs parks task in requires_recovery", as
  await orchestrator.enqueue({ id: "t-audit-failure", founderId: "f1", instruction: "Write a report", capability: "workspace.write", args: { file: "report.md" }, actor: developer });
  await assert.rejects(() => orchestrator.execute("t-audit-failure", developer), /audit database unavailable/);
  assert.equal((await repository.get("t-audit-failure"))?.task.status, "requires_recovery");
+});
+
+test("rejected high-risk task is cancelled and cannot be executed", async () => {
+ const { orchestrator, repository } = setup("high");
+ await orchestrator.enqueue({ id: "t-reject", founderId: "f1", instruction: "Replace a file", capability: "workspace.write", args: { file: "notes.md" }, actor: developer });
+ const pending = await orchestrator.requestApproval("t-reject", founder);
+ await orchestrator.decideApproval({ approvalId: pending.approvalId, approved: false, actor: founder });
+ assert.equal((await repository.get("t-reject"))?.task.status, "cancelled");
+ await assert.rejects(() => orchestrator.execute("t-reject", developer, pending.approvalId), /not executable/i);
 });

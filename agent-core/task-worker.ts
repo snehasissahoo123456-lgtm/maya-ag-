@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { CapabilityRegistry, AgentIdentity } from "./capability-registry.ts";
-import type { TaskOrchestrator, TaskRepository } from "./task-orchestrator.ts";
+import { digestAction, type ApprovalRepository } from "./approval-ledger.ts";
+import type { TaskEnvelope, TaskOrchestrator, TaskRepository } from "./task-orchestrator.ts";
 
 export interface TaskWorkerStatus {
   enabled: boolean;
@@ -21,8 +22,8 @@ export interface TaskWorkerOptions {
 }
 
 /**
- * Single-process, opt-in worker for the one currently safe capability.
- * Failed work is not retried, and interrupted tasks remain parked for review.
+ * Opt-in worker for read-only file reads and exact-Founder-approved file replacements.
+ * Unknown, unapproved, failed and interrupted work is never broadened or auto-replayed.
  */
 export class TaskWorker {
   private readonly founderId: string;
@@ -42,6 +43,7 @@ export class TaskWorker {
     private readonly orchestrator: TaskOrchestrator,
     private readonly capabilities: CapabilityRegistry,
     options: TaskWorkerOptions,
+    private readonly approvals?: ApprovalRepository,
   ) {
     if (!options.founderId.trim()) throw new Error("Worker Founder scope is required.");
     this.founderId = options.founderId;
@@ -75,6 +77,39 @@ export class TaskWorker {
     }
   }
 
+  private async executeAllowed(envelope: TaskEnvelope): Promise<"executed" | "skipped"> {
+    if (envelope.task.founderId !== this.founderId) return "skipped";
+    const isRead = envelope.capability === "workspace.read_file";
+    const isApprovedWrite = envelope.capability === "workspace.write_file";
+    if (!isRead && !isApprovedWrite) return "skipped";
+    if (isRead && envelope.task.requiresApproval) return "skipped";
+    if (isApprovedWrite && (!envelope.task.requiresApproval || !this.approvals)) return "skipped";
+
+    const actor: AgentIdentity = {
+      id: "maya-internal-task-worker:" + this.workerId,
+      founderId: this.founderId,
+      role: "worker",
+      scopes: isApprovedWrite ? ["workspace:read", "workspace:write"] : ["workspace:read"],
+    };
+    const { definition } = this.capabilities.validate(envelope.capability, actor, envelope.args);
+    if (!definition.allowedRoles.includes("worker")) return "skipped";
+    let approvalId: string | undefined;
+    if (isApprovedWrite) {
+      if (definition.risk !== "high" || !definition.requiresApproval) return "skipped";
+      const expectedDigest = digestAction(envelope.capability, envelope.args);
+      const grant = (await this.approvals!.listForFounder(this.founderId)).find(item =>
+        item.status === "approved" && item.taskId === envelope.task.id &&
+        item.capability === envelope.capability && item.actionDigest === expectedDigest &&
+        Date.parse(item.expiresAt) > Date.now());
+      if (!grant) return "skipped";
+      approvalId = grant.id;
+    } else if (definition.risk !== "low" || definition.requiresApproval) {
+      return "skipped";
+    }
+    await this.orchestrator.execute(envelope.task.id, actor, approvalId);
+    return "executed";
+  }
+
   async runOnce(): Promise<{ scanned: number; executed: number; skipped: number; failed: number; busy?: boolean }> {
     if (this.cycleActive) return { scanned: 0, executed: 0, skipped: 0, failed: 0, busy: true };
     this.cycleActive = true;
@@ -88,25 +123,13 @@ export class TaskWorker {
           if (!envelope) break;
           result.scanned++;
           try {
-            if (envelope.task.founderId !== this.founderId || envelope.task.status !== "queued" ||
-                this.blockedTaskIds.has(envelope.task.id) || envelope.capability !== "workspace.read_file" ||
-                envelope.task.requiresApproval) {
+            if (envelope.task.founderId !== this.founderId || envelope.task.status !== "queued" || this.blockedTaskIds.has(envelope.task.id)) {
               result.skipped++;
               continue;
             }
-            const actor: AgentIdentity = {
-              id: "maya-internal-task-worker:" + this.workerId,
-              founderId: this.founderId,
-              role: "worker",
-              scopes: ["workspace:read"],
-            };
-            const { definition } = this.capabilities.validate(envelope.capability, actor, envelope.args);
-            if (definition.risk !== "low" || definition.requiresApproval || !definition.allowedRoles.includes("worker")) {
-              result.skipped++;
-              continue;
-            }
-            await this.orchestrator.execute(envelope.task.id, actor);
-            result.executed++;
+            const outcome = await this.executeAllowed(envelope);
+            if (outcome === "executed") result.executed++;
+            else result.skipped++;
           } catch (error) {
             this.blockedTaskIds.add(envelope.task.id);
             result.failed++;
@@ -125,24 +148,10 @@ export class TaskWorker {
         for (const envelope of envelopes) {
           if (envelope.task.founderId !== this.founderId || envelope.task.status !== "queued") continue;
           if (this.blockedTaskIds.has(envelope.task.id)) { result.skipped++; continue; }
-          if (envelope.capability !== "workspace.read_file" || envelope.task.requiresApproval) {
-            result.skipped++;
-            continue;
-          }
-          const actor: AgentIdentity = {
-            id: "maya-internal-task-worker",
-            founderId: this.founderId,
-            role: "worker",
-            scopes: ["workspace:read"],
-          };
           try {
-            const { definition } = this.capabilities.validate(envelope.capability, actor, envelope.args);
-            if (definition.risk !== "low" || definition.requiresApproval || !definition.allowedRoles.includes("worker")) {
-              result.skipped++;
-              continue;
-            }
-            await this.orchestrator.execute(envelope.task.id, actor);
-            result.executed++;
+            const outcome = await this.executeAllowed(envelope);
+            if (outcome === "executed") result.executed++;
+            else result.skipped++;
           } catch (error) {
             this.blockedTaskIds.add(envelope.task.id);
             result.failed++;
