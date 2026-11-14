@@ -883,7 +883,7 @@ const specialistToolExecutor = new SpecialistToolExecutor(
       actorId: "specialist:" + event.agentId,
       actorRole: event.actorRole,
       type: eventType,
-      taskId: "specialist:" + event.agentId + ":" + event.completedAt,
+      taskId: event.taskId || ("specialist:" + event.agentId + ":" + event.completedAt),
       capability: event.capability,
       actionDigest,
       occurredAt: event.completedAt,
