@@ -607,7 +607,7 @@ test("Supabase-backed worker renews its lease while a task is executing", async 
   (repository as any).claimNext = async () => {
     if (claimed) return undefined;
     claimed = true;
-    return repository.get("worker-lease-renewal-1", "founder-primary");
+    return repository.get("worker-lease-renewal-1");
   };
   (repository as any).renewClaim = async (taskId: string, founderId: string, workerId: string, leaseMs: number) => {
     assert.equal(taskId, "worker-lease-renewal-1");
