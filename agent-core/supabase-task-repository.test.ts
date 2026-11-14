@@ -97,7 +97,7 @@ test("renews a live task lease only for the matching Founder and worker", async 
   const repository = new SupabaseTaskRepository("https://example.supabase.co", "service-role-test-key", fetcher as any);
   await repository.renewClaim("task-1", "founder-1", "worker-1", 30_000);
   assert.equal(requests.length, 1);
-  assert.match(requests[0].url, /rpc\\/maya_renew_task_claim$/);
+  assert.match(requests[0].url, /rpc\/maya_renew_task_claim$/);
   assert.deepEqual(requests[0].body, {
     p_task_id: "task-1",
     p_founder_id: "founder-1",
