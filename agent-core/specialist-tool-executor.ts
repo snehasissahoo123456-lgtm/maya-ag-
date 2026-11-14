@@ -129,7 +129,14 @@ export class SpecialistToolExecutor {
           ...(taskEnvelope ? { taskId: taskEnvelope.task.id } : {}),
         });
         if (taskEnvelope) {
-          taskEnvelope.task = transitionTask(taskEnvelope.task, "completed");
+          taskEnvelope.task = transitionTask(taskEnvelope.task, "completed", {
+            evidence: {
+              kind: "specialist-tool-completion",
+              description: "The specialist result was durably recorded and its audit event was acknowledged.",
+              reference: "sha256:" + resultSha256,
+              observedAt: completedAt,
+            },
+          });
           await this.taskRepository.put(taskEnvelope);
         }
         return result;
