@@ -11,6 +11,7 @@ on:
       - maya/goal-planner
       - maya/memory-retrieval
       - maya/specialist-runtime
+      - maya/ceo-orchestrator
   pull_request:
     branches:
       - main
@@ -19,6 +20,7 @@ on:
       - maya/persistent-conversations
       - maya/goal-planner
       - maya/memory-retrieval
+      - maya/specialist-runtime
 
 permissions:
   contents: read
