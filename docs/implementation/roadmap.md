@@ -21,11 +21,12 @@ Status: Foundation and first security-hardening pass are implemented. Latest CI 
 - [x] Persist the exact-action approval ledger to a single-instance file store and expose authenticated Founder request/decision endpoints. No high-risk capability is enabled.
 - [x] Implement one read-only workspace-file execution adapter with path containment, secret-file blocking, size limit, and SHA-256 evidence.
 - Extend workspace containment to every future file and command adapter; unrestricted shell execution remains disabled.
-Exit gate: partial evidence exists for the task API and its read-only capability. Still required: comprehensive route/tool authorization tests, CSRF/origin protection, durable sessions/audit, and security acceptance testing. No general-purpose worker or privileged action is enabled.
+Exit gate: partial evidence exists for the task API, read-only capability and opt-in single-process read-only worker. Still required: comprehensive route/tool authorization tests, CSRF/origin protection, durable sessions/audit, and security acceptance testing. No privileged action or general-purpose execution worker is enabled.
 
 ## Phase 2 — Cloud control plane
 - Device registry and device-bound credentials.
-- Durable task queue, planner, scheduler, policy engine, event stream, and observability.
+- [x] Add an opt-in, single-process worker that polls Founder-scoped queued tasks and executes only the allowlisted low-risk read-only workspace capability; expose worker status in health checks.
+- Durable transactional task queue, multi-instance scheduler, bounded retry/backoff, durable event stream, and observability.
 - AI provider adapter with server-side secrets and configurable quotas.
 - [x] Specialist agent manifests and bounded delegation policy (templates only; live model-backed agents and persistent budgets remain future work).
 Exit gate: two devices can share tasks securely; retries and restarts preserve state; approvals are bound to exact actions.

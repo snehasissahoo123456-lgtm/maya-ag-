@@ -7,6 +7,7 @@ class MemoryRepo implements TaskRepository {
  private rows = new Map<string, TaskEnvelope>();
  async get(id: string) { return this.rows.get(id); }
  async put(value: TaskEnvelope) { this.rows.set(value.task.id, structuredClone(value)); }
+ async list(founderId: string) { return [...this.rows.values()].filter(value => value.task.founderId === founderId).map(value => structuredClone(value)); }
 }
 const founder = { id: "founder-session", founderId: "f1", role: "founder" as const, scopes: ["*"] };
 const developer = { id: "developer-1", founderId: "f1", role: "developer" as const, scopes: ["workspace:write"] };

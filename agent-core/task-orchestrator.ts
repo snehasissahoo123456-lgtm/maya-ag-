@@ -5,6 +5,7 @@ export interface TaskEnvelope { task: MayaTask; capability: string; args: Record
 export interface TaskRepository {
   get(id: string): Promise<TaskEnvelope | undefined>;
   put(envelope: TaskEnvelope): Promise<void>;
+  list(founderId: string): Promise<TaskEnvelope[]>;
 }
 export interface CapabilityRunner {
   run(input: { capability: string; args: Record<string, unknown>; timeoutMs: number; idempotencyKey: string; signal: AbortSignal }): Promise<{ result: unknown; evidence: VerificationEvidence }>;
