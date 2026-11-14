@@ -142,6 +142,43 @@ export class TaskWorker {
     return "executed";
   }
 
+  private async executeWithLeaseRenewal(envelope: TaskEnvelope): Promise<"executed" | "skipped"> {
+    if (!this.repository.renewClaim) return this.executeAllowed(envelope);
+    const renewalIntervalMs = Math.max(1_000, Math.floor(this.leaseMs / 3));
+    let renewalInFlight = false;
+    let renewalError: Error | undefined;
+    const timer = setInterval(() => {
+      if (renewalInFlight || renewalError) return;
+      renewalInFlight = true;
+      void this.repository.renewClaim!(envelope.task.id, this.founderId, this.workerId, this.leaseMs)
+        .catch(error => {
+          renewalError = error instanceof Error ? error : new Error(String(error));
+          this.blockedTaskIds.add(envelope.task.id);
+          this.status = { ...this.status, lastError: "Task lease renewal failed; execution outcome requires inspection: " + renewalError.message };
+        })
+        .finally(() => { renewalInFlight = false; });
+    }, renewalIntervalMs);
+    timer.unref?.();
+    try {
+      const outcome = await this.executeAllowed(envelope);
+      // Wait for an in-flight renewal so a late failure cannot be silently ignored.
+      while (renewalInFlight) await new Promise(resolve => setTimeout(resolve, 10));
+      if (renewalError) {
+        const current = await this.repository.get(envelope.task.id, this.founderId);
+        if (current && ["running", "verifying"].includes(current.task.status)) {
+          current.task = transitionTask(current.task, "requires_recovery", {
+            error: "Worker lease renewal failed during execution. Inspect side effects and verification evidence before retrying.",
+          });
+          await this.repository.put(current);
+        }
+        throw new Error("Task lease renewal failed; task must be inspected before retrying: " + renewalError.message);
+      }
+      return outcome;
+    } finally {
+      clearInterval(timer);
+    }
+  }
+
   async runOnce(): Promise<{ scanned: number; executed: number; skipped: number; failed: number; busy?: boolean }> {
     if (this.cycleActive) return { scanned: 0, executed: 0, skipped: 0, failed: 0, busy: true };
     this.cycleActive = true;
@@ -159,7 +196,7 @@ export class TaskWorker {
               result.skipped++;
               continue;
             }
-            const outcome = await this.executeAllowed(envelope);
+            const outcome = await this.executeWithLeaseRenewal(envelope);
             if (outcome === "executed") result.executed++;
             else result.skipped++;
           } catch (error) {
