@@ -11,6 +11,8 @@ import { createServer as createViteServer } from "vite";
 import { GoogleGenAI } from "@google/genai";
 import { createHash, randomBytes } from "node:crypto";
 import { WebSocketServer, WebSocket } from "ws";
+import { DeviceBridgeManager } from "./agent-core/device-bridge-manager.ts";
+import { createDeviceRegistry } from "./agent-core/create-device-registry.ts";
 
 const MODEL_UPGRADES: Record<string, string> = {
   "gemini-2.5-flash": "gemini-3-flash-preview",
@@ -415,6 +417,7 @@ async function startServer() {
   const app = express();
   const server = http.createServer(app);
   const PORT = Number(process.env.PORT) || 3000;
+  const deviceBridgeManager = new DeviceBridgeManager(createDeviceRegistry());
 
   app.use(express.json({ limit: "50mb" }));
   app.use(express.urlencoded({ limit: "50mb", extended: true }));
@@ -451,6 +454,43 @@ async function startServer() {
     }
     (req as any).authSession = session;
     return next();
+  });
+
+  app.post("/api/devices/pairing", async (req, res): Promise<any> => {
+    const founderId = (req as any).authSession?.user?.id;
+    if (!founderId) return res.status(401).json({ success: false, error: "Verified Founder session required." });
+    try {
+      const pairing = await deviceBridgeManager.createPairing(founderId);
+      return res.status(201).json({ success: true, ...pairing, instructions: "Use this one-time code in the Maya local bridge. It expires in five minutes." });
+    } catch (error) {
+      return res.status(400).json({ success: false, error: error instanceof Error ? error.message : "Unable to create pairing code." });
+    }
+  });
+
+  app.get("/api/devices", async (req, res): Promise<any> => {
+    const founderId = (req as any).authSession?.user?.id;
+    if (!founderId) return res.status(401).json({ success: false, error: "Verified Founder session required." });
+    return res.json({ success: true, devices: await deviceBridgeManager.list(founderId) });
+  });
+
+  app.post("/api/devices/:id/commands", async (req, res): Promise<any> => {
+    const founderId = (req as any).authSession?.user?.id;
+    if (!founderId) return res.status(401).json({ success: false, error: "Verified Founder session required." });
+    const command = typeof req.body?.command === "string" ? req.body.command : "";
+    const args = req.body?.args && typeof req.body.args === "object" && !Array.isArray(req.body.args) ? req.body.args : {};
+    try {
+      const result = await deviceBridgeManager.executeCommand({ deviceId: req.params.id, founderId, command, args });
+      return res.json({ success: true, result });
+    } catch (error) {
+      return res.status(400).json({ success: false, error: error instanceof Error ? error.message : "Device command failed." });
+    }
+  });
+
+  app.delete("/api/devices/:id", async (req, res): Promise<any> => {
+    const founderId = (req as any).authSession?.user?.id;
+    if (!founderId) return res.status(401).json({ success: false, error: "Verified Founder session required." });
+    const revoked = await deviceBridgeManager.revoke(req.params.id, founderId);
+    return revoked ? res.json({ success: true, revoked: req.params.id }) : res.status(404).json({ success: false, error: "Device not found." });
   });
 
   app.post("/api/agent/ceo/orchestrate", async (req, res): Promise<any> => {
@@ -1633,10 +1673,15 @@ MULTILINGUAL & RAPID REACTION:
     }
   });
 
+  // Both WebSocket endpoints share one HTTP upgrade dispatcher. Multiple WebSocketServer
+  // instances attached directly to the same HTTP server reject each other's paths.
+  const deviceWss = new WebSocketServer({ noServer: true, maxPayload: 256 * 1024, perMessageDeflate: false });
+  deviceWss.on("connection", (socket: WebSocket) => deviceBridgeManager.accept(socket));
+  deviceWss.on("error", (error) => console.error("[Device Bridge] WebSocket server error:", error));
+
   // WebSocket Relay for ai.live.connect & ai.live.music.connect + Real-Time Watcher Stream
   const wss = new WebSocketServer({
-    server,
-    path: "/api/live-ws",
+    noServer: true,
     verifyClient: (info, done) => {
       const cookies = info.req.headers.cookie || "";
       const raw = cookies.split(";").map((part) => part.trim()).find((part) => part.startsWith("maya_session="));
@@ -1644,6 +1689,21 @@ MULTILINGUAL & RAPID REACTION:
       if (!authService.validateSession(token)) return done(false, 401, "Authentication required");
       return done(true);
     },
+  });
+
+  server.on("upgrade", (request, socket, head) => {
+    let pathname = "";
+    try { pathname = new URL(request.url || "/", "http://localhost").pathname; }
+    catch { socket.destroy(); return; }
+    if (pathname === "/api/device-bridge") {
+      deviceWss.handleUpgrade(request, socket, head, (webSocket) => deviceWss.emit("connection", webSocket, request));
+      return;
+    }
+    if (pathname === "/api/live-ws") {
+      wss.handleUpgrade(request, socket, head, (webSocket) => wss.emit("connection", webSocket, request));
+      return;
+    }
+    socket.destroy();
   });
 
   wss.on("connection", (ws: WebSocket) => {
@@ -1848,6 +1908,7 @@ MULTILINGUAL & RAPID REACTION:
   }
 
   server.on("close", () => { void taskWorker.stop(); });
+  server.on("close", () => { deviceWss.close(); wss.close(); });
   server.listen(PORT, "0.0.0.0", () => {
     if (taskWorkerEnabled) taskWorker.start();
     console.log(`[Backend] Server running on http://localhost:${PORT}`);

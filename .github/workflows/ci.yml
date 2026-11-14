@@ -23,10 +23,12 @@ on:
       - maya/supabase-memory-store
       - maya/semantic-memory-retrieval
       - maya/memory-feedback-loop
+      - maya/secure-device-bridge
   pull_request:
     branches:
       - main
       - maya/semantic-memory-retrieval
+      - maya/memory-feedback-loop
       - maya/supabase-memory-store
       - maya/distributed-task-leases
       - maya/durable-audit-trail
@@ -39,6 +41,7 @@ on:
       - maya/goal-planner
       - maya/memory-retrieval
       - maya/specialist-runtime
+      - maya/secure-device-bridge
 
 permissions:
   contents: read

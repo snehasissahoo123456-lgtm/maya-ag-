@@ -240,3 +240,21 @@ This module is intentionally described as file-backed persistence, not a product
 - [x] HTTP coverage for authenticated feedback
 - [ ] Evaluate ranking impact on a labelled retrieval benchmark
 - [ ] Add correction proposals and Founder approval before rewriting memory content
+
+
+## Secure local device bridge — development branch
+
+- [x] Founder-authenticated one-time device pairing with five-minute expiry
+- [x] Store only device-token hashes on the server and local device token in a restricted user-profile file
+- [x] Authenticated device inventory, online status, command relay and credential revocation
+- [x] Dedicated Devices workspace and Windows PowerShell launcher
+- [x] Restrict device commands to system information, workspace listing and bounded text-file reads
+- [x] Reject workspace traversal, symlinks and sensitive credential paths
+- [x] Test pairing, token storage, Founder isolation, live WebSocket command relay and HTTP authorization
+- [ ] Add transactional Supabase device registry and multi-instance connection routing
+- [ ] Add audited capability grants and exact-action Founder approval before enabling write, shell or browser-control capabilities
+- [ ] Add Windows service installation, secure auto-start, health monitoring and signed updater
+- [ ] Add Android remote client and mobile push notification support
+- [ ] Run threat modelling and penetration testing before enabling broader PC control
+
+Current connector is intentionally read-only. It is not a general remote desktop, shell, or arbitrary computer-control agent.
