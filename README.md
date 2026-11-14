@@ -66,3 +66,11 @@ Validated plans are stored in `goal-plans.json` under `MAYA_DATA_DIR`. Founder-s
 Maya retrieves up to five relevant explicitly saved Founder notes for each Gemini chat turn using bounded keyword scoring over note titles, categories and content. Retrieved notes are passed as JSON reference data and explicitly marked as untrusted context, not instructions. Chat-driven tool calls are read-only: memory writes, task queue writes and repository test commands are blocked in the direct chat tool loop and must go through a persisted goal plan with explicit Founder approval. This is keyword retrieval, not embeddings/vector search or autonomous self-modification.
 
 The development UI includes a Goal Plans workspace for generating, reviewing, approving and running persisted plans. It surfaces step state and result digests; it does not expose general shell, browser, device or external-account control.
+
+## Specialist reasoning runtime (current development branch)
+
+Authenticated APIs expose the specialist registry and a bounded specialist-run endpoint. The UI provides a Specialist Agents workspace for Research, Operations, Content, Finance, Developer and CEO roles. Each run is a single Gemini reasoning call with the role's manifest purpose/scopes and relevant saved notes. This runtime has no tools, browser, shell, filesystem, account, payment, deployment or device access; it cannot spawn/delegate to other agents or claim to have executed work. It is a specialist reasoning interface, not yet the full multi-agent workforce.
+
+## CEO specialist orchestration (current development branch)
+
+The authenticated CEO orchestration endpoint uses Gemini to select one to four distinct specialists from the registered manifests, validates the dispatch, runs each specialist sequentially, and asks the CEO layer to synthesize their findings. A dedicated CEO Orchestration workspace exposes this flow. This is a reasoning-only workflow: specialist agents have no tools and cannot execute external actions, spawn more agents or claim work was completed. The run is not yet a durable distributed workflow and its findings are not yet persisted as a long-term project record.

@@ -16,6 +16,8 @@ import '@material/web/icon/icon.js';
 import '@material/web/iconbutton/icon-button.js';
 import { ReactLockScreen } from './ReactLockScreen.tsx';
 import './PlanWorkspace.ts';
+import './SpecialistWorkspace.ts';
+import './CEOWorkspace.ts';
 
 import {
   SYB_VENTURES,
@@ -84,7 +86,7 @@ export class ActionEngineApp extends LitElement {
   @state() accessor probeOverallHealth = 100;
 
   // Active navigation tab
-  @state() accessor activeTab: 'dashboard' | 'console' | 'discovery' | 'tasks' | 'ecosystem' | 'tools' | 'memory' | 'artifacts' | 'tests' | 'platforms' | 'plans' = 'dashboard';
+  @state() accessor activeTab: 'dashboard' | 'console' | 'discovery' | 'tasks' | 'ecosystem' | 'tools' | 'memory' | 'artifacts' | 'tests' | 'platforms' | 'plans' | 'agents' | 'ceo' = 'dashboard';
   @state() accessor dashboardApiStatus: 'checking' | 'online' | 'offline' = 'checking';
   @state() accessor dashboardWorkerStatus: 'checking' | 'enabled' | 'disabled' | 'unknown' = 'checking';
   @state() accessor dashboardTasksStatus: 'checking' | 'available' | 'unauthenticated' | 'unavailable' = 'checking';
@@ -1561,6 +1563,22 @@ Status: Ready to build upon Founder "go ahead".`;
               </button>
 
               <button
+                class="w-full text-left px-2.5 py-2 rounded-xl text-xs flex items-center gap-2.5 transition-colors ${this.activeTab === 'ceo' ? 'bg-indigo-600/20 text-indigo-200 border border-indigo-500/30 font-semibold' : 'text-slate-300 hover:bg-slate-800/60 hover:text-white'}"
+                @click="${() => (this.activeTab = 'ceo')}"
+              >
+                <span class="material-symbols-outlined text-base ${this.activeTab === 'ceo' ? 'text-indigo-400' : 'text-slate-400'}">account_tree</span>
+                <span class="flex-1">CEO Orchestration</span>
+              </button>
+
+              <button
+                class="w-full text-left px-2.5 py-2 rounded-xl text-xs flex items-center gap-2.5 transition-colors ${this.activeTab === 'agents' ? 'bg-indigo-600/20 text-indigo-200 border border-indigo-500/30 font-semibold' : 'text-slate-300 hover:bg-slate-800/60 hover:text-white'}"
+                @click="${() => (this.activeTab = 'agents')}"
+              >
+                <span class="material-symbols-outlined text-base ${this.activeTab === 'agents' ? 'text-cyan-400' : 'text-slate-400'}">groups</span>
+                <span class="flex-1">Specialist Agents</span>
+              </button>
+
+              <button
                 class="w-full text-left px-2.5 py-2 rounded-xl text-xs flex items-center gap-2.5 transition-colors ${
                   this.activeTab === 'tests'
                     ? 'bg-indigo-600/20 text-indigo-200 border border-indigo-500/30 font-semibold'
@@ -1809,6 +1827,10 @@ Status: Ready to build upon Founder "go ahead".`;
     switch (this.activeTab) {
       case 'plans':
         return html`<maya-plan-workspace></maya-plan-workspace>`;
+      case 'agents':
+        return html`<maya-specialist-workspace></maya-specialist-workspace>`;
+      case 'ceo':
+        return html`<maya-ceo-workspace></maya-ceo-workspace>`;
       case 'dashboard':
         return this.renderDashboardTab();
       case 'console':

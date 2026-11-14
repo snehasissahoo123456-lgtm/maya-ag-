@@ -108,3 +108,29 @@ This module is intentionally described as file-backed persistence, not a product
 - [ ] Add explicit memory review, correction, expiry and deletion UI
 - [ ] Add transactional database storage and encryption/key management
 
+
+
+## Specialist reasoning runtime — development branch
+
+- [x] Expose Founder-authenticated specialist registry
+- [x] Run bounded Gemini reasoning calls using specialist role manifests
+- [x] Provide a dedicated Specialist Agents UI
+- [x] Inject relevant saved notes as untrusted reference context
+- [x] Enforce reasoning-only boundary with no tools or further delegation
+- [ ] Build CEO orchestration and real specialist-to-specialist delegation
+- [ ] Add per-agent durable work queues, budgets, concurrency controls and result verification
+- [ ] Connect scoped tools through approval-aware adapters
+
+
+
+## CEO specialist orchestration — development branch
+
+- [x] CEO selects 1–4 registered specialists with validated dispatch JSON
+- [x] Sequential specialist execution with bounded task sizes
+- [x] CEO synthesis of specialist findings
+- [x] Founder-authenticated orchestration API and dedicated UI
+- [x] Prevent recursive CEO/Founder delegation and specialist tool execution
+- [ ] Persist orchestration runs, assignments, findings and project status
+- [ ] Add cross-agent budgets, concurrency limits, cancellation and resumable queues
+- [ ] Allow approved specialists to use scoped tools through the approval ledger
+
