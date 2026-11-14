@@ -158,7 +158,7 @@ import { createChatToolExecutor } from "./agent-core/chat-tool-policy.ts";
 import { SpecialistRuntime, listRunnableSpecialists } from "./agent-core/specialist-runtime.ts";
 import { CEOOrchestrator } from "./agent-core/ceo-orchestrator.ts";
 import { FileCEORunRepository } from "./agent-core/file-ceo-run-repository.ts";
-import { FileScheduledJobRepository } from "./agent-core/file-scheduled-job-repository.ts";
+import { createScheduledJobRepository } from "./agent-core/create-scheduled-job-repository.ts";
 import { ScheduleWorker } from "./agent-core/schedule-worker.ts";
 
 const conversationStore = createConversationRepository();
@@ -215,13 +215,10 @@ const taskWorker = new TaskWorker(taskRepository, taskOrchestrator, taskCapabili
   maxTasksPerCycle: Number(process.env.MAYA_TASK_WORKER_MAX_TASKS_PER_CYCLE) || 20,
 });
 const taskWorkerEnabled = process.env.MAYA_TASK_WORKER_ENABLED === "true";
-const scheduleRepository = new FileScheduledJobRepository();
+const scheduleRepository = createScheduledJobRepository();
 const scheduleWorkerEnabled = process.env.MAYA_SCHEDULE_WORKER_ENABLED === "true";
 if (scheduleWorkerEnabled && !taskWorkerEnabled) {
   throw new Error("MAYA_SCHEDULE_WORKER_ENABLED requires MAYA_TASK_WORKER_ENABLED=true so queued read-only jobs can be executed.");
-}
-if (scheduleWorkerEnabled && (process.env.MAYA_STORAGE_DRIVER || "file").toLowerCase() !== "file") {
-  throw new Error("MAYA_SCHEDULE_WORKER_ENABLED requires single-instance file storage until distributed schedule leases are implemented.");
 }
 const scheduleWorker = new ScheduleWorker(scheduleRepository, taskRepository, taskOrchestrator, {
   founderId: "founder-primary",

@@ -80,3 +80,25 @@ test("schedule worker never queues another Founder's jobs", async () => {
     assert.equal(calls.length, 0);
   } finally { fs.rmSync(directory, { recursive: true, force: true }); }
 });
+
+
+test("schedule worker claims and completes jobs through distributed lease methods when available", async () => {
+  const dueAt = new Date(Date.now() - 1000).toISOString();
+  const claimedJob = { id: "leased", founderId: "founder-a", title: "Leased read", path: "README.md", status: "active", nextRunAt: dueAt, intervalMs: null, createdAt: dueAt, updatedAt: dueAt, runCount: 0, failureCount: 0 };
+  const calls: any[] = [];
+  const schedules = {
+    claimDue: async (founderId: string, workerId: string, leaseMs: number, limit: number) => {
+      calls.push({ method: "claim", founderId, workerId, leaseMs, limit }); return [claimedJob];
+    },
+    listDue: async () => { throw new Error("non-leased list path must not be used"); },
+    markEnqueued: async (...args: any[]) => { calls.push({ method: "complete", args }); },
+    recordFailure: async (...args: any[]) => { calls.push({ method: "fail", args }); },
+  };
+  const tasks = new FakeTasks(); const enqueued: any[] = [];
+  const worker = new ScheduleWorker(schedules as any, tasks as any, makeEnqueuer(tasks, enqueued), { founderId: "founder-a", workerId: "lease-worker", leaseMs: 20_000 });
+  const result = await worker.runOnce();
+  assert.equal(result.enqueued, 1);
+  assert.deepEqual(calls[0], { method: "claim", founderId: "founder-a", workerId: "lease-worker", leaseMs: 20_000, limit: 10 });
+  assert.equal(calls[1].method, "complete");
+  assert.equal(calls[1].args[4], "lease-worker");
+});

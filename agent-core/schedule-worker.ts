@@ -7,7 +7,7 @@ export interface ScheduleWorkerStatus {
   enabled: boolean; running: boolean; lastCycleAt?: string; lastError?: string;
   enqueued: number; duplicateSkips: number; failed: number;
 }
-export interface ScheduleWorkerOptions { founderId: string; pollIntervalMs?: number; maxJobsPerCycle?: number; workerId?: string; }
+export interface ScheduleWorkerOptions { founderId: string; pollIntervalMs?: number; maxJobsPerCycle?: number; workerId?: string; leaseMs?: number; }
 export interface ScheduledTaskEnqueuer {
   enqueue(input: { id: string; founderId: string; instruction: string; capability: string; args: Record<string, unknown>; actor: AgentIdentity }): Promise<TaskEnvelope>;
 }
@@ -24,6 +24,7 @@ export class ScheduleWorker {
   private readonly pollIntervalMs: number;
   private readonly maxJobsPerCycle: number;
   private readonly workerId: string;
+  private readonly leaseMs: number;
   private timer?: ReturnType<typeof setTimeout>;
   private cyclePromise?: Promise<{ scanned: number; enqueued: number; duplicateSkips: number; failed: number; busy?: boolean }>;
   private stopped = true;
@@ -41,6 +42,7 @@ export class ScheduleWorker {
     this.pollIntervalMs = Math.min(60_000, Math.max(1_000, Number.isFinite(options.pollIntervalMs) ? options.pollIntervalMs! : 3_000));
     this.maxJobsPerCycle = Math.min(50, Math.max(1, Number.isFinite(options.maxJobsPerCycle) ? Math.floor(options.maxJobsPerCycle!) : 10));
     this.workerId = (options.workerId || randomUUID()).slice(0, 128);
+    this.leaseMs = Math.min(300_000, Math.max(5_000, Number.isFinite(options.leaseMs) ? options.leaseMs! : 60_000));
   }
 
   getStatus(): ScheduleWorkerStatus { return { ...this.status, enabled: !this.stopped, running: this.cycleActive }; }
@@ -65,7 +67,10 @@ export class ScheduleWorker {
     this.status = { ...this.status, lastCycleAt: new Date().toISOString(), lastError: undefined };
     try {
       const now = new Date().toISOString();
-      const due = await this.schedules.listDue(this.founderId, now, this.maxJobsPerCycle);
+      const usesDistributedLease = typeof this.schedules.claimDue === "function";
+      const due = usesDistributedLease
+        ? await this.schedules.claimDue!(this.founderId, this.workerId, this.leaseMs, this.maxJobsPerCycle)
+        : await this.schedules.listDue(this.founderId, now, this.maxJobsPerCycle);
       result.scanned = due.length;
       const actor: AgentIdentity = {
         id: "maya-internal-scheduler:" + this.workerId,
@@ -93,12 +98,12 @@ export class ScheduleWorker {
             result.enqueued++;
           }
           const nextRunAt = job.intervalMs === null ? null : new Date(Date.now() + job.intervalMs).toISOString();
-          await this.schedules.markEnqueued(this.founderId, job.id, scheduledAt, nextRunAt);
+          await this.schedules.markEnqueued(this.founderId, job.id, scheduledAt, nextRunAt, usesDistributedLease ? this.workerId : undefined);
         } catch (error) {
           result.failed++;
           const message = error instanceof Error ? error.message : String(error);
           this.status = { ...this.status, lastError: message };
-          try { await this.schedules.recordFailure(this.founderId, job.id, message); }
+          try { await this.schedules.recordFailure(this.founderId, job.id, message, usesDistributedLease ? this.workerId : undefined); }
           catch (recordError) { this.status = { ...this.status, lastError: "Schedule failure could not be recorded: " + (recordError instanceof Error ? recordError.message : String(recordError)) }; }
         }
       }

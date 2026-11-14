@@ -298,7 +298,9 @@ The plan worker is disabled by default. It currently requires the file storage d
 - [x] Repeated enqueue protection if a worker stops between task creation and schedule advancement
 - [x] Bounded recurrence interval, per-cycle limit, failure counter and auto-pause after repeated failures
 - [x] Require both schedule and task workers to be explicitly enabled
-- [ ] Add distributed schedule leases and Supabase repository/migration
+- [x] Add Supabase schedule repository with atomic `FOR UPDATE SKIP LOCKED` leases and owner-bound completion/failure RPCs
+- [x] Add migration with service-role-only access and bounded lease expiry
+- [ ] Apply migration to the user's Supabase project and verify it against a real configured environment
 - [ ] Add richer schedule triggers only after each trigger has an audited, verified capability
 - [ ] Add time-zone-aware calendar rules, missed-run policy controls and notification delivery
 - [ ] Add real 24/7 hosting, monitoring and restart/backup acceptance tests

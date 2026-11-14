@@ -19,7 +19,8 @@ export interface ScheduledJobRepository {
   get(founderId: string, id: string): Promise<ScheduledReadJob | undefined>;
   list(founderId: string): Promise<ScheduledReadJob[]>;
   listDue(founderId: string, now: string, limit: number): Promise<ScheduledReadJob[]>;
-  markEnqueued(founderId: string, id: string, scheduledAt: string, nextRunAt: string | null): Promise<void>;
-  recordFailure(founderId: string, id: string, error: string): Promise<void>;
+  claimDue?(founderId: string, workerId: string, leaseMs: number, limit: number): Promise<ScheduledReadJob[]>;
+  markEnqueued(founderId: string, id: string, scheduledAt: string, nextRunAt: string | null, workerId?: string): Promise<void>;
+  recordFailure(founderId: string, id: string, error: string, workerId?: string): Promise<void>;
   pause(founderId: string, id: string): Promise<boolean>;
 }
