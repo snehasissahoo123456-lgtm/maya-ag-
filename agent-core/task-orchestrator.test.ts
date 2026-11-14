@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { ApprovalLedger } from "./approval-ledger.ts";
+import { ApprovalLedger, type ApprovalRepository } from "./approval-ledger.ts";
 import { CapabilityRegistry } from "./capability-registry.ts";
 import { TaskOrchestrator, type TaskEnvelope, type TaskRepository } from "./task-orchestrator.ts";
 class MemoryRepo implements TaskRepository {
@@ -96,4 +96,44 @@ test("rejected high-risk task is cancelled and cannot be executed", async () => 
  await orchestrator.decideApproval({ approvalId: pending.approvalId, approved: false, actor: founder });
  assert.equal((await repository.get("t-reject"))?.task.status, "cancelled");
  await assert.rejects(() => orchestrator.execute("t-reject", developer, pending.approvalId), /not executable/i);
+});
+
+
+test("expired Founder approval returns the task to the queue so a fresh approval can be requested", async () => {
+ const ledger = new ApprovalLedger();
+ const approvals: ApprovalRepository = {
+  request: input => ledger.request(input),
+  decide: async input => {
+   const record = (await ledger.listForFounder(input.founderId)).find(item => item.id === input.approvalId);
+   if (!record) throw new Error("Approval not found.");
+   return ledger.decide({ ...input, now: Date.parse(record.expiresAt) });
+  },
+  consume: input => ledger.consume(input),
+  listForFounder: founderId => ledger.listForFounder(founderId),
+ };
+ const registry = new CapabilityRegistry();
+ registry.register({
+  name: "workspace.write", description: "Replace an existing workspace file", risk: "high",
+  allowedRoles: ["developer"], requiredScopes: ["workspace:write"],
+  arguments: { file: { type: "string", required: true, maxLength: 100 } },
+  timeoutMs: 5000, requiresApproval: true, verification: "Read back and hash the replacement.",
+ });
+ const repository = new MemoryRepo();
+ const orchestrator = new TaskOrchestrator(repository, registry, approvals, {
+  run: async () => ({ result: "should not run", evidence: { kind: "test", description: "not executed", observedAt: new Date().toISOString() } }),
+ });
+ await orchestrator.enqueue({
+  id: "t-expired-approval", founderId: "f1", instruction: "Replace a report",
+  capability: "workspace.write", args: { file: "report.md" }, actor: developer,
+ });
+ const pending = await orchestrator.requestApproval("t-expired-approval", founder);
+ await assert.rejects(
+  () => orchestrator.decideApproval({ approvalId: pending.approvalId, approved: true, actor: founder }),
+  /returned to the queue.*new approval/i,
+ );
+ assert.equal((await repository.get("t-expired-approval"))?.task.status, "queued");
+ assert.equal((await approvals.listForFounder("f1")).find(item => item.id === pending.approvalId)?.status, "expired");
+ const replacement = await orchestrator.requestApproval("t-expired-approval", founder);
+ assert.ok(replacement.approvalId);
+ assert.equal((await approvals.listForFounder("f1")).find(item => item.id === replacement.approvalId)?.status, "pending");
 });
