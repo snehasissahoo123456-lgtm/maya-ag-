@@ -904,6 +904,7 @@ const specialistToolExecutor = new SpecialistToolExecutor(
     });
     currentAuditLogs = currentAuditLogs.slice(0, 500);
   },
+  taskRepository,
 );
 const specialistRuntime = new SpecialistRuntime({
   generate: async ({ systemInstruction, task, context, maxOutputTokens, tools, executeTool }) => {
