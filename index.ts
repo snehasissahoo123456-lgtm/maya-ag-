@@ -96,6 +96,8 @@ export class ActionEngineApp extends LitElement {
   @state() accessor dashboardWorkerStatus: 'checking' | 'enabled' | 'disabled' | 'unknown' = 'checking';
   @state() accessor dashboardTasksStatus: 'checking' | 'available' | 'unauthenticated' | 'unavailable' = 'checking';
   @state() accessor controlPlaneTasks: Array<{ task: { id: string; instruction: string; status: string; createdAt?: string; updatedAt?: string; verificationEvidence?: unknown[] }; capability: string; args: Record<string, unknown> }> = [];
+  private dashboardRefreshTimer?: ReturnType<typeof setInterval>;
+  private dashboardFetchInFlight = false;
 
   // Test Runner & Diagnostic Suite States
   @state() accessor testSuites: TestSuite[] = [...INITIAL_TEST_SUITES];
@@ -221,6 +223,9 @@ You can use this cockpit to inspect the current development status and configure
     await this.restoreSession();
     await this.restoreConversationHistory();
     await this.fetchDashboardData();
+    this.dashboardRefreshTimer = setInterval(() => {
+      if (this.isAuthenticated) void this.fetchDashboardData();
+    }, 15_000);
     await this.fetchServerState();
     await this.fetchWatcherStatus();
     await this.fetchPlatformProbes();
@@ -503,6 +508,8 @@ You can use this cockpit to inspect the current development status and configure
 
   override disconnectedCallback() {
     super.disconnectedCallback();
+    if (this.dashboardRefreshTimer) clearInterval(this.dashboardRefreshTimer);
+    this.dashboardRefreshTimer = undefined;
     if (this.wsReconnectTimer) clearTimeout(this.wsReconnectTimer);
     try {
       this.cockpitWs?.close();
@@ -676,6 +683,8 @@ You can use this cockpit to inspect the current development status and configure
   }
 
   private async fetchDashboardData() {
+    if (this.dashboardFetchInFlight) return;
+    this.dashboardFetchInFlight = true;
     this.dashboardApiStatus = 'checking';
     this.dashboardTasksStatus = 'checking';
     try {
@@ -710,6 +719,8 @@ You can use this cockpit to inspect the current development status and configure
       this.dashboardTasksStatus = 'available';
     } catch {
       this.dashboardTasksStatus = 'unavailable';
+    } finally {
+      this.dashboardFetchInFlight = false;
     }
   }
 
