@@ -113,7 +113,7 @@ export class TaskOrchestrator {
       envelope.task = transitionTask(envelope.task, "running");
     }
     envelope.attempts += 1;
-    await this.repository.put(envelope);
+    await this.saveExecutionState(envelope, actor, claim);
     const controller = new AbortController();
     let timeout: ReturnType<typeof setTimeout> | undefined;
     try {
