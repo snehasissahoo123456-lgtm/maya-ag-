@@ -82,7 +82,7 @@ values ('$write_id', '$founder',
   jsonb_build_object('task', jsonb_build_object('id', '$write_id', 'founderId', '$founder', 'status', 'queued', 'requiresApproval', true),
   'capability', 'workspace.write_file', 'args', jsonb_build_object('path', 'report.md', 'content', 'approved'), 'attempts', 0, 'idempotencyKey', '$write_id'));
 insert into public.maya_approvals (id, task_id, founder_id, capability, action_digest, requested_at, expires_at, status, decided_at)
-values ('approval-task-lease-ci', '$write_id', '$founder', 'workspace.write_file', repeat('a', 64),
+values ('approval-task-lease-ci', '$write_id', '$founder', 'workspace.write_file', '45c96a60b8c178229802dfc6289dfebf788a5d7b18978a37faa8172fad110c91',
   clock_timestamp() - interval '1 minute', clock_timestamp() + interval '5 minutes', 'approved', clock_timestamp());
 "
 approved_claim=$(run_sql "select id from public.maya_claim_next_task('$founder', 'worker-a', 60000)")
