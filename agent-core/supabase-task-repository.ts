@@ -69,6 +69,24 @@ export class SupabaseTaskRepository implements TaskRepository {
     return Array.isArray(rows) && rows[0] ? Number(rows[0].recovered) || 0 : 0;
   }
 
+  async putClaimed(envelope: TaskEnvelope, founderId: string, workerId: string): Promise<void> {
+    if (!envelope?.task?.id || !founderId || !workerId || envelope.task.founderId !== founderId) {
+      throw new Error("Task, Founder and worker identity are required for a fenced write.");
+    }
+    const result = await this.request<TaskRow>("rpc/maya_save_claimed_task", {
+      method: "POST",
+      body: JSON.stringify({
+        p_task_id: envelope.task.id,
+        p_founder_id: founderId,
+        p_worker_id: workerId,
+        p_envelope: envelope,
+      }),
+    });
+    if (!result || result.id !== envelope.task.id || result.founder_id !== founderId) {
+      throw new Error("Supabase did not confirm the lease-fenced task write.");
+    }
+  }
+
   async put(envelope: TaskEnvelope): Promise<void> {
     if (!envelope?.task?.id || !envelope.task.founderId) throw new Error("Task ID and Founder identity are required.");
     const result = await this.request<TaskRow>("rpc/maya_save_task", {
