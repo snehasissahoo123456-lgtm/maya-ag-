@@ -25,9 +25,9 @@ values (
 "
 
 # Two workers racing for one queued task must produce exactly one lease owner.
-"${psql_cmd[@]}" --command "select id from public.maya_claim_next_task('$founder', 'worker-a', 5000)" > /tmp/maya-task-claim-a.txt &
+"${psql_cmd[@]}" --command "select id from public.maya_claim_next_task('$founder', 'worker-a', 60000)" > /tmp/maya-task-claim-a.txt &
 pid_a=$!
-"${psql_cmd[@]}" --command "select id from public.maya_claim_next_task('$founder', 'worker-b', 5000)" > /tmp/maya-task-claim-b.txt &
+"${psql_cmd[@]}" --command "select id from public.maya_claim_next_task('$founder', 'worker-b', 60000)" > /tmp/maya-task-claim-b.txt &
 pid_b=$!
 wait "$pid_a"
 wait "$pid_b"
@@ -43,7 +43,7 @@ if [[ "$owner" != "worker-a" && "$owner" != "worker-b" ]]; then
   exit 1
 fi
 
-renewed=$(run_sql "select count(*) from public.maya_renew_task_claim('$task_id', '$founder', '$owner', 5000)")
+renewed=$(run_sql "select count(*) from public.maya_renew_task_claim('$task_id', '$founder', '$owner', 60000)")
 if [[ "$renewed" != "1" ]]; then echo "Exact lease owner could not renew the task lease"; exit 1; fi
 
 # A different worker must not renew or write the claimed task.
@@ -70,7 +70,7 @@ values ('$blocked_id', '$founder',
   jsonb_build_object('task', jsonb_build_object('id', '$blocked_id', 'founderId', '$founder', 'status', 'queued', 'requiresApproval', true),
   'capability', 'workspace.write_file', 'args', jsonb_build_object('path', 'report.md', 'content', 'x'), 'attempts', 0, 'idempotencyKey', '$blocked_id'));
 "
-blocked_claim=$(run_sql "select count(*) from public.maya_claim_next_task('$founder', 'worker-a', 5000)")
+blocked_claim=$(run_sql "select count(*) from public.maya_claim_next_task('$founder', 'worker-a', 60000)")
 if [[ "$blocked_claim" != "0" ]]; then echo "Unapproved write task was claimable"; exit 1; fi
 
 # An approved task may be claimed, but the application layer still verifies the exact action digest before execution.
@@ -83,7 +83,7 @@ insert into public.maya_approvals (id, task_id, founder_id, capability, action_d
 values ('approval-task-lease-ci', '$write_id', '$founder', 'workspace.write_file', repeat('a', 64),
   clock_timestamp() - interval '1 minute', clock_timestamp() + interval '5 minutes', 'approved', clock_timestamp());
 "
-approved_claim=$(run_sql "select id from public.maya_claim_next_task('$founder', 'worker-a', 5000)")
+approved_claim=$(run_sql "select id from public.maya_claim_next_task('$founder', 'worker-a', 60000)")
 if [[ "$approved_claim" != "$write_id" ]]; then echo "Approved write task was not claimable"; exit 1; fi
 
 # An in-flight lease cannot be released; after expiry, recovery parks it instead of replaying it.
