@@ -633,3 +633,30 @@ test("Supabase-backed worker renews its lease while a task is executing", async 
   assert.ok(renewals >= 1, "worker should renew at least once before the 1.8-second task completes");
   assert.equal((await repository.get("worker-lease-renewal-1"))?.task.status, "completed");
 });
+
+test("worker refuses to persist execution state after its lease fence rejects a stale worker", async () => {
+  const { orchestrator, worker, repository } = setup();
+  const taskId = "worker-stale-lease-fence";
+  await orchestrator.enqueue({
+    id: taskId,
+    founderId: "founder-primary",
+    instruction: "Read README",
+    capability: "workspace.read_file",
+    args: { path: "README.md" },
+    actor: founder,
+  });
+  let claimIssued = false;
+  Object.assign(repository, {
+    claimNext: async () => {
+      if (claimIssued) return undefined;
+      claimIssued = true;
+      return repository.get(taskId);
+    },
+    putClaimed: async () => { throw new Error("Task lease is expired or owned by another worker"); },
+    releaseClaim: async () => {},
+    recoverExpiredClaims: async () => 0,
+  });
+  const result = await worker.runOnce();
+  assert.equal(result.failed, 1);
+  assert.equal((await repository.get(taskId))?.task.status, "queued");
+});
