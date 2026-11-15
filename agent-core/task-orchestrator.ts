@@ -123,7 +123,7 @@ export class TaskOrchestrator {
       });
       const output = await Promise.race([this.runner.run({ capability: definition.name, args: envelope.args, timeoutMs: definition.timeoutMs, idempotencyKey: envelope.idempotencyKey, signal: controller.signal }), timeoutPromise]);
       envelope.task = transitionTask(envelope.task, "verifying");
-      await this.repository.put(envelope);
+      await this.saveExecutionState(envelope, actor, claim);
       await this.recordAudit(actor, "task.execution_verified", envelope, { evidenceReference: output.evidence.reference ?? null, evidenceKind: output.evidence.kind });
       envelope.result = output.result;
       envelope.task = transitionTask(envelope.task, "completed", { evidence: output.evidence });
