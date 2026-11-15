@@ -1014,7 +1014,31 @@ const ceoOrchestrator = new CEOOrchestrator({
     });
     return String(response.text || "");
   },
-}, specialistRuntime, taskRepository);
+}, specialistRuntime, taskRepository, {
+  dispatch: async ({ founderId, taskIds }) => {
+    if (founderId !== "founder-primary") throw new Error("The configured shared task worker is scoped to the primary Founder only.");
+    const deadline = Date.now() + 180_000;
+    let lastWorkerError: string | undefined;
+    while (Date.now() < deadline) {
+      const records = await Promise.all(taskIds.map(id => taskRepository.get(id, founderId)));
+      const failed = records.find(record => record && ["failed", "requires_recovery", "cancelled"].includes(record.task.status));
+      if (failed) {
+        throw new Error("CEO specialist task stopped in " + failed.task.status + ": " + (failed.task.lastError || failed.task.id));
+      }
+      if (records.length === taskIds.length && records.every(record => record?.task.status === "completed")) return;
+      try {
+        await taskWorker.runOnce();
+        lastWorkerError = undefined;
+      } catch (error) {
+        lastWorkerError = error instanceof Error ? error.message : String(error);
+        throw new Error("Shared task worker could not dispatch CEO specialist assignments: " + lastWorkerError);
+      }
+      await new Promise(resolve => setTimeout(resolve, 500));
+    }
+    throw new Error("CEO specialist assignments did not complete within 180 seconds." +
+      (lastWorkerError ? " Last worker error: " + lastWorkerError : ""));
+  },
+});
 
 
 function randomTaskId(): string {
