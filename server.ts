@@ -1210,6 +1210,83 @@ async function startServer() {
     return next();
   });
 
+  app.get("/api/system/readiness", async (req, res) => {
+    const founderId = (req as any).authSession?.user?.id;
+    if (!founderId) return res.status(401).json({ success: false, error: "Verified Founder session required." });
+
+    const storageDriver = (process.env.MAYA_STORAGE_DRIVER || "file").trim().toLowerCase();
+    const geminiConfigured = Boolean((process.env.GEMINI_API_KEY || process.env.API_KEY || "").trim());
+    const founderAuthConfigured = Boolean(
+      (process.env.MAYA_FOUNDER_EMAIL || "").trim() &&
+      (process.env.MAYA_FOUNDER_PASSWORD || "").length >= 16
+    );
+    let storageReachable = false;
+    let storageError: string | undefined;
+    try {
+      await taskRepository.list(founderId);
+      storageReachable = true;
+    } catch (error) {
+      storageError = error instanceof Error ? error.message : String(error);
+    }
+
+    const taskStatus = taskWorker.getStatus();
+    const goalPlanStatus = goalPlanWorker.getStatus();
+    const scheduleStatus = scheduleWorker.getStatus();
+    let developerReadiness: Awaited<ReturnType<NonNullable<typeof developerRuntimeBootstrapResult.runtime>["readiness"]>> | undefined;
+    let developerReadinessError: string | undefined;
+    if (developerRuntimeBootstrapResult.runtime) {
+      try {
+        developerReadiness = await developerRuntimeBootstrapResult.runtime.readiness();
+      } catch (error) {
+        developerReadinessError = error instanceof Error ? error.message : String(error);
+      }
+    }
+
+    const blockers: string[] = [];
+    if (!geminiConfigured) blockers.push("Gemini is not configured. Set GEMINI_API_KEY.");
+    if (!founderAuthConfigured) blockers.push("Founder login is not configured with a password of at least 16 characters.");
+    if (!storageReachable) blockers.push("Persistent task storage is not reachable." + (storageError ? " " + storageError : ""));
+    if (storageDriver === "file") blockers.push("File storage is single-instance only; do not run multiple Maya server replicas.");
+    if (storageDriver === "supabase" && (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY)) {
+      blockers.push("Supabase storage requires SUPABASE_URL and the server-only SUPABASE_SERVICE_ROLE_KEY.");
+    }
+    if (!taskStatus.enabled || !taskStatus.running) blockers.push("Background task worker is not running. Set MAYA_TASK_WORKER_ENABLED=true and restart Maya.");
+    if (!goalPlanStatus.enabled || !goalPlanStatus.running) blockers.push("Goal-plan worker is not running. Set MAYA_PLAN_WORKER_ENABLED=true and restart Maya.");
+    if (!scheduleStatus.enabled || !scheduleStatus.running) blockers.push("Schedule worker is not running. Set MAYA_SCHEDULE_WORKER_ENABLED=true and restart Maya.");
+
+    const developerBlockers = developerReadiness
+      ? [...developerReadiness.blockers]
+      : [...developerRuntimeBootstrapResult.blockers];
+    if (developerReadinessError) developerBlockers.push(developerReadinessError);
+    developerBlockers.push("The isolated Developer sandbox QA worker is a separate service; its live heartbeat has not been verified by this server.");
+    const coreRuntimeReady = geminiConfigured && founderAuthConfigured && storageReachable &&
+      taskStatus.enabled && taskStatus.running && goalPlanStatus.enabled && goalPlanStatus.running &&
+      scheduleStatus.enabled && scheduleStatus.running;
+    return res.json({
+      success: true,
+      readiness: {
+        coreRuntimeReady,
+        developerRuntimeReady: developerReadiness?.readyToApply ?? false,
+        storageDriver,
+        storageReachable,
+        singleInstanceOnly: storageDriver === "file",
+        geminiConfigured,
+        founderAuthConfigured,
+        workers: { task: taskStatus, goalPlan: goalPlanStatus, schedule: scheduleStatus },
+        developer: {
+          configured: developerRuntimeBootstrapResult.configured,
+          readyToApply: developerReadiness?.readyToApply ?? false,
+          isolated: developerReadiness?.isolated ?? false,
+          networkAccess: developerReadiness?.networkAccess ?? "unknown",
+          secretsMounted: developerReadiness?.secretsMounted ?? false,
+          blockers: developerBlockers,
+        },
+        blockers,
+        note: "This endpoint reports this server instance only. It does not prove cloud uptime, external OAuth connectivity, or operation of a separate Windows device bridge or sandbox worker.",
+      },
+    });
+  });
+
   app.use("/api/developer/changes", createDeveloperChangeRouter(developerChangeRepository, { runtime: developerRuntimeBootstrapResult.runtime, approvals: approvalRepository }));
 
   app.get("/api/developer/runtime/status", async (req, res) => {
