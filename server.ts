@@ -15,6 +15,7 @@ import { DeviceBridgeManager, DeviceCommandUncertainError } from "./agent-core/d
 import { createDeviceRegistry } from "./agent-core/create-device-registry.ts";
 import { DeveloperChangeStore } from "./agent-core/developer-change-store.ts";
 import { createDeveloperChangeRouter } from "./agent-core/developer-change-http.ts";
+import { readDeveloperSandboxWorkerHealth } from "./agent-core/developer-sandbox-health.ts";
 
 let activeDeviceBridgeManager: DeviceBridgeManager | undefined;
 
@@ -1259,7 +1260,8 @@ async function startServer() {
       ? [...developerReadiness.blockers]
       : [...developerRuntimeBootstrapResult.blockers];
     if (developerReadinessError) developerBlockers.push(developerReadinessError);
-    const developerWarnings = ["The isolated Developer sandbox QA worker is a separate service; its live heartbeat has not been verified by this server."];
+    const sandboxQaWorker = await readDeveloperSandboxWorkerHealth(process.env.MAYA_DEVELOPER_QUEUE_ROOT);
+    const developerWarnings = sandboxQaWorker.healthy ? [] : [sandboxQaWorker.reason || "The isolated Developer sandbox QA worker is not healthy."];
     const coreRuntimeReady = geminiConfigured && founderAuthConfigured && storageReachable &&
       taskStatus.enabled && goalPlanStatus.enabled && scheduleStatus.enabled;
     return res.json({
@@ -1281,7 +1283,8 @@ async function startServer() {
           secretsMounted: developerReadiness?.secretsMounted ?? false,
           blockers: developerBlockers,
           warnings: developerWarnings,
-          sandboxQaWorkerVerified: false,
+          sandboxQaWorkerVerified: sandboxQaWorker.healthy,
+          sandboxQaWorker,
         },
         blockers,
         warnings,
@@ -1304,10 +1307,11 @@ async function startServer() {
       const readiness = developerRuntimeBootstrapResult.runtime
         ? await developerRuntimeBootstrapResult.runtime.readiness()
         : undefined;
+      const sandboxQaWorker = await readDeveloperSandboxWorkerHealth(process.env.MAYA_DEVELOPER_QUEUE_ROOT);
       const blockers = readiness
         ? [...readiness.blockers]
         : [...developerRuntimeBootstrapResult.blockers];
-      blockers.push("The sandbox QA worker is a separate supervised service and has not been verified as running by this application instance.");
+      if (!sandboxQaWorker.healthy) blockers.push(sandboxQaWorker.reason || "The isolated sandbox QA worker is not healthy.");
       return res.json({
         success: true,
         runtime: {
@@ -1320,8 +1324,9 @@ async function startServer() {
           networkAccess: readiness?.networkAccess,
           secretsMounted: readiness?.secretsMounted,
           executionEnabled: readiness?.readyToApply ?? false,
-          qaEnabled: false,
+          qaEnabled: sandboxQaWorker.healthy,
           workerEnabled: false,
+          sandboxQaWorker,
         },
         changes: { total: changes.length, counts },
         blockers,
