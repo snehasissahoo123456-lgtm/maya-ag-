@@ -1017,7 +1017,7 @@ const ceoOrchestrator = new CEOOrchestrator({
 }, specialistRuntime, taskRepository, {
   dispatch: async ({ founderId, taskIds }) => {
     if (founderId !== "founder-primary") throw new Error("The configured shared task worker is scoped to the primary Founder only.");
-    const usesAtomicLeases = Boolean(taskRepository.claimNext);
+    const usesAtomicLeases = Boolean(taskRepository.claimNext && taskRepository.releaseClaim);
     const dispatchWorkers = usesAtomicLeases
       ? Array.from({ length: Math.min(taskIds.length, 4) }, () => new TaskWorker(
           taskRepository,
