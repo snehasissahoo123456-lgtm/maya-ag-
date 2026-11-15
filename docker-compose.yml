@@ -28,6 +28,8 @@ services:
       MAYA_PLAN_WORKER_POLL_MS: ${MAYA_PLAN_WORKER_POLL_MS:-3000}
       MAYA_SCHEDULE_WORKER_ENABLED: ${MAYA_SCHEDULE_WORKER_ENABLED:-false}
       MAYA_SCHEDULE_WORKER_POLL_MS: ${MAYA_SCHEDULE_WORKER_POLL_MS:-3000}
+      MAYA_DEVELOPER_QUEUE_ROOT: ${MAYA_DEVELOPER_QUEUE_ROOT:-/developer-queue}
+      MAYA_DEVELOPER_WORKSPACE_ROOT: ${MAYA_DEVELOPER_WORKSPACE_ROOT:-/developer-workspaces}
     volumes:
       - maya-data:/data
       - maya-developer-queue:/developer-queue
