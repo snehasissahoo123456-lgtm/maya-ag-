@@ -310,7 +310,7 @@ taskCapabilityRegistry.register({
     task: { type: "string", required: true, maxLength: 2000 },
     context: { type: "string", required: false, maxLength: 8000 },
   },
-  timeoutMs: 120_000,
+  timeoutMs: 60_000,
   requiresApproval: false,
   verification: "Run only the selected manifest-scoped specialist with bounded read-only tools and persist the output digest as task evidence.",
 });
@@ -1017,7 +1017,17 @@ const ceoOrchestrator = new CEOOrchestrator({
 }, specialistRuntime, taskRepository, {
   dispatch: async ({ founderId, taskIds }) => {
     if (founderId !== "founder-primary") throw new Error("The configured shared task worker is scoped to the primary Founder only.");
-    const deadline = Date.now() + 180_000;
+    const usesAtomicLeases = Boolean(taskRepository.claimNext);
+    const dispatchWorkers = usesAtomicLeases
+      ? Array.from({ length: Math.min(taskIds.length, 4) }, () => new TaskWorker(
+          taskRepository,
+          taskOrchestrator,
+          taskCapabilityRegistry,
+          { founderId, workerId: "ceo-dispatch-" + randomUUID(), leaseMs: 60_000, maxTasksPerCycle: 1 },
+          approvalRepository,
+        ))
+      : [];
+    const deadline = Date.now() + (usesAtomicLeases ? 150_000 : 270_000);
     let lastWorkerError: string | undefined;
     while (Date.now() < deadline) {
       const records = await Promise.all(taskIds.map(id => taskRepository.get(id, founderId)));
@@ -1027,7 +1037,11 @@ const ceoOrchestrator = new CEOOrchestrator({
       }
       if (records.length === taskIds.length && records.every(record => record?.task.status === "completed")) return;
       try {
-        await taskWorker.runOnce();
+        if (dispatchWorkers.length) {
+          await Promise.all(dispatchWorkers.map(worker => worker.runOnce()));
+        } else {
+          await taskWorker.runOnce();
+        }
         lastWorkerError = undefined;
       } catch (error) {
         lastWorkerError = error instanceof Error ? error.message : String(error);
@@ -1035,7 +1049,7 @@ const ceoOrchestrator = new CEOOrchestrator({
       }
       await new Promise(resolve => setTimeout(resolve, 500));
     }
-    throw new Error("CEO specialist assignments did not complete within 180 seconds." +
+    throw new Error("CEO specialist assignments did not complete within the bounded dispatch window." +
       (lastWorkerError ? " Last worker error: " + lastWorkerError : ""));
   },
 });
