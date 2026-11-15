@@ -127,7 +127,7 @@ export class TaskOrchestrator {
       await this.recordAudit(actor, "task.execution_verified", envelope, { evidenceReference: output.evidence.reference ?? null, evidenceKind: output.evidence.kind });
       envelope.result = output.result;
       envelope.task = transitionTask(envelope.task, "completed", { evidence: output.evidence });
-      await this.repository.put(envelope);
+      await this.saveExecutionState(envelope, actor, claim);
       return { task: envelope.task, result: output.result };
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
