@@ -622,6 +622,7 @@ test("Supabase-backed worker renews its lease while a task is executing", async 
     assert.equal(leaseMs, 5000);
     renewals++;
   };
+  (repository as any).putClaimed = async (envelope: TaskEnvelope) => repository.put(envelope);
   (repository as any).releaseClaim = async () => {};
   (repository as any).recoverExpiredClaims = async () => 0;
   const worker = new TaskWorker(repository, orchestrator, registry, {
