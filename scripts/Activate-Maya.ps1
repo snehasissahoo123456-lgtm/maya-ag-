@@ -137,6 +137,8 @@ Set-EnvValue "MAYA_SCHEDULE_WORKER_POLL_MS" "3000"
 $script:EnvLines | Set-Content -LiteralPath $EnvFile -Encoding utf8NoBOM
 
 $Identity = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
+& icacls $EnvFile /reset | Out-Null
+if ($LASTEXITCODE -ne 0) { throw "Could not reset .env file permissions before applying the private ACL." }
 & icacls $EnvFile /inheritance:r /grant:r "$($Identity):(M)" "NT AUTHORITY\SYSTEM:(F)" "BUILTIN\Administrators:(F)" | Out-Null
 if ($LASTEXITCODE -ne 0) { throw "Could not restrict .env file permissions to the current user, SYSTEM and Administrators." }
 
