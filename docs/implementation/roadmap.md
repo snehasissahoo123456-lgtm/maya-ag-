@@ -1,7 +1,7 @@
 # Maya Implementation Roadmap
 
-Branch: maya/release-hardening-audit-fixes (stacked on maya/specialist-ui-runtime-status)
-Status: The development stack through PR #45 has passed CI, but it is not integrated into main. This hardening branch restores the main-line persistent-session and CSRF controls and repairs migration/adapter contract defects. Live Supabase, physical-device and production deployment validation remain outstanding.
+Branch: main (default branch; PRs #95–#98 integrated on 2026-11-15)
+Status: CI-verified task lease renewal/fencing, CEO specialist dispatch through the shared TaskWorker, and guarded activation/readiness scripts are integrated into main. The codebase remains a bounded prototype until live credentials, device/supervisor pairing, external OAuth, independent QA heartbeat, cloud deployment, backups and end-to-end acceptance are verified.
 
 ## Phase 0 — Baseline and contracts
 - [x] Add a Founder dashboard as the default authenticated landing page; derive backend reachability and task counts from live API responses and remove unsupported integration/automation badges.
@@ -110,10 +110,10 @@ This module is intentionally described as file-backed persistence, not a product
 
 
 
-## Specialist runtime — development branch
+## Specialist runtime — main
 
 - [x] Expose Founder-authenticated specialist registry and dedicated UI
-- [x] Run bounded Gemini reasoning calls using registered role manifests
+- [x] Run bounded Gemini calls using registered role manifests
 - [x] Inject relevant saved notes as untrusted reference context
 - [x] Provide only manifest-scoped low-risk workspace reads and Founder-scoped memory search
 - [x] Persist redacted specialist tool outcomes through the append-only audit repository
@@ -124,17 +124,17 @@ This module is intentionally described as file-backed persistence, not a product
 
 
 
-## CEO specialist orchestration — development branch
+## CEO specialist orchestration — main
 
 - [x] CEO selects 1–4 registered specialists with validated dispatch JSON
-- [x] Run the bounded specialist set concurrently while preserving synthesis order
+- [x] Persist assignments and dispatch through the shared TaskWorker; use independent leases in Supabase mode
 - [x] Synthesize findings and report each specialist's actual execution mode
 - [x] Persist Founder-scoped run history through file and Supabase adapters
 - [x] Founder-authenticated orchestration API and dedicated UI
 - [x] Prevent recursive CEO/Founder delegation and high-risk specialist execution
 - [ ] Add partial-failure handling, cancellation and resumable assignments
-- [ ] Add per-run/per-agent budgets and global concurrency controls
-- [ ] Add durable task-level traces and independent QA verification
+- [ ] Add per-run/per-agent budgets, cancellation and global concurrency controls
+- [ ] Add durable per-specialist traces and independent QA verification
 
 
 
@@ -161,7 +161,7 @@ This module is intentionally described as file-backed persistence, not a product
 - [x] Refactor executor and plan APIs to await repository operations
 - [x] Add adapter tests for Founder scoping and updates
 - [x] Add atomic Supabase claim/release RPCs for running plans
-- [ ] Add lease renewal, optimistic concurrency/version checks and live multi-instance worker validation
+- [x] Add goal-plan worker lease renewal/heartbeat code; optimistic version checks and live multi-instance worker validation remain pending
 - [ ] Migrate task queue, memory notes, approval ledger and audit logs to database storage
 
 
@@ -174,7 +174,7 @@ This module is intentionally described as file-backed persistence, not a product
 - [x] Founder-filtered task reads/lists and adapter tests
 - [x] Founder-scoped approval and append-only audit repositories with Supabase adapters
 - [x] Atomic task claim/release leases and expired-claim recovery
-- [ ] Worker heartbeat/renewal for long-running work and live two-instance concurrency validation
+- [x] Worker heartbeat/lease renewal and fenced task writes are implemented and CI-tested (PR #95); live two-instance Supabase concurrency acceptance remains pending
 - [ ] Apply migrations and run end-to-end verification in the user's Supabase project
 
 
@@ -292,9 +292,9 @@ The plan worker is disabled by default. The server deliberately keeps it on sing
 - [x] Authenticated list and detail endpoints
 - [x] CEO workspace history list and report reopening
 - [x] Mark interrupted runs failed on server restart; do not silently replay specialist work
-- [ ] Add Supabase-backed CEO run repository and RLS migration
+- [x] Add Supabase-backed CEO run repository and RLS migration (live project migration remains pending)
 - [ ] Add resumable specialist assignments with bounded retries, cancellation and run-level budgets
-- [ ] Add durable per-specialist queues and cross-process concurrency control
+- [x] Route CEO specialist assignments through the shared durable TaskWorker with atomic leases (PR #96); cross-process run-level resume/cancellation remains pending
 - [ ] Add report export and evaluation metrics for specialist quality
 
 
