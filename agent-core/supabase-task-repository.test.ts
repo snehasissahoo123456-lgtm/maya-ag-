@@ -31,6 +31,31 @@ test("Supabase task repository writes through the owner-bound RPC with server-on
   assert.equal(body.p_envelope.task.id, "task-1");
 });
 
+test("Supabase claimed task writes use the exact Founder and worker lease fence", async () => {
+  const task = envelope();
+  let requestUrl = "";
+  let requestBody: any;
+  const repository = new SupabaseTaskRepository("https://maya-test.supabase.co", "service-secret", async (url, init) => {
+    requestUrl = String(url);
+    requestBody = JSON.parse(String(init?.body));
+    return jsonResponse({ id: task.task.id, founder_id: task.task.founderId, envelope: task, created_at: "", updated_at: "" });
+  });
+  await repository.putClaimed(task, "founder-a", "worker-a");
+  assert.match(requestUrl, /rpc\\/maya_save_claimed_task$/);
+  assert.equal(requestBody.p_task_id, "task-1");
+  assert.equal(requestBody.p_founder_id, "founder-a");
+  assert.equal(requestBody.p_worker_id, "worker-a");
+  assert.equal(requestBody.p_envelope.task.id, "task-1");
+});
+
+test("Supabase claimed task writes fail closed for a different Founder or missing lease confirmation", async () => {
+  const task = envelope();
+  const repository = new SupabaseTaskRepository("https://maya-test.supabase.co", "service-secret", async () =>
+    jsonResponse({ id: task.task.id, founder_id: "founder-b", envelope: task }));
+  await assert.rejects(() => repository.putClaimed(task, "founder-b", "worker-a"), /identity/);
+  await assert.rejects(() => repository.putClaimed(task, "founder-a", "worker-a"), /lease-fenced/);
+});
+
 test("Supabase task reads and lists are Founder-scoped", async () => {
   const task = envelope();
   const urls: string[] = [];
