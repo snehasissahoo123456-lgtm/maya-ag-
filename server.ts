@@ -1250,9 +1250,9 @@ async function startServer() {
     if (storageDriver === "supabase" && (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY)) {
       blockers.push("Supabase storage requires SUPABASE_URL and the server-only SUPABASE_SERVICE_ROLE_KEY.");
     }
-    if (!taskStatus.enabled || !taskStatus.running) blockers.push("Background task worker is not running. Set MAYA_TASK_WORKER_ENABLED=true and restart Maya.");
-    if (!goalPlanStatus.enabled || !goalPlanStatus.running) blockers.push("Goal-plan worker is not running. Set MAYA_PLAN_WORKER_ENABLED=true and restart Maya.");
-    if (!scheduleStatus.enabled || !scheduleStatus.running) blockers.push("Schedule worker is not running. Set MAYA_SCHEDULE_WORKER_ENABLED=true and restart Maya.");
+    if (!taskStatus.enabled) blockers.push("Background task worker is disabled. Set MAYA_TASK_WORKER_ENABLED=true and restart Maya.");
+    if (!goalPlanStatus.enabled) blockers.push("Goal-plan worker is disabled. Set MAYA_PLAN_WORKER_ENABLED=true and restart Maya.");
+    if (!scheduleStatus.enabled) blockers.push("Schedule worker is disabled. Set MAYA_SCHEDULE_WORKER_ENABLED=true and restart Maya.");
 
     const developerBlockers = developerReadiness
       ? [...developerReadiness.blockers]
@@ -1260,8 +1260,7 @@ async function startServer() {
     if (developerReadinessError) developerBlockers.push(developerReadinessError);
     developerBlockers.push("The isolated Developer sandbox QA worker is a separate service; its live heartbeat has not been verified by this server.");
     const coreRuntimeReady = geminiConfigured && founderAuthConfigured && storageReachable &&
-      taskStatus.enabled && taskStatus.running && goalPlanStatus.enabled && goalPlanStatus.running &&
-      scheduleStatus.enabled && scheduleStatus.running;
+      taskStatus.enabled && goalPlanStatus.enabled && scheduleStatus.enabled;
     return res.json({
       success: true,
       readiness: {
