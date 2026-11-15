@@ -719,20 +719,7 @@ test("shared task worker executes CEO specialist assignments with Founder scope 
     executionMode: "reasoning_only" as const,
     completedAt: new Date().toISOString(),
   };
-  const { repository, registry, approvals } = setup(async input => {
-    receivedFounder = input.founderId;
-    assert.equal(input.capability, "ceo.specialist.run");
-    assert.equal(input.args.agentId, "research");
-    return {
-      result: specialistResult,
-      evidence: {
-        kind: "ceo-specialist-output-sha256",
-        description: "Specialist output digest recorded.",
-        reference: "sha256:" + "a".repeat(64),
-        observedAt: specialistResult.completedAt,
-      },
-    };
-  });
+  const { repository, registry, approvals } = setup();
   const orchestrator = new TaskOrchestrator(repository, registry, approvals, {
     run: async input => {
       receivedFounder = input.founderId;
