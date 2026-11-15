@@ -39,6 +39,18 @@ export class SupabaseTaskRepository implements TaskRepository {
     return structuredClone(rows[0].envelope);
   }
 
+  async renewClaim(taskId: string, founderId: string, workerId: string, leaseMs: number): Promise<void> {
+    if (!taskId || !founderId || !workerId) throw new Error("Task, Founder and worker identity are required to renew a lease.");
+    const boundedLease = Math.max(5_000, Math.min(Math.floor(leaseMs), 300_000));
+    const rows = await this.request<TaskRow[]>("rpc/maya_renew_task_claim", {
+      method: "POST",
+      body: JSON.stringify({ p_task_id: taskId, p_founder_id: founderId, p_worker_id: workerId, p_lease_ms: boundedLease }),
+    });
+    if (!Array.isArray(rows) || rows.length !== 1 || rows[0].id !== taskId || rows[0].founder_id !== founderId) {
+      throw new Error("Task lease renewal was not confirmed for the owning Founder and worker.");
+    }
+  }
+
   async releaseClaim(taskId: string, founderId: string, workerId: string): Promise<void> {
     const rows = await this.request<TaskRow[]>("rpc/maya_release_task_claim", {
       method: "POST",
@@ -55,6 +67,24 @@ export class SupabaseTaskRepository implements TaskRepository {
       body: JSON.stringify({ p_founder_id: founderId }),
     });
     return Array.isArray(rows) && rows[0] ? Number(rows[0].recovered) || 0 : 0;
+  }
+
+  async putClaimed(envelope: TaskEnvelope, founderId: string, workerId: string): Promise<void> {
+    if (!envelope?.task?.id || !founderId || !workerId || envelope.task.founderId !== founderId) {
+      throw new Error("Task, Founder and worker identity are required for a fenced write.");
+    }
+    const result = await this.request<TaskRow>("rpc/maya_save_claimed_task", {
+      method: "POST",
+      body: JSON.stringify({
+        p_task_id: envelope.task.id,
+        p_founder_id: founderId,
+        p_worker_id: workerId,
+        p_envelope: envelope,
+      }),
+    });
+    if (!result || result.id !== envelope.task.id || result.founder_id !== founderId) {
+      throw new Error("Supabase did not confirm the lease-fenced task write.");
+    }
   }
 
   async put(envelope: TaskEnvelope): Promise<void> {

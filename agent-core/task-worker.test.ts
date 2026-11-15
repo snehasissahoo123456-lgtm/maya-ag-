@@ -289,6 +289,12 @@ test("worker uses atomic repository claims and releases each claimed task", asyn
       return this.item.task.id === id && (!founderId || this.item.task.founderId === founderId) ? structuredClone(this.item) : undefined;
     }
     async put(value: TaskEnvelope) { this.item = structuredClone(value); }
+    async putClaimed(value: TaskEnvelope, founderId: string, workerId: string) {
+      assert.equal(founderId, "founder-primary");
+      assert.equal(workerId.length > 0, true);
+      if (!this.claimed || value.task.id !== this.item.task.id) throw new Error("Lease no longer owned");
+      this.item = structuredClone(value);
+    }
     async list(founderId: string) { return this.item.task.founderId === founderId ? [structuredClone(this.item)] : []; }
     async claimNext(founderId: string, workerId: string, leaseMs: number) {
       assert.equal(founderId, "founder-primary");
@@ -584,4 +590,104 @@ test("worker creates a new local PC file only after exact Founder approval", asy
   assert.deepEqual(executedArgs, args);
   assert.equal((await repository.get("worker-device-create-1"))?.task.status, "completed");
   assert.equal((await approvals.listForFounder("founder-primary")).find(item => item.id === pending.approvalId)?.status, "consumed");
+});
+
+test("Supabase-backed worker renews its lease while a task is executing", async () => {
+  const { orchestrator, repository, registry, approvals } = setup(async () => {
+    await new Promise(resolve => setTimeout(resolve, 1800));
+    return {
+      result: { path: "README.md" },
+      evidence: { kind: "sha256", description: "Read-only file digest verified.", observedAt: new Date().toISOString() },
+    };
+  });
+  await orchestrator.enqueue({
+    id: "worker-lease-renewal-1",
+    founderId: "founder-primary",
+    instruction: "Read README slowly",
+    capability: "workspace.read_file",
+    args: { path: "README.md" },
+    actor: founder,
+  });
+  let claimed = false;
+  let renewals = 0;
+  (repository as any).claimNext = async () => {
+    if (claimed) return undefined;
+    claimed = true;
+    return repository.get("worker-lease-renewal-1");
+  };
+  (repository as any).renewClaim = async (taskId: string, founderId: string, workerId: string, leaseMs: number) => {
+    assert.equal(taskId, "worker-lease-renewal-1");
+    assert.equal(founderId, "founder-primary");
+    assert.ok(workerId.length > 0);
+    assert.equal(leaseMs, 5000);
+    renewals++;
+  };
+  (repository as any).putClaimed = async (envelope: TaskEnvelope) => repository.put(envelope);
+  (repository as any).releaseClaim = async () => {};
+  (repository as any).recoverExpiredClaims = async () => 0;
+  const worker = new TaskWorker(repository, orchestrator, registry, {
+    founderId: "founder-primary",
+    leaseMs: 5000,
+  }, approvals);
+  const result = await worker.runOnce();
+  assert.equal(result.executed, 1);
+  assert.ok(renewals >= 1, "worker should renew at least once before the 1.8-second task completes");
+  assert.equal((await repository.get("worker-lease-renewal-1"))?.task.status, "completed");
+});
+
+test("worker refuses to persist execution state after its lease fence rejects a stale worker", async () => {
+  const { orchestrator, worker, repository } = setup();
+  const taskId = "worker-stale-lease-fence";
+  await orchestrator.enqueue({
+    id: taskId,
+    founderId: "founder-primary",
+    instruction: "Read README",
+    capability: "workspace.read_file",
+    args: { path: "README.md" },
+    actor: founder,
+  });
+  let claimIssued = false;
+  Object.assign(repository, {
+    claimNext: async () => {
+      if (claimIssued) return undefined;
+      claimIssued = true;
+      return repository.get(taskId);
+    },
+    putClaimed: async () => { throw new Error("Task lease is expired or owned by another worker"); },
+    releaseClaim: async () => {},
+    recoverExpiredClaims: async () => 0,
+  });
+  const result = await worker.runOnce();
+  assert.equal(result.failed, 1);
+  assert.equal((await repository.get(taskId))?.task.status, "queued");
+});
+
+test("worker parks the last durable in-flight state when completion cannot be committed", async () => {
+  const { orchestrator, worker, repository } = setup();
+  const taskId = "worker-completion-fence-failure";
+  await orchestrator.enqueue({
+    id: taskId,
+    founderId: "founder-primary",
+    instruction: "Read README",
+    capability: "workspace.read_file",
+    args: { path: "README.md" },
+    actor: founder,
+  });
+  let claimIssued = false;
+  Object.assign(repository, {
+    claimNext: async () => {
+      if (claimIssued) return undefined;
+      claimIssued = true;
+      return repository.get(taskId);
+    },
+    putClaimed: async (value: TaskEnvelope) => {
+      if (value.task.status === "completed") throw new Error("Temporary database write failure");
+      await repository.put(value);
+    },
+    releaseClaim: async () => {},
+    recoverExpiredClaims: async () => 0,
+  });
+  const result = await worker.runOnce();
+  assert.equal(result.failed, 1);
+  assert.equal((await repository.get(taskId))?.task.status, "requires_recovery");
 });

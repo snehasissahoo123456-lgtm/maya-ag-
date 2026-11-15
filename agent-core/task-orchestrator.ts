@@ -9,6 +9,8 @@ export interface TaskRepository {
   put(envelope: TaskEnvelope): Promise<void>;
   list(founderId: string): Promise<TaskEnvelope[]>;
   claimNext?(founderId: string, workerId: string, leaseMs: number): Promise<TaskEnvelope | undefined>;
+  renewClaim?(taskId: string, founderId: string, workerId: string, leaseMs: number): Promise<void>;
+  putClaimed?(envelope: TaskEnvelope, founderId: string, workerId: string): Promise<void>;
   releaseClaim?(taskId: string, founderId: string, workerId: string): Promise<void>;
   recoverExpiredClaims?(founderId: string): Promise<number>;
 }
@@ -75,16 +77,25 @@ export class TaskOrchestrator {
     await this.repository.put(envelope);
     await this.recordAudit(input.actor, "task.approval_decided", envelope, { approvalId: approval.id, approved: input.approved });
   }
-  async execute(taskId: string, actor: AgentIdentity, approvalId?: string): Promise<{ task: MayaTask; result: unknown }> {
+  async execute(taskId: string, actor: AgentIdentity, approvalId?: string, claim?: { workerId: string }): Promise<{ task: MayaTask; result: unknown }> {
     if (this.executing.has(taskId)) throw new Error("Task execution is already in progress.");
+    if (claim && (!claim.workerId || !this.repository.putClaimed)) throw new Error("A lease-fenced repository write is required for claimed task execution.");
     this.executing.add(taskId);
     try {
-      return await this.executeOnce(taskId, actor, approvalId);
+      return await this.executeOnce(taskId, actor, approvalId, claim);
     } finally {
       this.executing.delete(taskId);
     }
   }
-  private async executeOnce(taskId: string, actor: AgentIdentity, approvalId?: string): Promise<{ task: MayaTask; result: unknown }> {
+  private async saveExecutionState(envelope: TaskEnvelope, actor: AgentIdentity, claim?: { workerId: string }): Promise<void> {
+    if (claim) {
+      if (!this.repository.putClaimed) throw new Error("Task lease fencing is unavailable; refusing an unfenced write.");
+      await this.repository.putClaimed(envelope, actor.founderId, claim.workerId);
+      return;
+    }
+    await this.repository.put(envelope);
+  }
+  private async executeOnce(taskId: string, actor: AgentIdentity, approvalId?: string, claim?: { workerId: string }): Promise<{ task: MayaTask; result: unknown }> {
     const envelope = await this.requireTask(taskId, actor.founderId);
     if (actor.founderId !== envelope.task.founderId) throw new Error("Task belongs to another Founder.");
     const { definition } = this.capabilities.validate(envelope.capability, actor, envelope.args);
@@ -102,7 +113,8 @@ export class TaskOrchestrator {
       envelope.task = transitionTask(envelope.task, "running");
     }
     envelope.attempts += 1;
-    await this.repository.put(envelope);
+    await this.saveExecutionState(envelope, actor, claim);
+    let lastPersistedTask = structuredClone(envelope.task);
     const controller = new AbortController();
     let timeout: ReturnType<typeof setTimeout> | undefined;
     try {
@@ -112,17 +124,20 @@ export class TaskOrchestrator {
       });
       const output = await Promise.race([this.runner.run({ capability: definition.name, args: envelope.args, timeoutMs: definition.timeoutMs, idempotencyKey: envelope.idempotencyKey, signal: controller.signal }), timeoutPromise]);
       envelope.task = transitionTask(envelope.task, "verifying");
-      await this.repository.put(envelope);
+      await this.saveExecutionState(envelope, actor, claim);
+      lastPersistedTask = structuredClone(envelope.task);
       await this.recordAudit(actor, "task.execution_verified", envelope, { evidenceReference: output.evidence.reference ?? null, evidenceKind: output.evidence.kind });
       envelope.result = output.result;
       envelope.task = transitionTask(envelope.task, "completed", { evidence: output.evidence });
-      await this.repository.put(envelope);
+      await this.saveExecutionState(envelope, actor, claim);
       return { task: envelope.task, result: output.result };
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
-      const requiresRecovery = envelope.task.status === "verifying" || error instanceof UncertainTaskExecutionError;
-      envelope.task = transitionTask(envelope.task, requiresRecovery ? "requires_recovery" : "failed", { error: reason });
-      await this.repository.put(envelope);
+      const requiresRecovery = envelope.task.status === "verifying" || envelope.task.status === "completed" || error instanceof UncertainTaskExecutionError;
+      const recoveryBase = envelope.task.status === "completed" ? lastPersistedTask : envelope.task;
+      envelope.task = transitionTask(recoveryBase, requiresRecovery ? "requires_recovery" : "failed", { error: reason });
+      if (requiresRecovery) envelope.result = undefined;
+      await this.saveExecutionState(envelope, actor, claim);
       if (envelope.task.status === "failed") {
         try { await this.recordAudit(actor, "task.execution_failed", envelope, { error: reason.slice(0, 500) }); } catch { /* preserve original execution error */ }
       }
