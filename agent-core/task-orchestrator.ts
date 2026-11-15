@@ -114,6 +114,7 @@ export class TaskOrchestrator {
     }
     envelope.attempts += 1;
     await this.saveExecutionState(envelope, actor, claim);
+    let lastPersistedTask = structuredClone(envelope.task);
     const controller = new AbortController();
     let timeout: ReturnType<typeof setTimeout> | undefined;
     try {
@@ -124,6 +125,7 @@ export class TaskOrchestrator {
       const output = await Promise.race([this.runner.run({ capability: definition.name, args: envelope.args, timeoutMs: definition.timeoutMs, idempotencyKey: envelope.idempotencyKey, signal: controller.signal }), timeoutPromise]);
       envelope.task = transitionTask(envelope.task, "verifying");
       await this.saveExecutionState(envelope, actor, claim);
+      lastPersistedTask = structuredClone(envelope.task);
       await this.recordAudit(actor, "task.execution_verified", envelope, { evidenceReference: output.evidence.reference ?? null, evidenceKind: output.evidence.kind });
       envelope.result = output.result;
       envelope.task = transitionTask(envelope.task, "completed", { evidence: output.evidence });
@@ -131,8 +133,10 @@ export class TaskOrchestrator {
       return { task: envelope.task, result: output.result };
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
-      const requiresRecovery = envelope.task.status === "verifying" || error instanceof UncertainTaskExecutionError;
-      envelope.task = transitionTask(envelope.task, requiresRecovery ? "requires_recovery" : "failed", { error: reason });
+      const requiresRecovery = envelope.task.status === "verifying" || envelope.task.status === "completed" || error instanceof UncertainTaskExecutionError;
+      const recoveryBase = envelope.task.status === "completed" ? lastPersistedTask : envelope.task;
+      envelope.task = transitionTask(recoveryBase, requiresRecovery ? "requires_recovery" : "failed", { error: reason });
+      if (requiresRecovery) envelope.result = undefined;
       await this.saveExecutionState(envelope, actor, claim);
       if (envelope.task.status === "failed") {
         try { await this.recordAudit(actor, "task.execution_failed", envelope, { error: reason.slice(0, 500) }); } catch { /* preserve original execution error */ }
