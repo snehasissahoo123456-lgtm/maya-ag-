@@ -68,8 +68,12 @@ function Read-Secret([string]$Prompt, [int]$MinimumLength) {
 $NodeCommand = Get-Command node.exe -ErrorAction SilentlyContinue
 if (-not $NodeCommand) { $NodeCommand = Get-Command node -ErrorAction Stop }
 $NodeVersionText = (& $NodeCommand.Source --version).Trim()
-if ($NodeVersionText -notmatch '^v(\d+)\.' -or [int]$Matches[1] -lt 22) {
-  throw "Maya requires Node.js 22 or newer. Detected $NodeVersionText."
+if ($NodeVersionText -notmatch '^v(\d+)\.(\d+)\.(\d+)' ) {
+  throw "Could not parse Node.js version: $NodeVersionText."
+}
+$NodeVersion = [version]("$($Matches[1]).$($Matches[2]).$($Matches[3])")
+if ($NodeVersion -lt [version]'22.9.0') {
+  throw "Maya requires Node.js 22.9.0 or newer for the env-file-if-exists runtime flag. Detected $NodeVersionText."
 }
 $BunCommand = Get-Command bun.exe -ErrorAction SilentlyContinue
 if (-not $BunCommand) { $BunCommand = Get-Command bun -ErrorAction SilentlyContinue }
