@@ -1259,14 +1259,14 @@ async function startServer() {
       ? [...developerReadiness.blockers]
       : [...developerRuntimeBootstrapResult.blockers];
     if (developerReadinessError) developerBlockers.push(developerReadinessError);
-    developerBlockers.push("The isolated Developer sandbox QA worker is a separate service; its live heartbeat has not been verified by this server.");
+    const developerWarnings = ["The isolated Developer sandbox QA worker is a separate service; its live heartbeat has not been verified by this server."];
     const coreRuntimeReady = geminiConfigured && founderAuthConfigured && storageReachable &&
       taskStatus.enabled && goalPlanStatus.enabled && scheduleStatus.enabled;
     return res.json({
       success: true,
       readiness: {
         coreRuntimeReady,
-        developerRuntimeReady: developerReadiness?.readyToApply ?? false,
+        developerHostReady: developerReadiness?.readyToApply ?? false,
         storageDriver,
         storageReachable,
         singleInstanceOnly: storageDriver === "file",
@@ -1280,6 +1280,8 @@ async function startServer() {
           networkAccess: developerReadiness?.networkAccess ?? "unknown",
           secretsMounted: developerReadiness?.secretsMounted ?? false,
           blockers: developerBlockers,
+          warnings: developerWarnings,
+          sandboxQaWorkerVerified: false,
         },
         blockers,
         warnings,
