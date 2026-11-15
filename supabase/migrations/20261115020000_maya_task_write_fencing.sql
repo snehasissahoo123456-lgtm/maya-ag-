@@ -111,7 +111,13 @@ begin
       and (t.lease_expires_at is null or t.lease_expires_at <= now())
       and (
         (
-          t.envelope->>'capability' = 'workspace.read_file'
+          t.envelope->>'capability' in (
+            'workspace.read_file',
+            'device.workspace.read_file',
+            'device.workspace.git_status',
+            'device.workspace.search_files',
+            'device.workspace.list_directory'
+          )
           and coalesce(t.envelope->'task'->>'requiresApproval', 'false') = 'false'
         )
         or (
