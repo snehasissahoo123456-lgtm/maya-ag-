@@ -660,3 +660,33 @@ test("worker refuses to persist execution state after its lease fence rejects a 
   assert.equal(result.failed, 1);
   assert.equal((await repository.get(taskId))?.task.status, "queued");
 });
+
+test("worker parks the last durable in-flight state when completion cannot be committed", async () => {
+  const { orchestrator, worker, repository } = setup();
+  const taskId = "worker-completion-fence-failure";
+  await orchestrator.enqueue({
+    id: taskId,
+    founderId: "founder-primary",
+    instruction: "Read README",
+    capability: "workspace.read_file",
+    args: { path: "README.md" },
+    actor: founder,
+  });
+  let claimIssued = false;
+  Object.assign(repository, {
+    claimNext: async () => {
+      if (claimIssued) return undefined;
+      claimIssued = true;
+      return repository.get(taskId);
+    },
+    putClaimed: async (value: TaskEnvelope) => {
+      if (value.task.status === "completed") throw new Error("Temporary database write failure");
+      await repository.put(value);
+    },
+    releaseClaim: async () => {},
+    recoverExpiredClaims: async () => 0,
+  });
+  const result = await worker.runOnce();
+  assert.equal(result.failed, 1);
+  assert.equal((await repository.get(taskId))?.task.status, "requires_recovery");
+});
