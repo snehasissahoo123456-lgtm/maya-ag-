@@ -102,7 +102,7 @@ export class TaskWorker {
     }
   }
 
-  private async executeAllowed(envelope: TaskEnvelope): Promise<"executed" | "skipped"> {
+  private async executeAllowed(envelope: TaskEnvelope, claimWorkerId?: string): Promise<"executed" | "skipped"> {
     if (envelope.task.founderId !== this.founderId) return "skipped";
     const isRead = envelope.capability === "workspace.read_file";
     const isDeviceRead = ["device.workspace.read_file", "device.workspace.git_status", "device.workspace.search_files", "device.workspace.list_directory"].includes(envelope.capability);
@@ -138,12 +138,12 @@ export class TaskWorker {
     } else if (definition.risk !== "low" || definition.requiresApproval) {
       return "skipped";
     }
-    await this.orchestrator.execute(envelope.task.id, actor, approvalId);
+    await this.orchestrator.execute(envelope.task.id, actor, approvalId, claimWorkerId ? { workerId: claimWorkerId } : undefined);
     return "executed";
   }
 
   private async executeWithLeaseRenewal(envelope: TaskEnvelope): Promise<"executed" | "skipped"> {
-    if (!this.repository.renewClaim) return this.executeAllowed(envelope);
+    if (!this.repository.renewClaim) return this.executeAllowed(envelope, this.workerId);
     const renewalIntervalMs = Math.max(1_000, Math.floor(this.leaseMs / 3));
     let renewalInFlight = false;
     let renewalError: Error | undefined;
@@ -160,7 +160,7 @@ export class TaskWorker {
     }, renewalIntervalMs);
     timer.unref?.();
     try {
-      const outcome = await this.executeAllowed(envelope);
+      const outcome = await this.executeAllowed(envelope, this.workerId);
       // Wait for an in-flight renewal so a late failure cannot be silently ignored.
       while (renewalInFlight) await new Promise(resolve => setTimeout(resolve, 10));
       if (renewalError) {
@@ -169,7 +169,11 @@ export class TaskWorker {
           current.task = transitionTask(current.task, "requires_recovery", {
             error: "Worker lease renewal failed during execution. Inspect side effects and verification evidence before retrying.",
           });
-          await this.repository.put(current);
+          // This write is fenced too. If the lease has expired or moved to another
+          // worker, leave recovery to the database's expired-lease recovery RPC.
+          if (this.repository.putClaimed) {
+            try { await this.repository.putClaimed(current, this.founderId, this.workerId); } catch { /* stale worker must not overwrite the new owner */ }
+          }
           throw new Error("Task lease renewal failed; task must be inspected before retrying: " + renewalError.message);
         }
         if (current?.task.status === "completed" && current.task.verificationEvidence.length > 0) {
