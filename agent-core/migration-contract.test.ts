@@ -57,3 +57,10 @@ test("claimed task writes are fenced by the current worker lease and valid lifec
   assert.match(sql, /lease_expires_at > clock_timestamp\(\)[\s\S]*returning \* into released/i);
   assert.match(sql, /status' not in \('running', 'verifying'\)/i);
 });
+
+test("CEO specialist assignments are eligible for the shared bounded task worker", () => {
+  const sql = migration("20261115030000_maya_ceo_specialist_task_queue.sql");
+  assert.match(sql, /'ceo\.specialist\.run'/);
+  assert.match(sql, /'device\.workspace\.list_directory'[\s\S]*'ceo\.specialist\.run'/);
+  assert.match(sql, /grant execute on function public\.maya_claim_next_task[\s\S]*to service_role/i);
+});

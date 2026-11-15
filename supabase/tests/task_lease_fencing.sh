@@ -116,4 +116,28 @@ if [[ "$recovered" -lt 1 ]]; then echo "Expired in-flight task was not recovered
 recovery_status=$(run_sql "select envelope->'task'->>'status' from public.maya_tasks where id = '$recovery_id'")
 if [[ "$recovery_status" != "requires_recovery" ]]; then echo "Expired in-flight task was not parked for recovery"; exit 1; fi
 
-echo "PostgreSQL task claim concurrency, renewal, lease fencing, approved-write gating, release and expiry recovery checks passed."
+# CEO specialist assignments share the same durable claim and lifecycle path.
+ceo_id="task-lease-ci-ceo-specialist"
+run_sql "
+insert into public.maya_tasks (id, founder_id, envelope)
+values ('$ceo_id', '$founder',
+  jsonb_build_object(
+    'task', jsonb_build_object('id', '$ceo_id', 'founderId', '$founder', 'status', 'queued', 'requiresApproval', false, 'verificationEvidence', '[]'::jsonb),
+    'capability', 'ceo.specialist.run',
+    'args', jsonb_build_object('runId', 'ceo-ci-run', 'agentId', 'research', 'task', 'Summarize repository architecture', 'context', ''),
+    'attempts', 0, 'idempotencyKey', '$ceo_id'
+  )
+);
+"
+ceo_claim=$(run_sql "select id from public.maya_claim_next_task('$founder', 'worker-ceo', 60000)")
+if [[ "$ceo_claim" != "$ceo_id" ]]; then echo "CEO specialist task was not claimable by the shared task worker"; exit 1; fi
+ceo_running="jsonb_build_object('task', jsonb_build_object('id', '$ceo_id', 'founderId', '$founder', 'status', 'running', 'requiresApproval', false, 'verificationEvidence', '[]'::jsonb), 'capability', 'ceo.specialist.run', 'args', jsonb_build_object('runId', 'ceo-ci-run', 'agentId', 'research', 'task', 'Summarize repository architecture', 'context', ''), 'attempts', 1, 'idempotencyKey', '$ceo_id')"
+run_sql "select (public.maya_save_claimed_task('$ceo_id', '$founder', 'worker-ceo', $ceo_running)).id" >/dev/null
+ceo_verifying="jsonb_build_object('task', jsonb_build_object('id', '$ceo_id', 'founderId', '$founder', 'status', 'verifying', 'requiresApproval', false, 'verificationEvidence', '[]'::jsonb), 'capability', 'ceo.specialist.run', 'args', jsonb_build_object('runId', 'ceo-ci-run', 'agentId', 'research', 'task', 'Summarize repository architecture', 'context', ''), 'attempts', 1, 'idempotencyKey', '$ceo_id')"
+run_sql "select (public.maya_save_claimed_task('$ceo_id', '$founder', 'worker-ceo', $ceo_verifying)).id" >/dev/null
+ceo_completed="jsonb_build_object('task', jsonb_build_object('id', '$ceo_id', 'founderId', '$founder', 'status', 'completed', 'requiresApproval', false, 'verificationEvidence', jsonb_build_array(jsonb_build_object('kind', 'ceo-specialist-output-sha256', 'description', 'specialist result digest'))), 'capability', 'ceo.specialist.run', 'args', jsonb_build_object('runId', 'ceo-ci-run', 'agentId', 'research', 'task', 'Summarize repository architecture', 'context', ''), 'attempts', 1, 'idempotencyKey', '$ceo_id')"
+run_sql "select (public.maya_save_claimed_task('$ceo_id', '$founder', 'worker-ceo', $ceo_completed)).id" >/dev/null
+ceo_released=$(run_sql "select count(*) from public.maya_release_task_claim('$ceo_id', '$founder', 'worker-ceo')")
+if [[ "$ceo_released" != "1" ]]; then echo "CEO specialist task lease could not be released"; exit 1; fi
+
+echo "PostgreSQL task claim concurrency, renewal, lease fencing, approved-write gating, CEO specialist dispatch, release and expiry recovery checks passed."

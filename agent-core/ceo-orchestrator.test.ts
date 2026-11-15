@@ -2,7 +2,10 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { CEOOrchestrator, validateCEODispatchPlan, CEOPlanValidationError } from "./ceo-orchestrator.ts";
 import type { SpecialistResult } from "./specialist-runtime.ts";
-import type { TaskEnvelope, TaskRepository } from "./task-orchestrator.ts";
+import { TaskOrchestrator, type TaskEnvelope, type TaskRepository } from "./task-orchestrator.ts";
+import { CapabilityRegistry } from "./capability-registry.ts";
+import { ApprovalLedger } from "./approval-ledger.ts";
+import { TaskWorker } from "./task-worker.ts";
 
 const dispatch = { summary: "Use research and finance perspectives.", assignments: [
   { agentId: "research", task: "Identify the key technical risks." },
@@ -101,4 +104,75 @@ test("does not start any specialist when CEO dispatch JSON is invalid", async ()
   }, { run: async () => { started = true; return result("research"); } });
   await assert.rejects(orchestrator.run({ objective: "Review" }), /invalid dispatch JSON/);
   assert.equal(started, false);
+});
+
+test("CEO specialist assignments are queued, executed and verified by the shared TaskWorker", async () => {
+  const repository = memoryTaskRepository();
+  const registry = new CapabilityRegistry();
+  registry.register({
+    name: "ceo.specialist.run",
+    description: "Run a bounded read-only specialist assignment.",
+    risk: "low",
+    allowedRoles: ["worker"],
+    requiredScopes: ["agents:execute"],
+    arguments: {
+      runId: { type: "string", required: true, maxLength: 128 },
+      agentId: { type: "string", required: true, maxLength: 64 },
+      task: { type: "string", required: true, maxLength: 2000 },
+      context: { type: "string", required: false, maxLength: 8000 },
+    },
+    timeoutMs: 10_000,
+    requiresApproval: false,
+    verification: "Persist a digest of the bounded specialist output.",
+  });
+  const orchestrator = new TaskOrchestrator(repository, registry, new ApprovalLedger(), {
+    run: async ({ capability, args, founderId }) => {
+      assert.equal(capability, "ceo.specialist.run");
+      assert.equal(founderId, "founder-42");
+      const finding = result(String(args.agentId));
+      return {
+        result: finding,
+        evidence: {
+          kind: "ceo-specialist-output-sha256",
+          description: "Specialist output digest verified.",
+          reference: "sha256:" + "b".repeat(64),
+          observedAt: finding.completedAt,
+        },
+      };
+    },
+  });
+  const worker = new TaskWorker(repository, orchestrator, registry, { founderId: "founder-42" }, new ApprovalLedger());
+  const ceo = new CEOOrchestrator({
+    plan: async () => JSON.stringify(dispatch),
+    synthesize: async ({ findings }) => findings.map(item => item.output).join("\\n"),
+  }, {
+    run: async () => { throw new Error("CEO must dispatch through TaskWorker, not execute specialists directly."); },
+  }, repository, {
+    dispatch: async ({ founderId, taskIds }) => {
+      assert.equal(founderId, "founder-42");
+      const queued = await Promise.all(taskIds.map(id => repository.get(id, founderId)));
+      assert.ok(queued.every(item => item?.task.status === "queued"));
+      const cycle = await worker.runOnce();
+      assert.equal(cycle.executed, taskIds.length);
+    },
+  });
+  const output = await ceo.run({ objective: "Review the launch plan", founderId: "founder-42", runId: "ceo-shared-worker-run" });
+  assert.equal(output.executionMode, "multi_specialist_durable_task_worker");
+  assert.deepEqual(output.findings.map(item => item.agentId), ["research", "finance"]);
+  const records = await repository.list("founder-42");
+  assert.equal(records.length, 2);
+  assert.ok(records.every(item => item.task.status === "completed"));
+  assert.ok(records.every(item => item.task.verificationEvidence.some(evidence => evidence.kind === "ceo-specialist-output-sha256")));
+  assert.ok(records.every(item => (item.result as SpecialistResult).output.endsWith("findings")));
+});
+
+test("CEO rejects oversized run identifiers before dispatch", async () => {
+  const ceo = new CEOOrchestrator({
+    plan: async () => JSON.stringify(dispatch),
+    synthesize: async () => "unused",
+  }, { run: async input => result(input.agentId) });
+  await assert.rejects(
+    () => ceo.run({ objective: "Review launch plan", runId: "r".repeat(129) }),
+    /run ID must be at most 128 characters/,
+  );
 });

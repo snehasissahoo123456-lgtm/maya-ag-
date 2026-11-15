@@ -15,7 +15,7 @@ export interface TaskRepository {
   recoverExpiredClaims?(founderId: string): Promise<number>;
 }
 export interface CapabilityRunner {
-  run(input: { capability: string; args: Record<string, unknown>; timeoutMs: number; idempotencyKey: string; signal: AbortSignal }): Promise<{ result: unknown; evidence: VerificationEvidence }>;
+  run(input: { capability: string; args: Record<string, unknown>; timeoutMs: number; idempotencyKey: string; signal: AbortSignal; founderId: string }): Promise<{ result: unknown; evidence: VerificationEvidence }>;
 }
 
 export class UncertainTaskExecutionError extends Error {
@@ -122,7 +122,7 @@ export class TaskOrchestrator {
       const timeoutPromise = new Promise<never>((_resolve, reject) => {
         timeout = setTimeout(() => { controller.abort(); reject(new Error("Capability execution timed out.")); }, definition.timeoutMs);
       });
-      const output = await Promise.race([this.runner.run({ capability: definition.name, args: envelope.args, timeoutMs: definition.timeoutMs, idempotencyKey: envelope.idempotencyKey, signal: controller.signal }), timeoutPromise]);
+      const output = await Promise.race([this.runner.run({ capability: definition.name, args: envelope.args, timeoutMs: definition.timeoutMs, idempotencyKey: envelope.idempotencyKey, signal: controller.signal, founderId: actor.founderId }), timeoutPromise]);
       envelope.task = transitionTask(envelope.task, "verifying");
       await this.saveExecutionState(envelope, actor, claim);
       lastPersistedTask = structuredClone(envelope.task);

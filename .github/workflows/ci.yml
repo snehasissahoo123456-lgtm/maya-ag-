@@ -49,7 +49,11 @@ jobs:
           $files = @(
             "scripts/Start-Maya-Bridge.ps1",
             "scripts/Install-Maya-Bridge-Startup.ps1",
-            "scripts/Uninstall-Maya-Bridge-Startup.ps1"
+            "scripts/Uninstall-Maya-Bridge-Startup.ps1",
+            "scripts/Start-Maya-Server.ps1",
+            "scripts/Install-Maya-Server-Startup.ps1",
+            "scripts/Uninstall-Maya-Server-Startup.ps1",
+            "scripts/Activate-Maya.ps1"
           )
           foreach ($file in $files) {
             $tokens = $null
@@ -63,6 +67,10 @@ jobs:
           $installer = Get-Content -Raw "scripts/Install-Maya-Bridge-Startup.ps1"
           if ($installer -notmatch "-LogonType Interactive" -or $installer -notmatch "-RunLevel Limited") {
             throw "Bridge startup must use an interactive, limited-privilege current-user task."
+          }
+          $serverInstaller = Get-Content -Raw "scripts/Install-Maya-Server-Startup.ps1"
+          if ($serverInstaller -notmatch "-LogonType Interactive" -or $serverInstaller -notmatch "-RunLevel Limited") {
+            throw "Maya server startup must use an interactive, limited-privilege current-user task."
           }
       - name: Apply Supabase migrations to disposable PostgreSQL
         env:

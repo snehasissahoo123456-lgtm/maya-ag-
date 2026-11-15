@@ -139,6 +139,22 @@ function setup(
     requiresApproval: false,
     verification: "Hash the bounded directory listing.",
   });
+  registry.register({
+    name: "ceo.specialist.run",
+    description: "Run a bounded read-only specialist assignment.",
+    risk: "low",
+    allowedRoles: ["worker"],
+    requiredScopes: ["agents:execute"],
+    arguments: {
+      runId: { type: "string", required: true, maxLength: 128 },
+      agentId: { type: "string", required: true, maxLength: 64 },
+      task: { type: "string", required: true, maxLength: 2000 },
+      context: { type: "string", required: false, maxLength: 8000 },
+    },
+    timeoutMs: 120_000,
+    requiresApproval: false,
+    verification: "Hash specialist output and persist verification evidence.",
+  });
   const approvals = new ApprovalLedger();
   const orchestrator = new TaskOrchestrator(repository, registry, approvals, { run });
   const worker = new TaskWorker(repository, orchestrator, registry, { founderId: "founder-primary", pollIntervalMs: 1000, isDeviceAvailable }, approvals);
@@ -690,4 +706,55 @@ test("worker parks the last durable in-flight state when completion cannot be co
   const result = await worker.runOnce();
   assert.equal(result.failed, 1);
   assert.equal((await repository.get(taskId))?.task.status, "requires_recovery");
+});
+
+test("shared task worker executes CEO specialist assignments with Founder scope and durable verification", async () => {
+  let receivedFounder = "";
+  const specialistResult = {
+    agentId: "research",
+    displayName: "Research Specialist",
+    role: "specialist" as const,
+    task: "Review the architecture",
+    output: "Verified bounded research finding",
+    executionMode: "reasoning_only" as const,
+    completedAt: new Date().toISOString(),
+  };
+  const { repository, registry, approvals } = setup();
+  const orchestrator = new TaskOrchestrator(repository, registry, approvals, {
+    run: async input => {
+      receivedFounder = input.founderId;
+      assert.equal(input.capability, "ceo.specialist.run");
+      return {
+        result: specialistResult,
+        evidence: {
+          kind: "ceo-specialist-output-sha256",
+          description: "Specialist output digest recorded.",
+          reference: "sha256:" + "a".repeat(64),
+          observedAt: specialistResult.completedAt,
+        },
+      };
+    },
+  });
+  const worker = new TaskWorker(repository, orchestrator, registry, { founderId: "founder-primary" }, approvals);
+  const task = createTask({
+    id: "worker-ceo-specialist-1",
+    founderId: "founder-primary",
+    instruction: "CEO specialist assignment (research): Review the architecture",
+    riskLevel: "low",
+    requiresApproval: false,
+  });
+  await repository.put({
+    task,
+    capability: "ceo.specialist.run",
+    args: { runId: "ceo-run-1", agentId: "research", task: "Review the architecture", context: "" },
+    attempts: 0,
+    idempotencyKey: task.id,
+  });
+  const result = await worker.runOnce();
+  assert.equal(result.executed, 1);
+  assert.equal(receivedFounder, "founder-primary");
+  const saved = await repository.get(task.id);
+  assert.equal(saved?.task.status, "completed");
+  assert.equal((saved?.result as typeof specialistResult)?.output, specialistResult.output);
+  assert.ok(saved?.task.verificationEvidence.some(item => item.kind === "ceo-specialist-output-sha256"));
 });
