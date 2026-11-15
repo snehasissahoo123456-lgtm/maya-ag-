@@ -174,6 +174,7 @@ begin
       and founder_id = p_founder_id
       and lease_owner = p_worker_id
       and lease_expires_at > clock_timestamp()
+      and envelope->'task'->>'status' not in ('running', 'verifying')
     returning * into released;
   if not found then
     raise exception 'Task lease is expired, missing, or not owned by this Founder and worker';
