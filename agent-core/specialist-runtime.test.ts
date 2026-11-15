@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { SpecialistRuntime, listRunnableSpecialists } from "./specialist-runtime.ts";
+import { AGENT_MANIFESTS, getAgentManifest } from "./agent-manifests.ts";
 import { CapabilityRegistry } from "./capability-registry.ts";
 import { SpecialistToolExecutor } from "./specialist-tool-executor.ts";
 
@@ -14,11 +15,29 @@ test("runs a named specialist with bounded identity and no tool permissions", as
   assert.match(prompt, /Never claim to have executed actions/i);
 });
 
-test("lists runnable roles but excludes Founder identity", () => {
+test("lists runnable department templates but excludes Founder identity", () => {
   const agents = listRunnableSpecialists();
-  assert.ok(agents.some(agent => agent.id === "research"));
-  assert.ok(agents.some(agent => agent.id === "developer"));
+  const expected = [
+    "research", "operations", "content", "finance", "product", "marketing", "sales",
+    "customer-support", "people-ops", "legal-compliance", "procurement",
+    "executive-assistant", "data-analytics", "security-it", "real-estate", "hospitality",
+    "developer",
+  ];
+  for (const id of expected) assert.ok(agents.some(agent => agent.id === id), "missing department template: " + id);
   assert.ok(!agents.some(agent => agent.id === "founder"));
+  assert.equal(AGENT_MANIFESTS.length, expected.length + 2);
+});
+
+test("department templates cannot create agents, approve actions or delegate recursively", () => {
+  const departments = AGENT_MANIFESTS.filter(agent => agent.role === "specialist");
+  assert.ok(departments.length >= 15);
+  for (const agent of departments) {
+    assert.equal(agent.mayCreateAgents, false, agent.id);
+    assert.equal(agent.mayApproveActions, false, agent.id);
+    assert.deepEqual(agent.allowedDelegates, [], agent.id);
+    assert.ok(agent.maxConcurrentTasks >= 1 && agent.maxConcurrentTasks <= 3, agent.id);
+  }
+  assert.equal(getAgentManifest("ceo")?.mayApproveActions, false);
 });
 
 test("rejects Founder, unknown roles, and oversized tasks", async () => {
