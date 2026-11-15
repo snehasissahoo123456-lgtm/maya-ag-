@@ -136,7 +136,7 @@ begin
                 and a.founder_id = t.founder_id
                 and a.capability = t.envelope->>'capability'
                 and a.status = 'approved'
-                and a.expires_at > now()
+                and a.expires_at > clock_timestamp()
           )
         )
       )
@@ -187,3 +187,36 @@ revoke all on function public.maya_claim_next_task(text, text, integer) from pub
 revoke all on function public.maya_release_task_claim(text, text, text) from public, anon, authenticated;
 grant execute on function public.maya_claim_next_task(text, text, integer) to service_role;
 grant execute on function public.maya_release_task_claim(text, text, text) to service_role;
+
+-- Recovery must use wall-clock expiry as well; an old transaction timestamp must
+-- never recover or retain a lease based on when the transaction began.
+create or replace function public.maya_recover_expired_task_claims(p_founder_id text)
+returns table(recovered integer)
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare changed_count integer;
+begin
+  if p_founder_id is null or char_length(p_founder_id) < 1 or char_length(p_founder_id) > 256 then
+    raise exception 'Invalid Founder ID';
+  end if;
+  update public.maya_tasks
+    set envelope = jsonb_set(
+      jsonb_set(
+        jsonb_set(envelope, '{task,status}', to_jsonb('requires_recovery'::text), true),
+        '{task,lastError}', to_jsonb('Worker lease expired during execution; inspect side effects before retrying.'::text), true
+      ),
+      '{task,updatedAt}', to_jsonb(clock_timestamp()::text), true
+    ),
+    updated_at = clock_timestamp(), lease_owner = null, lease_expires_at = null
+    where founder_id = p_founder_id
+      and lease_expires_at <= clock_timestamp()
+      and envelope->'task'->>'status' in ('running', 'verifying');
+  get diagnostics changed_count = row_count;
+  return query select changed_count;
+end;
+$$;
+
+revoke all on function public.maya_recover_expired_task_claims(text) from public, anon, authenticated;
+grant execute on function public.maya_recover_expired_task_claims(text) to service_role;
