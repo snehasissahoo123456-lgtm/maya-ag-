@@ -165,3 +165,14 @@ test("CEO specialist assignments are queued, executed and verified by the shared
   assert.ok(records.every(item => item.task.verificationEvidence.some(evidence => evidence.kind === "ceo-specialist-output-sha256")));
   assert.ok(records.every(item => (item.result as SpecialistResult).output.endsWith("findings")));
 });
+
+test("CEO rejects oversized run identifiers before dispatch", async () => {
+  const ceo = new CEOOrchestrator({
+    plan: async () => JSON.stringify(dispatch),
+    synthesize: async () => "unused",
+  }, { run: async input => result(input.agentId) });
+  await assert.rejects(
+    () => ceo.run({ objective: "Review launch plan", runId: "r".repeat(129) }),
+    /run ID must be at most 128 characters/,
+  );
+});
