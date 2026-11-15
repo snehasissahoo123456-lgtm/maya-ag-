@@ -74,3 +74,109 @@ $$;
 
 revoke all on function public.maya_save_claimed_task(text, text, text, jsonb) from public, anon, authenticated;
 grant execute on function public.maya_save_claimed_task(text, text, text, jsonb) to service_role;
+
+-- The queue may lease only read-only work without approval, or explicitly approved
+-- write tasks. The worker still verifies the exact argument digest and atomically
+-- consumes the one-time grant before executing any write.
+drop index if exists public.maya_tasks_safe_claim_idx;
+create index maya_tasks_safe_claim_idx
+  on public.maya_tasks (founder_id, lease_expires_at, created_at)
+  where envelope->'task'->>'status' = 'queued';
+
+create or replace function public.maya_claim_next_task(
+  p_founder_id text,
+  p_worker_id text,
+  p_lease_ms integer
+)
+returns setof public.maya_tasks
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare candidate public.maya_tasks;
+declare bounded_ms integer;
+begin
+  if p_founder_id is null or char_length(p_founder_id) < 1 or char_length(p_founder_id) > 256 then
+    raise exception 'Invalid Founder ID';
+  end if;
+  if p_worker_id is null or char_length(p_worker_id) < 1 or char_length(p_worker_id) > 128 then
+    raise exception 'Invalid worker ID';
+  end if;
+  bounded_ms := greatest(5000, least(coalesce(p_lease_ms, 60000), 300000));
+
+  select * into candidate
+    from public.maya_tasks t
+    where t.founder_id = p_founder_id
+      and t.envelope->'task'->>'status' = 'queued'
+      and (t.lease_expires_at is null or t.lease_expires_at <= now())
+      and (
+        (
+          t.envelope->>'capability' = 'workspace.read_file'
+          and coalesce(t.envelope->'task'->>'requiresApproval', 'false') = 'false'
+        )
+        or (
+          t.envelope->>'capability' in (
+            'workspace.write_file',
+            'device.workspace.write_file',
+            'device.workspace.create_file',
+            'device.workspace.create_directory',
+            'device.workspace.move_file'
+          )
+          and coalesce(t.envelope->'task'->>'requiresApproval', 'false') = 'true'
+          and exists (
+            select 1
+              from public.maya_approvals a
+              where a.task_id = t.id
+                and a.founder_id = t.founder_id
+                and a.capability = t.envelope->>'capability'
+                and a.status = 'approved'
+                and a.expires_at > now()
+          )
+        )
+      )
+    order by t.created_at asc
+    limit 1
+    for update of t skip locked;
+
+  if not found then return; end if;
+
+  update public.maya_tasks
+    set lease_owner = p_worker_id,
+        lease_expires_at = now() + (bounded_ms * interval '1 millisecond')
+    where id = candidate.id and founder_id = p_founder_id
+    returning * into candidate;
+
+  return next candidate;
+end;
+$$;
+
+create or replace function public.maya_release_task_claim(
+  p_task_id text,
+  p_founder_id text,
+  p_worker_id text
+)
+returns setof public.maya_tasks
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare released public.maya_tasks;
+begin
+  update public.maya_tasks
+    set lease_owner = null, lease_expires_at = null
+    where id = p_task_id
+      and founder_id = p_founder_id
+      and lease_owner = p_worker_id
+      and lease_expires_at > now()
+    returning * into released;
+  if not found then
+    raise exception 'Task lease is expired, missing, or not owned by this Founder and worker';
+  end if;
+  return next released;
+end;
+$$;
+
+revoke all on function public.maya_claim_next_task(text, text, integer) from public, anon, authenticated;
+revoke all on function public.maya_release_task_claim(text, text, text) from public, anon, authenticated;
+grant execute on function public.maya_claim_next_task(text, text, integer) to service_role;
+grant execute on function public.maya_release_task_claim(text, text, text) to service_role;
