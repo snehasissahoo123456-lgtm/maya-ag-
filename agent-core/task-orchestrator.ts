@@ -10,6 +10,7 @@ export interface TaskRepository {
   list(founderId: string): Promise<TaskEnvelope[]>;
   claimNext?(founderId: string, workerId: string, leaseMs: number): Promise<TaskEnvelope | undefined>;
   renewClaim?(taskId: string, founderId: string, workerId: string, leaseMs: number): Promise<void>;
+  putClaimed?(envelope: TaskEnvelope, founderId: string, workerId: string): Promise<void>;
   releaseClaim?(taskId: string, founderId: string, workerId: string): Promise<void>;
   recoverExpiredClaims?(founderId: string): Promise<number>;
 }
