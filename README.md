@@ -69,11 +69,11 @@ The development UI includes a Goal Plans workspace for generating, reviewing, ap
 
 ## Specialist reasoning runtime (current development branch)
 
-Authenticated APIs expose the specialist registry and a bounded specialist-run endpoint. The UI provides a Specialist Agents workspace for Research, Operations, Content, Finance, Developer and CEO roles. Each run is a single Gemini reasoning call with the role's manifest purpose/scopes and relevant saved notes. This runtime has no tools, browser, shell, filesystem, account, payment, deployment or device access; it cannot spawn/delegate to other agents or claim to have executed work. It is a specialist reasoning interface, not yet the full multi-agent workforce.
+Authenticated APIs expose a specialist registry and bounded specialist-run endpoint. Each specialist receives its role manifest and relevant Founder memory. The runtime may expose only manifest-scoped low-risk workspace reads and Founder-scoped memory search; it does not grant specialist file writes, shell, unrestricted browser/device control, account changes, payments or deployment. Department templates describe reasoning roles, not a dynamic 100-agent workforce.
 
 ## CEO specialist orchestration (current development branch)
 
-The authenticated CEO orchestration endpoint uses Gemini to select one to four distinct specialists from the registered manifests, validates the dispatch, runs each specialist sequentially, and asks the CEO layer to synthesize their findings. A dedicated CEO Orchestration workspace exposes this flow. This is a reasoning-only workflow: specialist agents have no tools and cannot execute external actions, spawn more agents or claim work was completed. The run is not yet a durable distributed workflow and its findings are not yet persisted as a long-term project record.
+The authenticated CEO orchestration endpoint uses Gemini to select one to four distinct specialists from registered manifests and validates the dispatch. Founder-scoped assignments are persisted as tasks and routed through the shared TaskWorker; with Supabase they use independent leases, renewal and fenced writes. The CEO accepts only completed task records with verification evidence before synthesis. Specialists remain bounded to manifest-scoped low-risk read tools; they cannot recursively delegate, approve actions, write files, run shell commands or commit external changes. CEO run history has file and Supabase adapters, but partial-failure resume, cancellation, per-agent budgets and full independent QA are still outstanding.
 
 ## Supabase conversation database (optional deployment mode)
 
@@ -84,7 +84,7 @@ The same Supabase mode also persists validated goal plans and step execution sta
 
 ## Supabase task queue adapter (development branch)
 
-The `maya/supabase-task-queue` branch adds an optional Supabase PostgREST task repository. It uses a server-only service-role key, Founder-scoped reads, and the `maya_save_task` database RPC to atomically create/update a task only when its immutable Founder owner matches. Apply `supabase/migrations/20261108010000_maya_tasks.sql` in addition to the prior conversation and goal-plan migrations before enabling `MAYA_STORAGE_DRIVER=supabase`. The local JSON task repository remains the default. This adapter does not itself make the worker distributed or multi-instance safe; claim/lease semantics and concurrent worker coordination remain separate release requirements.
+The `main` branch includes an optional Supabase PostgREST task repository using a server-only service-role key, Founder-scoped reads and owner-bound database writes. Supabase task execution uses atomic claims, bounded leases, heartbeat renewal and fenced state writes; CEO specialist assignments use the same worker path. Apply all timestamped Supabase migrations in order before selecting `MAYA_STORAGE_DRIVER=supabase`. The default remains local file storage. CI tests the migrations against disposable PostgreSQL; the user's live Supabase project and two-instance runtime still require operator configuration and acceptance.
 
 
 ## Durable audit trail (development branch)
@@ -99,7 +99,7 @@ Approval requests, decisions and single-use consumption now have an asynchronous
 
 ## Supabase task leases (development branch)
 
-When using the Supabase task repository, the worker claims only queued `workspace.read_file` tasks that do not require approval. Claims use `FOR UPDATE SKIP LOCKED`, a bounded owner lease and an explicit release RPC. Expired leases on tasks already marked running/verifying are parked as `requires_recovery`; they are never automatically replayed. Apply `supabase/migrations/20261108040000_maya_task_leases.sql` after the task table migration. Configure `MAYA_TASK_WORKER_LEASE_MS` and `MAYA_TASK_WORKER_MAX_TASKS_PER_CYCLE`. The worker remains opt-in and disabled by default; this is not yet a general-purpose distributed executor.
+When using Supabase task storage, the worker claims eligible Founder-scoped tasks with `FOR UPDATE SKIP LOCKED`, renews bounded owner leases and fences every worker-owned state write. Expired or stale workers cannot overwrite a newer owner; uncertain side effects are parked for recovery rather than replayed. Supported work includes registered low-risk reads, bounded local-device reads, CEO specialist runs and exact-Founder-approved write capabilities. This is a guarded execution layer, not a general-purpose shell/browser operator. Workers remain opt-in and disabled by default; configure `MAYA_TASK_WORKER_LEASE_MS` and `MAYA_TASK_WORKER_MAX_TASKS_PER_CYCLE` only after reviewing the activation runbook.
 
 
 ## Founder memory repository (development branch)
@@ -130,7 +130,7 @@ Apply `supabase/migrations/20261109000000_maya_tasks.sql` after the earlier Supa
 
 ## Persistent CEO orchestration history (development branch)
 
-Founder-authenticated CEO runs are now recorded in a local, atomic `ceo-runs.json` repository. The UI can list and reopen prior reports. A server restart marks in-progress CEO runs as failed with a recovery note; Maya does not silently rerun specialist work. This repository currently uses single-instance file persistence even when other subsystems are configured for Supabase. A Supabase adapter, retention policy, encrypted backup and live migration remain outstanding.
+Founder-authenticated CEO runs are recorded through file or Supabase repositories and can be listed/reopened in the CEO workspace. Interrupted runs are marked failed rather than silently replayed. Supabase mode requires the CEO-run migration to be applied to the live project. Resumable partial assignments, cancellation, per-run budgets, retention and encrypted backup/restore verification remain outstanding.
 
 
 ## Scheduled read-only jobs (development branch)
