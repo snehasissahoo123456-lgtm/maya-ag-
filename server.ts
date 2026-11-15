@@ -1324,7 +1324,7 @@ async function startServer() {
           networkAccess: readiness?.networkAccess,
           secretsMounted: readiness?.secretsMounted,
           executionEnabled: readiness?.readyToApply ?? false,
-          qaEnabled: sandboxQaWorker.healthy,
+          qaEnabled: sandboxQaWorker.healthy && (readiness?.readyToApply ?? false),
           workerEnabled: false,
           sandboxQaWorker,
         },
