@@ -88,6 +88,20 @@ values ('approval-task-lease-ci', '$write_id', '$founder', 'workspace.write_file
 approved_claim=$(run_sql "select id from public.maya_claim_next_task('$founder', 'worker-a', 60000)")
 if [[ "$approved_claim" != "$write_id" ]]; then echo "Approved write task was not claimable"; exit 1; fi
 
+# A claimed mutation cannot start until its exact one-time approval has been consumed.
+unapproved_running="jsonb_build_object('task', jsonb_build_object('id', '$write_id', 'founderId', '$founder', 'status', 'running', 'requiresApproval', true), 'capability', 'workspace.write_file', 'args', jsonb_build_object('path', 'report.md', 'content', 'approved'), 'attempts', 1, 'idempotencyKey', '$write_id')"
+unapproved_write="$(run_sql "do \\$\\$ begin perform public.maya_save_claimed_task('$write_id', '$founder', 'worker-a', $unapproved_running); raise exception 'write started without consumed approval'; exception when others then if sqlerrm = 'write started without consumed approval' then raise; end if; end \\$\\$")"
+consumed=$(run_sql "select count(*) from public.maya_consume_approval('approval-task-lease-ci', '$founder', '$write_id', 'workspace.write_file', '45c96a60b8c178229802dfc6289dfebf788a5d7b18978a37faa8172fad110c91', clock_timestamp())")
+if [[ "$consumed" != "1" ]]; then echo "Exact Founder approval could not be consumed"; exit 1; fi
+approved_running="jsonb_build_object('task', jsonb_build_object('id', '$write_id', 'founderId', '$founder', 'status', 'running', 'requiresApproval', true, 'approval', jsonb_build_object('approvalId', 'approval-task-lease-ci', 'taskId', '$write_id', 'founderId', '$founder', 'approvedAt', clock_timestamp()::text)), 'capability', 'workspace.write_file', 'args', jsonb_build_object('path', 'report.md', 'content', 'approved'), 'attempts', 1, 'idempotencyKey', '$write_id')"
+run_sql "select (public.maya_save_claimed_task('$write_id', '$founder', 'worker-a', $approved_running)).id" >/dev/null
+approved_verifying="jsonb_build_object('task', jsonb_build_object('id', '$write_id', 'founderId', '$founder', 'status', 'verifying', 'requiresApproval', true, 'approval', jsonb_build_object('approvalId', 'approval-task-lease-ci', 'taskId', '$write_id', 'founderId', '$founder', 'approvedAt', clock_timestamp()::text)), 'capability', 'workspace.write_file', 'args', jsonb_build_object('path', 'report.md', 'content', 'approved'), 'attempts', 1, 'idempotencyKey', '$write_id')"
+run_sql "select (public.maya_save_claimed_task('$write_id', '$founder', 'worker-a', $approved_verifying)).id" >/dev/null
+approved_completed="jsonb_build_object('task', jsonb_build_object('id', '$write_id', 'founderId', '$founder', 'status', 'completed', 'requiresApproval', true, 'approval', jsonb_build_object('approvalId', 'approval-task-lease-ci', 'taskId', '$write_id', 'founderId', '$founder', 'approvedAt', clock_timestamp()::text), 'verificationEvidence', jsonb_build_array(jsonb_build_object('kind', 'ci', 'description', 'approved write fence test'))), 'capability', 'workspace.write_file', 'args', jsonb_build_object('path', 'report.md', 'content', 'approved'), 'attempts', 1, 'idempotencyKey', '$write_id')"
+run_sql "select (public.maya_save_claimed_task('$write_id', '$founder', 'worker-a', $approved_completed)).id" >/dev/null
+write_released=$(run_sql "select count(*) from public.maya_release_task_claim('$write_id', '$founder', 'worker-a')")
+if [[ "$write_released" != "1" ]]; then echo "Approved write task lease could not be released"; exit 1; fi
+
 # An in-flight lease cannot be released; after expiry, recovery parks it instead of replaying it.
 run_sql "
 insert into public.maya_tasks (id, founder_id, envelope, lease_owner, lease_expires_at)
