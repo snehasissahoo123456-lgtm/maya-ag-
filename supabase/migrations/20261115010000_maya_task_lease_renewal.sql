@@ -26,12 +26,12 @@ begin
   bounded_ms := greatest(5000, least(coalesce(p_lease_ms, 60000), 300000));
 
   update public.maya_tasks
-    set lease_expires_at = now() + (bounded_ms * interval '1 millisecond'),
+    set lease_expires_at = clock_timestamp() + (bounded_ms * interval '1 millisecond'),
         updated_at = now()
     where id = p_task_id
       and founder_id = p_founder_id
       and lease_owner = p_worker_id
-      and lease_expires_at > now()
+      and lease_expires_at > clock_timestamp()
       and envelope->'task'->>'status' in ('running', 'verifying')
     returning * into renewed;
 
