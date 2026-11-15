@@ -43,13 +43,15 @@ if [[ "$owner" != "worker-a" && "$owner" != "worker-b" ]]; then
   exit 1
 fi
 
-renewed=$(run_sql "select count(*) from public.maya_renew_task_claim('$task_id', '$founder', '$owner', 60000)")
-if [[ "$renewed" != "1" ]]; then echo "Exact lease owner could not renew the task lease"; exit 1; fi
-
-# A different worker must not renew or write the claimed task.
-wrong_renew=$(run_sql "do \$\$ begin perform * from public.maya_renew_task_claim('$task_id', '$founder', 'not-owner', 5000); raise exception 'wrong worker renewed lease'; exception when others then if sqlerrm = 'wrong worker renewed lease' then raise; end if; end \$\$")
 running_envelope="jsonb_build_object('task', jsonb_build_object('id', '$task_id', 'founderId', '$founder', 'status', 'running', 'requiresApproval', false, 'verificationEvidence', '[]'::jsonb), 'capability', 'workspace.read_file', 'args', jsonb_build_object('path', 'README.md'), 'attempts', 1, 'idempotencyKey', '$task_id')"
 run_sql "select (public.maya_save_claimed_task('$task_id', '$founder', '$owner', $running_envelope)).id" >/dev/null
+
+# Renewal is allowed only after the claim has entered an active execution state.
+renewed=$(run_sql "select count(*) from public.maya_renew_task_claim('$task_id', '$founder', '$owner', 60000)")
+if [[ "$renewed" != "1" ]]; then echo "Exact lease owner could not renew the active task lease"; exit 1; fi
+
+# A different worker must not renew or write the claimed task.
+wrong_renew=$(run_sql "do \$\$ begin perform * from public.maya_renew_task_claim('$task_id', '$founder', 'not-owner', 60000); raise exception 'wrong worker renewed lease'; exception when others then if sqlerrm = 'wrong worker renewed lease' then raise; end if; end \$\$")
 
 # A worker that does not own the lease cannot write, and an active task cannot be released.
 wrong_write="$(run_sql "do \$\$ begin perform public.maya_save_claimed_task('$task_id', '$founder', 'not-owner', $running_envelope); raise exception 'wrong worker wrote task'; exception when others then if sqlerrm = 'wrong worker wrote task' then raise; end if; end \$\$")"
