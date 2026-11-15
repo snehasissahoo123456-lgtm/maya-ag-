@@ -56,6 +56,20 @@ begin
     raise exception 'Task state transition is not permitted for the current leased state';
   end if;
 
+  if coalesce((p_envelope->'task'->>'requiresApproval')::boolean, false) then
+    if not exists (
+      select 1
+        from public.maya_approvals a
+        where a.id = p_envelope->'task'->'approval'->>'approvalId'
+          and a.task_id = p_task_id
+          and a.founder_id = p_founder_id
+          and a.capability = p_envelope->>'capability'
+          and a.status = 'consumed'
+    ) then
+      raise exception 'Claimed write task requires a consumed exact-action Founder approval';
+    end if;
+  end if;
+
   update public.maya_tasks
     set envelope = p_envelope,
         updated_at = now()
