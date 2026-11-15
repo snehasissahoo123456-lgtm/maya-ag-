@@ -299,6 +299,22 @@ taskCapabilityRegistry.register({
   verification: "Move one regular non-sensitive file without overwriting the destination; verify destination bytes by SHA-256 before removing the source.",
 });
 taskCapabilityRegistry.register({
+  name: "ceo.specialist.run",
+  description: "Run one bounded read-only specialist assignment as a durable Founder-scoped task.",
+  risk: "low",
+  allowedRoles: ["worker"],
+  requiredScopes: ["agents:execute"],
+  arguments: {
+    runId: { type: "string", required: true, maxLength: 128 },
+    agentId: { type: "string", required: true, maxLength: 64 },
+    task: { type: "string", required: true, maxLength: 2000 },
+    context: { type: "string", required: false, maxLength: 8000 },
+  },
+  timeoutMs: 60_000,
+  requiresApproval: false,
+  verification: "Run only the selected manifest-scoped specialist with bounded read-only tools and persist the output digest as task evidence.",
+});
+taskCapabilityRegistry.register({
   name: "device.workspace.create_directory",
   description: "Create one new directory beneath an existing parent in an enrolled local device workspace after exact Founder approval.",
   risk: "high",
@@ -312,15 +328,35 @@ taskCapabilityRegistry.register({
   requiresApproval: true,
   verification: "Ask the enrolled local bridge to create one directory beneath an existing parent and verify the resulting directory.",
 });
-// Enabled task capabilities are safe workspace reads and exact-Founder-approved file and directory operations on enrolled PCs. Shell, deploy, payment and arbitrary device-control capabilities remain blocked.
+// Enabled task capabilities are safe workspace reads, exact-Founder-approved file operations and manifest-scoped read-only specialist execution. Shell, deploy, payment and arbitrary device-control capabilities remain blocked.
 const approvalRepository = createApprovalRepository();
+let specialistRuntime: SpecialistRuntime | undefined;
 const taskOrchestrator = new TaskOrchestrator(
   taskRepository,
   taskCapabilityRegistry,
   approvalRepository,
   {
-    run: async ({ capability, args, signal }) => {
+    run: async ({ capability, args, signal, founderId }) => {
       if (signal.aborted) throw new Error("Task execution was cancelled.");
+      if (capability === "ceo.specialist.run") {
+        if (!specialistRuntime) throw new Error("Specialist runtime is not initialized.");
+        const result = await specialistRuntime.run({
+          agentId: String(args.agentId || ""),
+          task: String(args.task || ""),
+          context: typeof args.context === "string" ? args.context : "",
+          founderId,
+        });
+        const digest = createHash("sha256").update(result.output, "utf8").digest("hex");
+        return {
+          result,
+          evidence: {
+            kind: "ceo-specialist-output-sha256",
+            description: "The manifest-scoped specialist completed its bounded read-only assignment; output digest recorded.",
+            reference: "sha256:" + digest,
+            observedAt: result.completedAt,
+          },
+        };
+      }
       if (capability === "workspace.read_file") {
         const file = resolveWorkspacePath(args.path);
         if (isSensitiveWorkspacePath(file)) throw new Error("Reading secrets and credential files is blocked.");
@@ -906,7 +942,7 @@ const specialistToolExecutor = new SpecialistToolExecutor(
   },
   taskRepository,
 );
-const specialistRuntime = new SpecialistRuntime({
+specialistRuntime = new SpecialistRuntime({
   generate: async ({ systemInstruction, task, context, maxOutputTokens, tools, executeTool }) => {
     const apiKey = process.env.GEMINI_API_KEY || process.env.API_KEY;
     if (!apiKey) throw new Error("Gemini is not configured.");
@@ -978,7 +1014,45 @@ const ceoOrchestrator = new CEOOrchestrator({
     });
     return String(response.text || "");
   },
-}, specialistRuntime, taskRepository);
+}, specialistRuntime, taskRepository, {
+  dispatch: async ({ founderId, taskIds }) => {
+    if (founderId !== "founder-primary") throw new Error("The configured shared task worker is scoped to the primary Founder only.");
+    const usesAtomicLeases = Boolean(taskRepository.claimNext && taskRepository.releaseClaim);
+    const dispatchWorkers = usesAtomicLeases
+      ? Array.from({ length: Math.min(taskIds.length, 4) }, () => new TaskWorker(
+          taskRepository,
+          taskOrchestrator,
+          taskCapabilityRegistry,
+          { founderId, workerId: "ceo-dispatch-" + randomUUID(), leaseMs: 60_000, maxTasksPerCycle: 1 },
+          approvalRepository,
+        ))
+      : [];
+    const deadline = Date.now() + (usesAtomicLeases ? 150_000 : 270_000);
+    let lastWorkerError: string | undefined;
+    while (Date.now() < deadline) {
+      const records = await Promise.all(taskIds.map(id => taskRepository.get(id, founderId)));
+      const failed = records.find(record => record && ["failed", "requires_recovery", "cancelled"].includes(record.task.status));
+      if (failed) {
+        throw new Error("CEO specialist task stopped in " + failed.task.status + ": " + (failed.task.lastError || failed.task.id));
+      }
+      if (records.length === taskIds.length && records.every(record => record?.task.status === "completed")) return;
+      try {
+        if (dispatchWorkers.length) {
+          await Promise.all(dispatchWorkers.map(worker => worker.runOnce()));
+        } else {
+          await taskWorker.runOnce();
+        }
+        lastWorkerError = undefined;
+      } catch (error) {
+        lastWorkerError = error instanceof Error ? error.message : String(error);
+        throw new Error("Shared task worker could not dispatch CEO specialist assignments: " + lastWorkerError);
+      }
+      await new Promise(resolve => setTimeout(resolve, 500));
+    }
+    throw new Error("CEO specialist assignments did not complete within the bounded dispatch window." +
+      (lastWorkerError ? " Last worker error: " + lastWorkerError : ""));
+  },
+});
 
 
 function randomTaskId(): string {
