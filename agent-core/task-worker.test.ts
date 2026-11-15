@@ -289,6 +289,12 @@ test("worker uses atomic repository claims and releases each claimed task", asyn
       return this.item.task.id === id && (!founderId || this.item.task.founderId === founderId) ? structuredClone(this.item) : undefined;
     }
     async put(value: TaskEnvelope) { this.item = structuredClone(value); }
+    async putClaimed(value: TaskEnvelope, founderId: string, workerId: string) {
+      assert.equal(founderId, "founder-primary");
+      assert.equal(workerId.length > 0, true);
+      if (!this.claimed || value.task.id !== this.item.task.id) throw new Error("Lease no longer owned");
+      this.item = structuredClone(value);
+    }
     async list(founderId: string) { return this.item.task.founderId === founderId ? [structuredClone(this.item)] : []; }
     async claimNext(founderId: string, workerId: string, leaseMs: number) {
       assert.equal(founderId, "founder-primary");
