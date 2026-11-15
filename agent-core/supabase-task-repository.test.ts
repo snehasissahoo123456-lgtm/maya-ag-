@@ -41,7 +41,7 @@ test("Supabase claimed task writes use the exact Founder and worker lease fence"
     return jsonResponse({ id: task.task.id, founder_id: task.task.founderId, envelope: task, created_at: "", updated_at: "" });
   });
   await repository.putClaimed(task, "founder-a", "worker-a");
-  assert.match(requestUrl, /rpc\\/maya_save_claimed_task$/);
+  assert.match(requestUrl, /rpc\/maya_save_claimed_task$/);
   assert.equal(requestBody.p_task_id, "task-1");
   assert.equal(requestBody.p_founder_id, "founder-a");
   assert.equal(requestBody.p_worker_id, "worker-a");
