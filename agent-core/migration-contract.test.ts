@@ -50,7 +50,8 @@ test("claimed task writes are fenced by the current worker lease and valid lifec
   assert.match(sql, /previous_status = 'running'[\s\S]*next_status in \('verifying', 'failed', 'requires_recovery'\)/i);
   assert.match(sql, /previous_status = 'verifying'[\s\S]*next_status in \('completed', 'requires_recovery'\)/i);
   assert.match(sql, /grant execute on function public\.maya_save_claimed_task[\s\S]*to service_role/i);
-  assert.match(sql, /a\.status = 'approved'[\s\S]*a\.expires_at > now\(\)/i);
+  assert.match(sql, /a\.status = 'approved'[\s\S]*a\.expires_at > clock_timestamp\(\)/i);
+  assert.match(sql, /lease_expires_at <= clock_timestamp\(\)[\s\S]*requires_recovery/i);
   assert.match(sql, /lease_expires_at > clock_timestamp\(\)[\s\S]*returning \* into released/i);
   assert.match(sql, /status' not in \('running', 'verifying'\)/i);
 });
