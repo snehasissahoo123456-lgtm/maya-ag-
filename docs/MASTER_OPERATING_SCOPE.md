@@ -296,6 +296,29 @@ Important limitations must remain visible until separately resolved and runtime-
 - Semantic memory retrieval is not model self-training or autonomous policy modification.
 - Merged PRs and green CI are not equivalent to runtime or production acceptance.
 
+### Verified implementation baseline as of 2026-11-15
+
+The following code-level work is integrated into `main` and passed its cited repository CI run. This is not a claim of live production operation.
+
+| Integrated work | Evidence / boundary |
+|---|---|
+| Task lease renewal, ownership fencing, exact approval consumption and expiry recovery | PR #95; CI run 1506 passed. |
+| CEO specialist assignments persisted and executed through the shared TaskWorker | PR #96, integrated by PR #98; source CI run 1527 and integration CI run 1553 passed. |
+| Guarded activation script, server readiness endpoint and limited-privilege Windows logon startup | PR #97, integrated by PR #98; source CI run 1549 and integration CI run 1553 passed. |
+| Dashboard automatic health/task refresh | PR #93; refresh is authenticated and server-derived. |
+| Specialist tool outcomes persisted in the shared task ledger | PR #94; bounded tool allowlist remains in force. |
+
+### Not yet runtime-verified
+
+- The Founder has not supplied and configured the live Gemini key, Founder password, or live Supabase URL/service-role key in the target environment.
+- The user's Supabase migrations have not been confirmed applied to their actual project.
+- The Windows local bridge and separate Developer host supervisor have not been confirmed installed, paired and healthy on the target PC.
+- The independent sandbox QA worker heartbeat has not been verified.
+- Gmail, Calendar and other external OAuth/API accounts are not connected and end-to-end tested.
+- A public cloud deployment, production URL, backup/restore drill, uptime monitoring and 24/7 acceptance have not been verified.
+- The registered workforce is a bounded set of static role templates, not a dynamic 100-agent factory; the department templates added by PR #99 remain subject to CI and merge.
+- The master register's unchecked items remain open unless a specific implementation and verification artifact satisfies the entire requirement.
+
 ## 18. Rules for maintaining this register
 
 - Every new Founder requirement must be added here or linked as a traceable child requirement before implementation is considered planned.
