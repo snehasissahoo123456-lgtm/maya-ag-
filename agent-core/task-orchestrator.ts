@@ -133,7 +133,7 @@ export class TaskOrchestrator {
       const reason = error instanceof Error ? error.message : String(error);
       const requiresRecovery = envelope.task.status === "verifying" || error instanceof UncertainTaskExecutionError;
       envelope.task = transitionTask(envelope.task, requiresRecovery ? "requires_recovery" : "failed", { error: reason });
-      await this.repository.put(envelope);
+      await this.saveExecutionState(envelope, actor, claim);
       if (envelope.task.status === "failed") {
         try { await this.recordAudit(actor, "task.execution_failed", envelope, { error: reason.slice(0, 500) }); } catch { /* preserve original execution error */ }
       }
