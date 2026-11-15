@@ -71,6 +71,7 @@ export class CEOOrchestrator {
     catch { throw new CEOPlanValidationError("CEO returned invalid dispatch JSON; no specialist was started."); }
     const dispatch = validateCEODispatchPlan(parsed, objective);
     const runId = input.runId?.trim() || randomUUID();
+    if (runId.length > 128) throw new Error("CEO run ID must be at most 128 characters.");
     const tracked = Boolean(input.founderId && this.taskRepository);
     const assignments = tracked
       ? dispatch.assignments.map(assignment => ({
