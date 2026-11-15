@@ -12,12 +12,15 @@ export interface CEOPlannerAdapter {
 export interface SpecialistRunner {
   run(input: { agentId: string; task: string; context?: string; founderId?: string }): Promise<SpecialistResult>;
 }
+export interface CEOTaskDispatcher {
+  dispatch(input: { founderId: string; taskIds: string[] }): Promise<void>;
+}
 export interface CEOOrchestrationResult {
   objective: string;
   summary: string;
   assignments: SpecialistAssignment[];
   findings: SpecialistResult[];
-  executionMode: "multi_specialist_reasoning_only" | "multi_specialist_bounded_read_only";
+  executionMode: "multi_specialist_reasoning_only" | "multi_specialist_bounded_read_only" | "multi_specialist_durable_task_worker";
   completedAt: string;
 }
 export class CEOPlanValidationError extends Error {
@@ -52,6 +55,7 @@ export class CEOOrchestrator {
     private readonly adapter: CEOPlannerAdapter,
     private readonly specialists: SpecialistRunner,
     private readonly taskRepository?: TaskRepository,
+    private readonly taskDispatcher?: CEOTaskDispatcher,
   ) {}
 
   async run(input: { objective: string; context?: string; founderId?: string; runId?: string }): Promise<CEOOrchestrationResult> {
@@ -67,74 +71,112 @@ export class CEOOrchestrator {
     catch { throw new CEOPlanValidationError("CEO returned invalid dispatch JSON; no specialist was started."); }
     const dispatch = validateCEODispatchPlan(parsed, objective);
     const runId = input.runId?.trim() || randomUUID();
-    // Every dispatched specialist receives a durable task-ledger record before
-    // it starts. "planning" is intentional: generic queued-task workers cannot
-    // claim CEO-owned work, and only this bounded orchestrator can advance it.
-    const tracked = input.founderId && this.taskRepository;
+    const tracked = Boolean(input.founderId && this.taskRepository);
     const assignments = tracked
       ? dispatch.assignments.map(assignment => ({
           ...assignment,
           taskId: "ceo-step-" + createHash("sha256").update(input.founderId + ":" + runId + ":" + assignment.agentId).digest("hex").slice(0, 32),
         }))
       : dispatch.assignments;
-    // Dispatch the bounded (maximum four) specialist set concurrently. Persist
-    // each lifecycle transition so Founder task history reflects actual work.
-    const findings = await Promise.all(assignments.map(async assignment => {
-      let envelope: TaskEnvelope | undefined;
-      if (tracked) {
-        const task = transitionTask(createTask({
-          id: assignment.taskId!,
-          founderId: input.founderId!,
-          instruction: "CEO specialist assignment (" + assignment.agentId + "): " + assignment.task,
-          riskLevel: "medium",
-          requiresApproval: false,
-        }), "planning");
-        envelope = {
-          task,
+
+    let findings: SpecialistResult[];
+    if (tracked && this.taskDispatcher) {
+      // CEO assignments enter the same durable queue as Founder tasks. The generic
+      // TaskWorker owns claims, lease renewal, execution state and verification.
+      for (const assignment of assignments) {
+        const envelope: TaskEnvelope = {
+          task: createTask({
+            id: assignment.taskId!,
+            founderId: input.founderId!,
+            instruction: "CEO specialist assignment (" + assignment.agentId + "): " + assignment.task,
+            riskLevel: "low",
+            requiresApproval: false,
+          }),
           capability: "ceo.specialist.run",
-          args: { runId, agentId: assignment.agentId, task: assignment.task },
+          args: { runId, agentId: assignment.agentId, task: assignment.task, context },
           attempts: 0,
           idempotencyKey: assignment.taskId!,
         };
         await this.taskRepository!.put(envelope);
-        envelope.task = transitionTask(envelope.task, "running");
-        envelope.attempts += 1;
-        await this.taskRepository!.put(envelope);
       }
-      try {
-        const finding = await this.specialists.run({ agentId: assignment.agentId, task: assignment.task, context, founderId: input.founderId });
-        if (envelope) {
-          const observedAt = finding.completedAt || new Date().toISOString();
-          const digest = createHash("sha256").update(finding.output).digest("hex");
-          envelope.result = { sha256: digest, observedAt };
-          envelope.task = transitionTask(envelope.task, "verifying");
-          await this.taskRepository!.put(envelope);
-          envelope.task = transitionTask(envelope.task, "completed", {
-            evidence: {
-              kind: "ceo-specialist-output-sha256",
-              description: "The specialist returned a non-empty result; its output digest is recorded in the task ledger.",
-              reference: "sha256:" + digest,
-              observedAt,
-            },
-          });
-          await this.taskRepository!.put(envelope);
+      await this.taskDispatcher.dispatch({ founderId: input.founderId!, taskIds: assignments.map(item => item.taskId!) });
+      const records = await Promise.all(assignments.map(item => this.taskRepository!.get(item.taskId!, input.founderId)));
+      findings = records.map((record, index) => {
+        const assignment = assignments[index];
+        if (!record) throw new Error("CEO specialist task record is missing after dispatch: " + assignment.taskId);
+        if (record.task.status !== "completed") {
+          throw new Error("CEO specialist task did not complete: " + assignment.agentId + " (" + record.task.status + ")" +
+            (record.task.lastError ? ": " + record.task.lastError : ""));
+        }
+        if (!record.task.verificationEvidence.some(evidence => evidence.kind === "ceo-specialist-output-sha256")) {
+          throw new Error("CEO specialist task completed without output verification evidence: " + assignment.agentId);
+        }
+        const finding = record.result as SpecialistResult | undefined;
+        if (!finding || finding.agentId !== assignment.agentId || typeof finding.output !== "string" || !finding.output.trim()) {
+          throw new Error("CEO specialist task returned an invalid result: " + assignment.agentId);
         }
         return finding;
-      } catch (error) {
-        if (envelope && ["planning", "running"].includes(envelope.task.status)) {
-          envelope.task = transitionTask(envelope.task, "failed", {
-            error: (error instanceof Error ? error.message : String(error)).slice(0, 1000),
-          });
+      });
+    } else {
+      // Compatibility path for isolated tests and single-call environments that
+      // do not provide a durable worker dispatcher.
+      findings = await Promise.all(assignments.map(async assignment => {
+        let envelope: TaskEnvelope | undefined;
+        if (tracked) {
+          const task = transitionTask(createTask({
+            id: assignment.taskId!,
+            founderId: input.founderId!,
+            instruction: "CEO specialist assignment (" + assignment.agentId + "): " + assignment.task,
+            riskLevel: "medium",
+            requiresApproval: false,
+          }), "planning");
+          envelope = {
+            task,
+            capability: "ceo.specialist.run",
+            args: { runId, agentId: assignment.agentId, task: assignment.task, context },
+            attempts: 0,
+            idempotencyKey: assignment.taskId!,
+          };
           await this.taskRepository!.put(envelope);
-        } else if (envelope?.task.status === "verifying") {
-          envelope.task = transitionTask(envelope.task, "requires_recovery", {
-            error: "Specialist output was returned but its completion record could not be durably confirmed. Review the CEO run before retrying.",
-          });
+          envelope.task = transitionTask(envelope.task, "running");
+          envelope.attempts += 1;
           await this.taskRepository!.put(envelope);
         }
-        throw error;
-      }
-    }));
+        try {
+          const finding = await this.specialists.run({ agentId: assignment.agentId, task: assignment.task, context, founderId: input.founderId });
+          if (envelope) {
+            const observedAt = finding.completedAt || new Date().toISOString();
+            const digest = createHash("sha256").update(finding.output).digest("hex");
+            envelope.result = finding;
+            envelope.task = transitionTask(envelope.task, "verifying");
+            await this.taskRepository!.put(envelope);
+            envelope.task = transitionTask(envelope.task, "completed", {
+              evidence: {
+                kind: "ceo-specialist-output-sha256",
+                description: "The specialist returned a non-empty result; its output digest is recorded in the task ledger.",
+                reference: "sha256:" + digest,
+                observedAt,
+              },
+            });
+            await this.taskRepository!.put(envelope);
+          }
+          return finding;
+        } catch (error) {
+          if (envelope && ["planning", "running"].includes(envelope.task.status)) {
+            envelope.task = transitionTask(envelope.task, "failed", {
+              error: (error instanceof Error ? error.message : String(error)).slice(0, 1000),
+            });
+            await this.taskRepository!.put(envelope);
+          } else if (envelope?.task.status === "verifying") {
+            envelope.task = transitionTask(envelope.task, "requires_recovery", {
+              error: "Specialist output was returned but its completion record could not be durably confirmed. Review the CEO run before retrying.",
+            });
+            await this.taskRepository!.put(envelope);
+          }
+          throw error;
+        }
+      }));
+    }
     const summary = await this.adapter.synthesize({ objective, findings, context });
     if (!summary.trim() || summary.length > 16000) throw new Error("CEO synthesis is empty or exceeds the response limit.");
     return {
@@ -142,7 +184,7 @@ export class CEOOrchestrator {
       summary: summary.trim(),
       assignments,
       findings,
-      executionMode: findings.some(item => item.executionMode === "bounded_read_only_tools") ? "multi_specialist_bounded_read_only" : "multi_specialist_reasoning_only",
+      executionMode: tracked && this.taskDispatcher ? "multi_specialist_durable_task_worker" : findings.some(item => item.executionMode === "bounded_read_only_tools") ? "multi_specialist_bounded_read_only" : "multi_specialist_reasoning_only",
       completedAt: new Date().toISOString(),
     };
   }
