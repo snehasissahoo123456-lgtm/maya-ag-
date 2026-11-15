@@ -41,3 +41,13 @@ test("conversation storage compatibility adds the JSONB messages column and immu
   assert.match(sql, /maya_conversations_owner_immutable/);
   assert.match(sql, /maya_prevent_conversation_owner_change/);
 });
+
+test("claimed task writes are fenced by the current worker lease and valid lifecycle transitions", () => {
+  const sql = migration("20261115020000_maya_task_write_fencing.sql");
+  assert.match(sql, /lease_owner = p_worker_id/);
+  assert.match(sql, /lease_expires_at > now\(\)/);
+  assert.match(sql, /for update/i);
+  assert.match(sql, /previous_status = 'running'[\s\S]*next_status in \('verifying', 'failed', 'requires_recovery'\)/i);
+  assert.match(sql, /previous_status = 'verifying'[\s\S]*next_status in \('completed', 'requires_recovery'\)/i);
+  assert.match(sql, /grant execute on function public\.maya_save_claimed_task[\s\S]*to service_role/i);
+});
