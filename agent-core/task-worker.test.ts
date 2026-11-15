@@ -625,5 +625,5 @@ test("Supabase-backed worker renews its lease while a task is executing", async 
   const result = await worker.runOnce();
   assert.equal(result.executed, 1);
   assert.ok(renewals >= 1, "worker should renew at least once before the 1.8-second task completes");
-  assert.equal((await repository.get("worker-lease-renewal-1", "founder-primary"))?.task.status, "completed");
+  assert.equal((await repository.get("worker-lease-renewal-1"))?.task.status, "completed");
 });
