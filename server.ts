@@ -1243,10 +1243,11 @@ async function startServer() {
     }
 
     const blockers: string[] = [];
+    const warnings: string[] = [];
     if (!geminiConfigured) blockers.push("Gemini is not configured. Set GEMINI_API_KEY.");
     if (!founderAuthConfigured) blockers.push("Founder login is not configured with a password of at least 16 characters.");
     if (!storageReachable) blockers.push("Persistent task storage is not reachable." + (storageError ? " " + storageError : ""));
-    if (storageDriver === "file") blockers.push("File storage is single-instance only; do not run multiple Maya server replicas.");
+    if (storageDriver === "file") warnings.push("File storage is single-instance only; do not run multiple Maya server replicas.");
     if (storageDriver === "supabase" && (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY)) {
       blockers.push("Supabase storage requires SUPABASE_URL and the server-only SUPABASE_SERVICE_ROLE_KEY.");
     }
@@ -1281,6 +1282,7 @@ async function startServer() {
           blockers: developerBlockers,
         },
         blockers,
+        warnings,
         note: "This endpoint reports this server instance only. It does not prove cloud uptime, external OAuth connectivity, or operation of a separate Windows device bridge or sandbox worker.",
       },
     });
