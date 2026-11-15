@@ -41,7 +41,7 @@ begin
     where id = p_task_id
       and founder_id = p_founder_id
       and lease_owner = p_worker_id
-      and lease_expires_at > now()
+      and lease_expires_at > clock_timestamp()
     for update;
 
   if not found then
@@ -62,7 +62,7 @@ begin
     where id = p_task_id
       and founder_id = p_founder_id
       and lease_owner = p_worker_id
-      and lease_expires_at > now()
+      and lease_expires_at > clock_timestamp()
     returning * into saved;
 
   if not found then
@@ -108,7 +108,7 @@ begin
     from public.maya_tasks t
     where t.founder_id = p_founder_id
       and t.envelope->'task'->>'status' = 'queued'
-      and (t.lease_expires_at is null or t.lease_expires_at <= now())
+      and (t.lease_expires_at is null or t.lease_expires_at <= clock_timestamp())
       and (
         (
           t.envelope->>'capability' in (
@@ -148,7 +148,7 @@ begin
 
   update public.maya_tasks
     set lease_owner = p_worker_id,
-        lease_expires_at = now() + (bounded_ms * interval '1 millisecond')
+        lease_expires_at = clock_timestamp() + (bounded_ms * interval '1 millisecond')
     where id = candidate.id and founder_id = p_founder_id
     returning * into candidate;
 
@@ -173,7 +173,7 @@ begin
     where id = p_task_id
       and founder_id = p_founder_id
       and lease_owner = p_worker_id
-      and lease_expires_at > now()
+      and lease_expires_at > clock_timestamp()
     returning * into released;
   if not found then
     raise exception 'Task lease is expired, missing, or not owned by this Founder and worker';
