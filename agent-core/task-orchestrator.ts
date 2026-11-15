@@ -77,16 +77,25 @@ export class TaskOrchestrator {
     await this.repository.put(envelope);
     await this.recordAudit(input.actor, "task.approval_decided", envelope, { approvalId: approval.id, approved: input.approved });
   }
-  async execute(taskId: string, actor: AgentIdentity, approvalId?: string): Promise<{ task: MayaTask; result: unknown }> {
+  async execute(taskId: string, actor: AgentIdentity, approvalId?: string, claim?: { workerId: string }): Promise<{ task: MayaTask; result: unknown }> {
     if (this.executing.has(taskId)) throw new Error("Task execution is already in progress.");
+    if (claim && (!claim.workerId || !this.repository.putClaimed)) throw new Error("A lease-fenced repository write is required for claimed task execution.");
     this.executing.add(taskId);
     try {
-      return await this.executeOnce(taskId, actor, approvalId);
+      return await this.executeOnce(taskId, actor, approvalId, claim);
     } finally {
       this.executing.delete(taskId);
     }
   }
-  private async executeOnce(taskId: string, actor: AgentIdentity, approvalId?: string): Promise<{ task: MayaTask; result: unknown }> {
+  private async saveExecutionState(envelope: TaskEnvelope, actor: AgentIdentity, claim?: { workerId: string }): Promise<void> {
+    if (claim) {
+      if (!this.repository.putClaimed) throw new Error("Task lease fencing is unavailable; refusing an unfenced write.");
+      await this.repository.putClaimed(envelope, actor.founderId, claim.workerId);
+      return;
+    }
+    await this.repository.put(envelope);
+  }
+  private async executeOnce(taskId: string, actor: AgentIdentity, approvalId?: string, claim?: { workerId: string }): Promise<{ task: MayaTask; result: unknown }> {
     const envelope = await this.requireTask(taskId, actor.founderId);
     if (actor.founderId !== envelope.task.founderId) throw new Error("Task belongs to another Founder.");
     const { definition } = this.capabilities.validate(envelope.capability, actor, envelope.args);
