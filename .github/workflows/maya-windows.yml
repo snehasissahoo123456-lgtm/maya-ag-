@@ -1,0 +1,83 @@
+name: Maya Windows installer
+
+on:
+  push:
+    branches:
+      - "maya/**"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  windows-installer:
+    name: Build, install and smoke-test Windows x64 EXE
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.4
+
+      - name: Install locked dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Typecheck, tests and production bundle
+        run: |
+          bun run lint
+          bun run test
+          bun run build
+
+      - name: Install production Node dependencies for desktop packaging
+        shell: pwsh
+        run: npm install --omit=dev --no-package-lock
+
+      - name: Package Windows installer
+        run: npx --yes electron-builder@26.0.12 --win nsis --x64 --publish never --config electron-builder.yml
+
+      - name: Verify installer artifact exists
+        shell: pwsh
+        run: |
+          $installer = Get-ChildItem "release/Maya-Setup-*-x64.exe" | Select-Object -First 1
+          if (-not $installer) { throw "Windows installer EXE was not produced." }
+          if ($installer.Length -lt 10MB) { throw "Installer is unexpectedly small ($($installer.Length) bytes)." }
+          Write-Host "Installer: $($installer.FullName) ($($installer.Length) bytes)"
+
+      - name: Install the generated EXE
+        shell: pwsh
+        run: |
+          $installer = (Get-ChildItem "release/Maya-Setup-*-x64.exe" | Select-Object -First 1).FullName
+          $installDir = "C:\maya-windows-smoke"
+          $process = Start-Process -FilePath $installer -ArgumentList @("/S", "/D=$installDir") -Wait -PassThru
+          if ($process.ExitCode -ne 0) { throw "NSIS installer failed with exit code $($process.ExitCode)." }
+          if (-not (Test-Path "$installDir\Maya.exe")) { throw "Installed Maya.exe was not found." }
+          "MAYA_INSTALL_DIR=$installDir" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Smoke-test the installed backend through packaged Electron runtime
+        shell: pwsh
+        run: |
+          $env:MAYA_TEST_EMAIL = "ci-founder@example.invalid"
+          $env:MAYA_TEST_PASSWORD = "CI-only-test-password-12345"
+          node desktop/smoke-test.cjs "$env:MAYA_INSTALL_DIR"
+
+      - name: Upload verified installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Maya-Windows-x64-Installer
+          path: release/Maya-Setup-*-x64.exe
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Publish verified GitHub prerelease
+        if: github.event_name == 'push'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: maya-windows-\${{ github.sha }}
+          name: Maya Windows Preview (\${{ github.sha }})
+          prerelease: true
+          generate_release_notes: true
+          files: release/Maya-Setup-*-x64.exe

@@ -2986,7 +2986,7 @@ MULTILINGUAL & RAPID REACTION:
 
   server.on("close", () => { void taskWorker.stop(); void goalPlanWorker.stop(); void scheduleWorker.stop(); });
   server.on("close", () => { deviceWss.close(); wss.close(); });
-  server.listen(PORT, "0.0.0.0", () => {
+  server.listen(PORT, process.env.MAYA_HOST || "0.0.0.0", () => {
     if (taskWorkerEnabled) taskWorker.start();
     if (goalPlanWorkerEnabled) goalPlanWorker.start();
     if (scheduleWorkerEnabled) scheduleWorker.start();

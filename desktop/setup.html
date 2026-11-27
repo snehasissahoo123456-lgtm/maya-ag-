@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:">
+  <title>Maya setup</title>
+  <link rel="stylesheet" href="setup.css">
+  <script defer src="setup.js"></script>
+</head>
+<body>
+  <main class="shell">
+    <div class="brand"><div class="mark">M</div><div><p class="eyebrow">FOUNDER WORKSPACE</p><h1>Maya</h1></div></div>
+    <p class="intro">Set up your local Windows installation. Your Founder credentials and Gemini key are encrypted using Windows-backed secure storage on this PC.</p>
+    <form id="setup-form">
+      <label for="email">Founder email</label>
+      <input id="email" name="email" type="email" autocomplete="username" required placeholder="you@example.com">
+      <label for="password">Founder password</label>
+      <input id="password" name="password" type="password" autocomplete="new-password" minlength="16" required placeholder="At least 16 characters">
+      <p class="hint">This becomes your Maya sign-in password. Use a unique password and keep it safe.</p>
+      <label for="apiKey">Gemini API key <span class="optional">optional</span></label>
+      <input id="apiKey" name="apiKey" type="password" autocomplete="off" placeholder="Paste your Gemini API key">
+      <p class="hint">Without a key, Maya can open but Gemini-powered features will remain unavailable. Google may charge for API usage.</p>
+      <button id="save" type="submit">Save securely and launch Maya</button>
+      <p id="status" role="status" aria-live="polite"></p>
+    </form>
+    <p class="foot">Credentials stay on this Windows user profile. They are not sent to the Maya repository.</p>
+  </main>
+</body>
+</html>
