@@ -76,6 +76,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: maya-windows-${{ github.sha }}
+          target_commitish: ${{ github.sha }}
           name: Maya Windows Preview (${{ github.sha }})
           prerelease: true
           generate_release_notes: true
