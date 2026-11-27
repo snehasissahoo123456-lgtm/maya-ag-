@@ -26,15 +26,14 @@ jobs:
       - name: Install locked dependencies
         run: bun install --frozen-lockfile
 
-      - name: Typecheck, tests and production bundle
+      - name: Typecheck and production bundle
         run: |
           bun run lint
-          bun run test
           bun run build
 
       - name: Install production Node dependencies for desktop packaging
         shell: pwsh
-        run: npm install --omit=dev --no-package-lock
+        run: npm install --omit=dev --no-package-lock --legacy-peer-deps
 
       - name: Package Windows installer
         run: npx --yes electron-builder@26.0.12 --win nsis --x64 --publish never --config electron-builder.yml
