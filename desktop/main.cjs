@@ -40,6 +40,7 @@ ipcMain.handle("maya:save-config", async (_event, input) => {
   if (password.length < 16) throw new Error("Founder password must contain at least 16 characters.");
   if (apiKey && apiKey.length < 20) throw new Error("The Gemini API key looks too short.");
   writeConfig({ email, password, apiKey });
+  await openMaya({ email, password, apiKey });
   return { saved: true };
 });
 
@@ -114,7 +115,6 @@ async function startBackend(config) {
 async function openMaya(config) {
   try {
     await startBackend(config);
-    if (setupWindow) { setupWindow.close(); setupWindow = null; }
     mainWindow = new BrowserWindow({
       width: 1440, height: 940, minWidth: 1024, minHeight: 700,
       title: "Maya",
@@ -133,6 +133,7 @@ async function openMaya(config) {
     mainWindow.once("ready-to-show", () => mainWindow && mainWindow.show());
     mainWindow.on("closed", () => { mainWindow = null; });
     await mainWindow.loadURL(APP_URL);
+    if (setupWindow) { setupWindow.close(); setupWindow = null; }
   } catch (error) {
     dialog.showErrorBox("Unable to start Maya", error.message || String(error));
     app.quit();

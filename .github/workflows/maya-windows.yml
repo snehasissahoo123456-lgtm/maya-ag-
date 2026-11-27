@@ -76,8 +76,8 @@ jobs:
         if: github.event_name == 'push'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: maya-windows-\${{ github.sha }}
-          name: Maya Windows Preview (\${{ github.sha }})
+          tag_name: maya-windows-${{ github.sha }}
+          name: Maya Windows Preview (${{ github.sha }})
           prerelease: true
           generate_release_notes: true
           files: release/Maya-Setup-*-x64.exe

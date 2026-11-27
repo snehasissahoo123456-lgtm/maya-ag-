@@ -1,5 +1,7 @@
 appId: com.syb.maya
 productName: Maya
+extraMetadata:
+  main: desktop/main.cjs
 electronVersion: 35.7.5
 asar: false
 directories:
@@ -29,7 +31,7 @@ win:
     - target: nsis
       arch:
         - x64
-  artifactName: Maya-Setup-\${version}-x64.\${ext}
+  artifactName: Maya-Setup-${version}-x64.${ext}
   requestedExecutionLevel: asInvoker
 nsis:
   oneClick: false

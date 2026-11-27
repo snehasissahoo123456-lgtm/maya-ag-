@@ -18,7 +18,7 @@ form.addEventListener("submit", async event => {
     if (result.saved) {
       status.className = "success";
       status.textContent = "Credentials encrypted. Starting Maya…";
-      window.close();
+      status.textContent = "Maya is opening. You can close this setup window.";
     }
   } catch (error) {
     status.className = "error";
