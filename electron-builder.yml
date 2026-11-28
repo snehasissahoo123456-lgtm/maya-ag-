@@ -1,0 +1,43 @@
+appId: com.syb.maya
+productName: Maya
+extraMetadata:
+  main: desktop/main.cjs
+electronVersion: 35.7.5
+asar: false
+directories:
+  output: release
+files:
+  - "**/*"
+  - "!**/*.test.ts"
+  - "!**/*.test.tsx"
+  - "!**/*.test.js"
+  - "!docs/**"
+  - "!supabase/**"
+  - "!android/**"
+  - "!.github/**"
+  - "!bun.lock"
+  - "!bun.lockb"
+  - "!Dockerfile"
+  - "!docker-compose.yml"
+  - "!README.md"
+  - "!AGENTS.md"
+  - "!PLAN.md"
+  - "!*.md"
+  - "!**/.env*"
+  - "!**/.git/**"
+  - "!**/.cache/**"
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+  artifactName: Maya-Setup-${version}-x64.${ext}
+  requestedExecutionLevel: asInvoker
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: Maya
+  uninstallDisplayName: Maya

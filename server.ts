@@ -7,7 +7,6 @@ import http from "http";
 import path from "path";
 import fs from "fs";
 import { execSync, spawn } from "child_process";
-import { createServer as createViteServer } from "vite";
 import { GoogleGenAI } from "@google/genai";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { WebSocketServer, WebSocket } from "ws";
@@ -2971,6 +2970,9 @@ MULTILINGUAL & RAPID REACTION:
   });
 
   if (process.env.NODE_ENV !== "production") {
+    // Vite is a development dependency; load it only in development so the
+    // packaged production backend does not require Vite at runtime.
+    const { createServer: createViteServer } = await import("vite");
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: "spa",
@@ -2986,7 +2988,7 @@ MULTILINGUAL & RAPID REACTION:
 
   server.on("close", () => { void taskWorker.stop(); void goalPlanWorker.stop(); void scheduleWorker.stop(); });
   server.on("close", () => { deviceWss.close(); wss.close(); });
-  server.listen(PORT, "0.0.0.0", () => {
+  server.listen(PORT, process.env.MAYA_HOST || "0.0.0.0", () => {
     if (taskWorkerEnabled) taskWorker.start();
     if (goalPlanWorkerEnabled) goalPlanWorker.start();
     if (scheduleWorkerEnabled) scheduleWorker.start();
